@@ -2,7 +2,7 @@
 // ハンバーガーメニューからスライドインし、セッション/ウィンドウの切り替えを行う
 // セッション作成・削除機能を含む
 
-import { listSessions, listWindows, createSession, deleteSession, createWindow, deleteWindow } from './api.js';
+import { listSessions, listWindows, createSession, deleteSession, createWindow, deleteWindow, renameWindow } from './api.js';
 
 /**
  * Drawer はセッション/ウィンドウ切り替え用のスライドインパネル。
@@ -25,6 +25,7 @@ export class Drawer {
    * @param {function(): void} [options.onDeleteSession] - セッション削除後のコールバック
    * @param {function(string, number): void} [options.onCreateWindow] - ウィンドウ作成後のコールバック (session, windowIndex)
    * @param {function(): void} [options.onDeleteWindow] - ウィンドウ削除後のコールバック
+   * @param {function(string, number, string): void} [options.onRenameWindow] - ウィンドウリネーム後のコールバック (session, windowIndex, newName)
    */
   constructor(options) {
     this._onSelectWindow = options.onSelectWindow;
@@ -33,6 +34,7 @@ export class Drawer {
     this._onDeleteSession = options.onDeleteSession || null;
     this._onCreateWindow = options.onCreateWindow || null;
     this._onDeleteWindow = options.onDeleteWindow || null;
+    this._onRenameWindow = options.onRenameWindow || null;
     this._visible = false;
     this._currentSession = null;
     this._currentWindowIndex = null;
@@ -647,10 +649,26 @@ export class Drawer {
       el.classList.add('drawer-window-item--current');
     }
 
+    const indexEl = document.createElement('span');
+    indexEl.className = 'drawer-window-index';
+    indexEl.textContent = `${win.index}: `;
+
     const nameEl = document.createElement('span');
     nameEl.className = 'drawer-window-name';
-    nameEl.textContent = `${win.index}: ${win.name}`;
+    nameEl.textContent = win.name;
 
+    // ウィンドウ名タップでインライン編集
+    nameEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // 長押し後のクリックイベントは無視
+      if (this._longPressDetected) {
+        this._longPressDetected = false;
+        return;
+      }
+      this._startWindowRename(el, indexEl, nameEl, sessionName, win);
+    });
+
+    el.appendChild(indexEl);
     el.appendChild(nameEl);
 
     if (win.active || isCurrent) {
@@ -663,7 +681,7 @@ export class Drawer {
     // 長押しでウィンドウ削除オプション表示
     this._setupWindowLongPress(el, sessionName, win, windowCount);
 
-    // ウィンドウタップでの挙動
+    // ウィンドウタップでの挙動（名前以外の部分をタップした場合）
     el.addEventListener('click', () => {
       // 長押し後のクリックイベントは無視
       if (this._longPressDetected) {
@@ -684,6 +702,107 @@ export class Drawer {
     });
 
     return el;
+  }
+
+  /**
+   * ウィンドウ名のインライン編集を開始する。
+   * ウィンドウ名部分を input に切り替え、Enter で確定、Esc でキャンセルする。
+   * @param {HTMLElement} el - ウィンドウ要素
+   * @param {HTMLElement} indexEl - インデックス表示要素
+   * @param {HTMLElement} nameEl - 名前表示要素
+   * @param {string} sessionName - セッション名
+   * @param {Object} win - ウィンドウ情報
+   */
+  _startWindowRename(el, indexEl, nameEl, sessionName, win) {
+    // 既に編集中なら何もしない
+    if (el.querySelector('.drawer-window-rename-input')) {
+      return;
+    }
+
+    const originalName = win.name;
+
+    // 名前要素を非表示にして input に置き換え
+    nameEl.style.display = 'none';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'drawer-window-rename-input';
+    input.value = originalName;
+    input.autocomplete = 'off';
+    input.autocapitalize = 'off';
+    input.spellcheck = false;
+
+    // indexEl の後に挿入
+    indexEl.after(input);
+    input.focus();
+    input.select();
+
+    const finishRename = async () => {
+      const newName = input.value.trim();
+
+      // 空や変更なしの場合はキャンセル
+      if (!newName || newName === originalName) {
+        input.remove();
+        nameEl.style.display = '';
+        return;
+      }
+
+      input.disabled = true;
+
+      try {
+        const result = await renameWindow(sessionName, win.index, newName);
+
+        // キャッシュを更新
+        if (this._windowsCache[sessionName]) {
+          const cachedWin = this._windowsCache[sessionName].find(w => w.index === win.index);
+          if (cachedWin) {
+            cachedWin.name = result.name;
+          }
+        }
+
+        // 表示を更新
+        input.remove();
+        nameEl.textContent = result.name;
+        nameEl.style.display = '';
+
+        // コールバック呼び出し（ヘッダータイトルの更新用）
+        if (this._onRenameWindow) {
+          this._onRenameWindow(sessionName, win.index, result.name);
+        }
+      } catch (err) {
+        console.error('Failed to rename window:', err);
+        input.remove();
+        nameEl.style.display = '';
+        this._showDeleteError(`Failed to rename window: ${err.message}`);
+      }
+    };
+
+    const cancelRename = () => {
+      input.remove();
+      nameEl.style.display = '';
+    };
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        finishRename();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        cancelRename();
+      }
+    });
+
+    input.addEventListener('blur', () => {
+      // blur 時にも確定を試みる（名前変更あれば保存、なければキャンセル）
+      finishRename();
+    });
+
+    // input のクリックが親要素に伝播しないようにする
+    input.addEventListener('click', (e) => {
+      e.stopPropagation();
+    });
   }
 
   /**

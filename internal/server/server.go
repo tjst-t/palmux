@@ -19,6 +19,7 @@ type TmuxManager interface {
 	ListWindows(session string) ([]tmux.Window, error)
 	NewWindow(session, name string) (*tmux.Window, error)
 	KillWindow(session string, index int) error
+	RenameWindow(session string, index int, name string) error
 	Attach(session string) (*os.File, *exec.Cmd, error)
 }
 
@@ -59,6 +60,7 @@ func NewServer(opts Options) *Server {
 	mux.Handle("GET /api/sessions/{session}/windows", auth(s.handleListWindows()))
 	mux.Handle("POST /api/sessions/{session}/windows", auth(s.handleCreateWindow()))
 	mux.Handle("DELETE /api/sessions/{session}/windows/{index}", auth(s.handleDeleteWindow()))
+	mux.Handle("PATCH /api/sessions/{session}/windows/{index}", auth(s.handleRenameWindow()))
 	mux.Handle("GET /api/sessions/{session}/windows/{index}/attach", auth(s.handleAttach()))
 
 	// 静的ファイル配信

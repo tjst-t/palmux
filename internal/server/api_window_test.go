@@ -290,6 +290,178 @@ func TestHandleDeleteWindow(t *testing.T) {
 	}
 }
 
+func TestHandleRenameWindow(t *testing.T) {
+	tests := []struct {
+		name         string
+		session      string
+		index        string
+		body         string
+		renameErr    error
+		windows      []tmux.Window
+		windowsErr   error
+		wantStatus   int
+		wantName     string
+		wantIndex    int
+	}{
+		{
+			name:    "正常系: ウィンドウをリネームする",
+			session: "main",
+			index:   "1",
+			body:    `{"name": "editor"}`,
+			windows: []tmux.Window{
+				{Index: 0, Name: "bash", Active: true},
+				{Index: 1, Name: "editor", Active: false},
+			},
+			wantStatus: http.StatusOK,
+			wantName:   "editor",
+			wantIndex:  1,
+		},
+		{
+			name:    "正常系: インデックス0のウィンドウをリネーム",
+			session: "dev",
+			index:   "0",
+			body:    `{"name": "shell"}`,
+			windows: []tmux.Window{
+				{Index: 0, Name: "shell", Active: true},
+			},
+			wantStatus: http.StatusOK,
+			wantName:   "shell",
+			wantIndex:  0,
+		},
+		{
+			name:       "異常系: 名前が空: 400を返す",
+			session:    "main",
+			index:      "1",
+			body:       `{"name": ""}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "異常系: nameフィールドなし: 400を返す",
+			session:    "main",
+			index:      "1",
+			body:       `{}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "異常系: 不正JSON: 400を返す",
+			session:    "main",
+			index:      "1",
+			body:       `{invalid`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "異常系: 不正なインデックス: 400を返す",
+			session:    "main",
+			index:      "abc",
+			body:       `{"name": "test"}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "異常系: 負のインデックス: 400を返す",
+			session:    "main",
+			index:      "-1",
+			body:       `{"name": "test"}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "異常系: tmux RenameWindow エラー: 500を返す",
+			session:    "main",
+			index:      "99",
+			body:       `{"name": "test"}`,
+			renameErr:  errors.New("window not found"),
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name:       "異常系: tmux ListWindows エラー: 500を返す",
+			session:    "main",
+			index:      "1",
+			body:       `{"name": "test"}`,
+			windowsErr: errors.New("session not found"),
+			wantStatus: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &configurableMock{
+				renameWinErr: tt.renameErr,
+				windows:      tt.windows,
+				windowsErr:   tt.windowsErr,
+			}
+			srv, token := newTestServer(mock)
+			rec := doRequest(t, srv.Handler(), http.MethodPatch, "/api/sessions/"+tt.session+"/windows/"+tt.index, token, tt.body)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d, body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+
+			if tt.wantStatus == http.StatusOK {
+				ct := rec.Header().Get("Content-Type")
+				if !strings.Contains(ct, "application/json") {
+					t.Errorf("Content-Type = %q, want application/json", ct)
+				}
+
+				var result tmux.Window
+				if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+					t.Fatalf("failed to decode response: %v", err)
+				}
+
+				if result.Name != tt.wantName {
+					t.Errorf("result.Name = %q, want %q", result.Name, tt.wantName)
+				}
+				if result.Index != tt.wantIndex {
+					t.Errorf("result.Index = %d, want %d", result.Index, tt.wantIndex)
+				}
+
+				if mock.calledRenameWindow.session != tt.session {
+					t.Errorf("RenameWindow session = %q, want %q", mock.calledRenameWindow.session, tt.session)
+				}
+				if mock.calledRenameWindow.name != tt.wantName {
+					t.Errorf("RenameWindow name = %q, want %q", mock.calledRenameWindow.name, tt.wantName)
+				}
+			}
+
+			if tt.wantStatus == http.StatusBadRequest || tt.wantStatus == http.StatusInternalServerError {
+				ct := rec.Header().Get("Content-Type")
+				if !strings.Contains(ct, "application/json") {
+					t.Errorf("Content-Type = %q, want application/json", ct)
+				}
+			}
+		})
+	}
+}
+
+func TestHandleRenameWindow_WithBasePath(t *testing.T) {
+	mock := &configurableMock{
+		windows: []tmux.Window{
+			{Index: 1, Name: "renamed", Active: false},
+		},
+	}
+
+	const token = "test-token"
+	srv := NewServer(Options{
+		Tmux:     mock,
+		Token:    token,
+		BasePath: "/palmux/",
+	})
+
+	rec := doRequest(t, srv.Handler(), http.MethodPatch, "/palmux/api/sessions/main/windows/1", token, `{"name": "renamed"}`)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	if mock.calledRenameWindow.session != "main" {
+		t.Errorf("RenameWindow session = %q, want %q", mock.calledRenameWindow.session, "main")
+	}
+	if mock.calledRenameWindow.index != 1 {
+		t.Errorf("RenameWindow index = %d, want %d", mock.calledRenameWindow.index, 1)
+	}
+	if mock.calledRenameWindow.name != "renamed" {
+		t.Errorf("RenameWindow name = %q, want %q", mock.calledRenameWindow.name, "renamed")
+	}
+}
+
 func TestHandleListWindows_WithBasePath(t *testing.T) {
 	mock := &configurableMock{
 		windows: []tmux.Window{

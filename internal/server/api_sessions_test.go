@@ -26,7 +26,8 @@ type configurableMock struct {
 	windowsErr  error
 	newWindow   *tmux.Window
 	newWinErr   error
-	killWinErr  error
+	killWinErr   error
+	renameWinErr error
 
 	// 呼び出し記録
 	calledListSessions bool
@@ -37,6 +38,11 @@ type configurableMock struct {
 	calledKillWindow   struct {
 		session string
 		index   int
+	}
+	calledRenameWindow struct {
+		session string
+		index   int
+		name    string
 	}
 }
 
@@ -71,6 +77,15 @@ func (m *configurableMock) KillWindow(session string, index int) error {
 		index   int
 	}{session, index}
 	return m.killWinErr
+}
+
+func (m *configurableMock) RenameWindow(session string, index int, name string) error {
+	m.calledRenameWindow = struct {
+		session string
+		index   int
+		name    string
+	}{session, index, name}
+	return m.renameWinErr
 }
 
 func (m *configurableMock) Attach(session string) (*os.File, *exec.Cmd, error) {

@@ -116,6 +116,17 @@ func (m *Manager) KillWindow(session string, index int) error {
 	return nil
 }
 
+// RenameWindow は指定セッションの指定インデックスのウィンドウをリネームする。
+func (m *Manager) RenameWindow(session string, index int, name string) error {
+	target := fmt.Sprintf("%s:%d", session, index)
+	_, err := m.Exec.Run("rename-window", "-t", target, name)
+	if err != nil {
+		return fmt.Errorf("rename window: %w", err)
+	}
+
+	return nil
+}
+
 // Attach は tmux attach-session を pty 内で実行し、pty のマスター側ファイルと exec.Cmd を返す。
 // 呼び出し元は返されたファイルを通じて pty と双方向に通信できる。
 // 使用後は呼び出し元がファイルの Close とプロセスの Kill/Wait を行う必要がある。

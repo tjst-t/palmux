@@ -122,6 +122,23 @@ export async function createWindow(session, name) {
 }
 
 /**
+ * ウィンドウをリネームする。
+ * @param {string} session - セッション名
+ * @param {number} index - ウィンドウインデックス
+ * @param {string} name - 新しいウィンドウ名
+ * @returns {Promise<{index: number, name: string, active: boolean}>}
+ */
+export async function renameWindow(session, index, name) {
+  return fetchAPI(
+    `api/sessions/${encodeURIComponent(session)}/windows/${index}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    }
+  );
+}
+
+/**
  * ウィンドウを削除する。
  * @param {string} session - セッション名
  * @param {number} index - ウィンドウインデックス
