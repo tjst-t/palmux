@@ -25,27 +25,30 @@ type TmuxManager interface {
 
 // Server は Palmux の HTTP サーバーを表す。
 type Server struct {
-	tmux     TmuxManager
-	token    string
-	basePath string
-	handler  http.Handler
+	tmux        TmuxManager
+	token       string
+	basePath    string
+	handler     http.Handler
+	connTracker *connectionTracker
 }
 
 // Options は Server の生成オプション。
 type Options struct {
-	Tmux     TmuxManager
-	Token    string
-	BasePath string
-	Frontend fs.FS // 静的ファイル配信用 FS（テスト時は nil 可）
+	Tmux           TmuxManager
+	Token          string
+	BasePath       string
+	Frontend       fs.FS // 静的ファイル配信用 FS（テスト時は nil 可）
+	MaxConnections int   // 同一セッションへの最大同時接続数（デフォルト: 5）
 }
 
 // NewServer は Options を元に新しい Server を生成する。
 // ベースパスの正規化、ルーティング登録、認証ミドルウェアの適用を行う。
 func NewServer(opts Options) *Server {
 	s := &Server{
-		tmux:     opts.Tmux,
-		token:    opts.Token,
-		basePath: NormalizeBasePath(opts.BasePath),
+		tmux:        opts.Tmux,
+		token:       opts.Token,
+		basePath:    NormalizeBasePath(opts.BasePath),
+		connTracker: newConnectionTracker(opts.MaxConnections),
 	}
 
 	mux := http.NewServeMux()
@@ -62,6 +65,7 @@ func NewServer(opts Options) *Server {
 	mux.Handle("DELETE /api/sessions/{session}/windows/{index}", auth(s.handleDeleteWindow()))
 	mux.Handle("PATCH /api/sessions/{session}/windows/{index}", auth(s.handleRenameWindow()))
 	mux.Handle("GET /api/sessions/{session}/windows/{index}/attach", auth(s.handleAttach()))
+	mux.Handle("GET /api/connections", auth(s.handleListConnections()))
 
 	// 静的ファイル配信
 	if opts.Frontend != nil {

@@ -22,7 +22,11 @@ type wsMock struct {
 	configurableMock
 
 	attachErr error
-	attachPty *os.File // ハンドラに渡す側（pty マスター）
+	attachPty *os.File // ハンドラに渡す側（pty マスター） - 単一接続テスト用
+
+	// multiPty が true の場合、Attach 呼び出しごとに新しい pty ペアを作成する
+	multiPty bool
+	ptsPairs []*os.File // テスト側がアクセスするスレーブ側の一覧
 
 	calledAttach string
 	mu           sync.Mutex
@@ -35,12 +39,27 @@ func (m *wsMock) Attach(session string) (*os.File, *exec.Cmd, error) {
 	if m.attachErr != nil {
 		return nil, nil, m.attachErr
 	}
+
+	var ptmx *os.File
+	if m.multiPty {
+		// 複数接続テスト用: 毎回新しい pty ペアを作成
+		var pts *os.File
+		var err error
+		ptmx, pts, err = createPtyPair()
+		if err != nil {
+			return nil, nil, err
+		}
+		m.ptsPairs = append(m.ptsPairs, pts)
+	} else {
+		ptmx = m.attachPty
+	}
+
 	// ダミーの sleep プロセスを起動（cleanup テスト用）
 	cmd := exec.Command("sleep", "60")
 	if err := cmd.Start(); err != nil {
 		return nil, nil, err
 	}
-	return m.attachPty, cmd, nil
+	return ptmx, cmd, nil
 }
 
 // wsTestMessage は WebSocket メッセージの JSON 構造。
@@ -81,6 +100,18 @@ func newTestServerWithWS(mock *wsMock) (*Server, string) {
 		Tmux:     mock,
 		Token:    token,
 		BasePath: "/",
+	})
+	return srv, token
+}
+
+// newTestServerWithWSAndMaxConn は WebSocket テスト用 Server を MaxConnections 付きで作成するヘルパー。
+func newTestServerWithWSAndMaxConn(mock *wsMock, maxConn int) (*Server, string) {
+	const token = "test-token"
+	srv := NewServer(Options{
+		Tmux:           mock,
+		Token:          token,
+		BasePath:       "/",
+		MaxConnections: maxConn,
 	})
 	return srv, token
 }
@@ -345,4 +376,360 @@ func TestHandleAttach_AuthRequired(t *testing.T) {
 	if resp != nil && resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
 	}
+}
+
+// --- Connection Tracker Tests ---
+
+func TestConnectionTracker_Add(t *testing.T) {
+	ct := newConnectionTracker(5)
+
+	id, err := ct.add("main", "127.0.0.1:12345")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id == "" {
+		t.Error("expected non-empty connection ID")
+	}
+
+	conns := ct.list()
+	if len(conns) != 1 {
+		t.Fatalf("expected 1 connection, got %d", len(conns))
+	}
+	if conns[0].Session != "main" {
+		t.Errorf("session = %q, want %q", conns[0].Session, "main")
+	}
+	if conns[0].RemoteIP != "127.0.0.1:12345" {
+		t.Errorf("remote_ip = %q, want %q", conns[0].RemoteIP, "127.0.0.1:12345")
+	}
+	if conns[0].Connected.IsZero() {
+		t.Error("connected time should not be zero")
+	}
+}
+
+func TestConnectionTracker_Remove(t *testing.T) {
+	ct := newConnectionTracker(5)
+
+	id, err := ct.add("main", "127.0.0.1:12345")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ct.remove(id)
+
+	conns := ct.list()
+	if len(conns) != 0 {
+		t.Errorf("expected 0 connections after remove, got %d", len(conns))
+	}
+}
+
+func TestConnectionTracker_MaxPerSession(t *testing.T) {
+	ct := newConnectionTracker(2)
+
+	// 同一セッションに2つの接続（上限）
+	id1, err := ct.add("main", "127.0.0.1:1")
+	if err != nil {
+		t.Fatalf("unexpected error on first add: %v", err)
+	}
+	_, err = ct.add("main", "127.0.0.1:2")
+	if err != nil {
+		t.Fatalf("unexpected error on second add: %v", err)
+	}
+
+	// 3つ目は拒否される
+	_, err = ct.add("main", "127.0.0.1:3")
+	if err == nil {
+		t.Fatal("expected error when exceeding max connections, got nil")
+	}
+
+	// 別のセッションは影響を受けない
+	_, err = ct.add("dev", "127.0.0.1:4")
+	if err != nil {
+		t.Fatalf("unexpected error on different session: %v", err)
+	}
+
+	// 1つ削除すれば再度追加可能
+	ct.remove(id1)
+	_, err = ct.add("main", "127.0.0.1:5")
+	if err != nil {
+		t.Fatalf("unexpected error after removing a connection: %v", err)
+	}
+}
+
+func TestConnectionTracker_List(t *testing.T) {
+	ct := newConnectionTracker(5)
+
+	ct.add("main", "127.0.0.1:1")
+	ct.add("dev", "192.168.1.1:2")
+	ct.add("main", "10.0.0.1:3")
+
+	conns := ct.list()
+	if len(conns) != 3 {
+		t.Fatalf("expected 3 connections, got %d", len(conns))
+	}
+
+	// セッション名ごとの接続数を数える
+	sessionCounts := make(map[string]int)
+	for _, c := range conns {
+		sessionCounts[c.Session]++
+	}
+	if sessionCounts["main"] != 2 {
+		t.Errorf("main connections = %d, want 2", sessionCounts["main"])
+	}
+	if sessionCounts["dev"] != 1 {
+		t.Errorf("dev connections = %d, want 1", sessionCounts["dev"])
+	}
+}
+
+func TestConnectionTracker_ConcurrentSafety(t *testing.T) {
+	ct := newConnectionTracker(100)
+	var wg sync.WaitGroup
+
+	// 並行してadd/remove/listを実行してデータ競合がないことを確認
+	for i := 0; i < 50; i++ {
+		wg.Add(3)
+		go func(i int) {
+			defer wg.Done()
+			id, _ := ct.add("session", "127.0.0.1:"+strings.Repeat("0", i%5))
+			if id != "" {
+				ct.remove(id)
+			}
+		}(i)
+		go func() {
+			defer wg.Done()
+			ct.list()
+		}()
+		go func() {
+			defer wg.Done()
+			ct.add("other", "192.168.0.1:1")
+		}()
+	}
+	wg.Wait()
+}
+
+func TestHandleAttach_MultipleConnectionsSameSession(t *testing.T) {
+	mock := &wsMock{
+		multiPty: true,
+	}
+
+	srv, token := newTestServerWithWSAndMaxConn(mock, 5)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// 同一セッションに2つの WebSocket 接続を確立
+	conn1, _, cancel1 := dialWS(t, ts.URL, "/api/sessions/main/windows/0/attach", token)
+	defer cancel1()
+	defer conn1.Close(websocket.StatusNormalClosure, "")
+
+	conn2, _, cancel2 := dialWS(t, ts.URL, "/api/sessions/main/windows/0/attach", token)
+	defer cancel2()
+	defer conn2.Close(websocket.StatusNormalClosure, "")
+
+	// 両方の接続が成功していることを確認（パニックしない）
+	time.Sleep(200 * time.Millisecond)
+
+	// cleanup: multiPty の pts を閉じる
+	mock.mu.Lock()
+	for _, pts := range mock.ptsPairs {
+		pts.Close()
+	}
+	mock.mu.Unlock()
+}
+
+func TestHandleAttach_TooManyConnections(t *testing.T) {
+	mock := &wsMock{
+		multiPty: true,
+	}
+
+	// maxConnections を 2 に設定
+	srv, token := newTestServerWithWSAndMaxConn(mock, 2)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// 2つの接続を確立（上限まで）
+	conn1, _, cancel1 := dialWS(t, ts.URL, "/api/sessions/main/windows/0/attach", token)
+	defer cancel1()
+	defer conn1.Close(websocket.StatusNormalClosure, "")
+
+	conn2, _, cancel2 := dialWS(t, ts.URL, "/api/sessions/main/windows/0/attach", token)
+	defer cancel2()
+	defer conn2.Close(websocket.StatusNormalClosure, "")
+
+	// 少し待って接続が登録されるのを確認
+	time.Sleep(200 * time.Millisecond)
+
+	// 3つ目の接続は 429 で拒否されるべき
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/sessions/main/windows/0/attach"
+	ctx, cancel3 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel3()
+
+	_, resp, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		HTTPHeader: http.Header{
+			"Authorization": []string{"Bearer " + token},
+		},
+	})
+
+	// WebSocket upgrade が拒否されてエラーが返るはず
+	if err == nil {
+		t.Fatal("expected error when exceeding max connections, but got nil")
+	}
+	if resp != nil && resp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusTooManyRequests)
+	}
+
+	// cleanup
+	mock.mu.Lock()
+	for _, pts := range mock.ptsPairs {
+		pts.Close()
+	}
+	mock.mu.Unlock()
+}
+
+func TestHandleAttach_ConnectionRemovedAfterClose(t *testing.T) {
+	mock := &wsMock{
+		multiPty: true,
+	}
+
+	srv, token := newTestServerWithWSAndMaxConn(mock, 5)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// 接続を確立
+	conn, _, cancel := dialWS(t, ts.URL, "/api/sessions/main/windows/0/attach", token)
+	defer cancel()
+
+	// 接続が登録されたことを確認
+	time.Sleep(200 * time.Millisecond)
+
+	conns := srv.connTracker.list()
+	if len(conns) != 1 {
+		t.Fatalf("expected 1 connection, got %d", len(conns))
+	}
+
+	// WebSocket を閉じる
+	conn.Close(websocket.StatusNormalClosure, "done")
+
+	// 接続が削除されるまで待つ
+	time.Sleep(1 * time.Second)
+
+	conns = srv.connTracker.list()
+	if len(conns) != 0 {
+		t.Errorf("expected 0 connections after close, got %d", len(conns))
+	}
+
+	// cleanup
+	mock.mu.Lock()
+	for _, pts := range mock.ptsPairs {
+		pts.Close()
+	}
+	mock.mu.Unlock()
+}
+
+func TestHandleListConnections(t *testing.T) {
+	mock := &wsMock{
+		multiPty: true,
+	}
+
+	srv, token := newTestServerWithWSAndMaxConn(mock, 5)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// まず接続なしの状態で API を呼ぶ
+	rec := doRequest(t, srv.Handler(), http.MethodGet, "/api/connections", token, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var emptyConns []connectionInfo
+	if err := json.NewDecoder(rec.Body).Decode(&emptyConns); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(emptyConns) != 0 {
+		t.Errorf("expected 0 connections, got %d", len(emptyConns))
+	}
+
+	// WebSocket 接続を確立
+	conn1, _, cancel1 := dialWS(t, ts.URL, "/api/sessions/main/windows/0/attach", token)
+	defer cancel1()
+	defer conn1.Close(websocket.StatusNormalClosure, "")
+
+	conn2, _, cancel2 := dialWS(t, ts.URL, "/api/sessions/dev/windows/0/attach", token)
+	defer cancel2()
+	defer conn2.Close(websocket.StatusNormalClosure, "")
+
+	time.Sleep(200 * time.Millisecond)
+
+	// 接続一覧 API を呼ぶ
+	rec = doRequest(t, srv.Handler(), http.MethodGet, "/api/connections", token, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	ct := rec.Header().Get("Content-Type")
+	if !strings.Contains(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+
+	var conns []connectionInfo
+	if err := json.NewDecoder(rec.Body).Decode(&conns); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(conns) != 2 {
+		t.Fatalf("expected 2 connections, got %d", len(conns))
+	}
+
+	// セッション名ごとの接続を確認
+	sessionFound := make(map[string]bool)
+	for _, c := range conns {
+		sessionFound[c.Session] = true
+		if c.RemoteIP == "" {
+			t.Error("remote_ip should not be empty")
+		}
+		if c.Connected.IsZero() {
+			t.Error("connected time should not be zero")
+		}
+	}
+	if !sessionFound["main"] {
+		t.Error("expected connection for session 'main'")
+	}
+	if !sessionFound["dev"] {
+		t.Error("expected connection for session 'dev'")
+	}
+
+	// cleanup
+	mock.mu.Lock()
+	for _, pts := range mock.ptsPairs {
+		pts.Close()
+	}
+	mock.mu.Unlock()
+}
+
+func TestHandleListConnections_AuthRequired(t *testing.T) {
+	mock := &wsMock{}
+	srv, _ := newTestServerWithWS(mock)
+
+	rec := doRequest(t, srv.Handler(), http.MethodGet, "/api/connections", "", "")
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestHandleAttach_DefaultMaxConnections(t *testing.T) {
+	// MaxConnections が 0 の場合、デフォルトの 5 が使われることを確認
+	mock := &wsMock{
+		multiPty: true,
+	}
+
+	srv, _ := newTestServerWithWS(mock)
+
+	// connTracker の maxPerSession がデフォルトの 5 であることを確認
+	if srv.connTracker.maxPerSession != 5 {
+		t.Errorf("default maxPerSession = %d, want 5", srv.connTracker.maxPerSession)
+	}
+
+	// cleanup
+	mock.mu.Lock()
+	for _, pts := range mock.ptsPairs {
+		pts.Close()
+	}
+	mock.mu.Unlock()
 }

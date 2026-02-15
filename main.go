@@ -22,6 +22,7 @@ func main() {
 	tlsKey := flag.String("tls-key", "", "TLS private key file")
 	token := flag.String("token", "", "Fixed auth token (auto-generated if empty)")
 	basePath := flag.String("base-path", "/", "Base path")
+	maxConnections := flag.Int("max-connections", 5, "Max simultaneous connections per session")
 
 	flag.Parse()
 
@@ -66,10 +67,11 @@ func main() {
 	// サーバーを生成
 	normalizedBasePath := server.NormalizeBasePath(*basePath)
 	srv := server.NewServer(server.Options{
-		Tmux:     mgr,
-		Token:    authToken,
-		BasePath: normalizedBasePath,
-		Frontend: frontFS,
+		Tmux:           mgr,
+		Token:          authToken,
+		BasePath:       normalizedBasePath,
+		Frontend:       frontFS,
+		MaxConnections: *maxConnections,
 	})
 
 	addr := fmt.Sprintf("%s:%d", *host, *port)

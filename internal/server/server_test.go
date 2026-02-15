@@ -260,6 +260,20 @@ func TestServer_RoutingWithBasePathRoot(t *testing.T) {
 			wantStatus: http.StatusUpgradeRequired,
 		},
 		{
+			name:       "GET /api/connections: 認証あり → 200",
+			method:     http.MethodGet,
+			path:       "/api/connections",
+			withToken:  true,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "GET /api/connections: 認証なし → 401",
+			method:     http.MethodGet,
+			path:       "/api/connections",
+			withToken:  false,
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
 			name:       "GET /: 静的ファイル → 200 (認証不要)",
 			method:     http.MethodGet,
 			path:       "/",
@@ -354,6 +368,13 @@ func TestServer_RoutingWithBasePathPalmux(t *testing.T) {
 			wantStatus: http.StatusUpgradeRequired,
 		},
 		{
+			name:       "GET /palmux/api/connections: 認証あり → 200",
+			method:     http.MethodGet,
+			path:       "/palmux/api/connections",
+			withToken:  true,
+			wantStatus: http.StatusOK,
+		},
+		{
 			name:       "GET /palmux/: 静的ファイル → 200 (認証不要)",
 			method:     http.MethodGet,
 			path:       "/palmux/",
@@ -423,6 +444,13 @@ func TestServer_RoutingWithDeepNestedBasePath(t *testing.T) {
 			name:       "GET /deep/nested/path/api/sessions/main/windows: 認証あり → 200",
 			method:     http.MethodGet,
 			path:       "/deep/nested/path/api/sessions/main/windows",
+			withToken:  true,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "GET /deep/nested/path/api/connections: 認証あり → 200",
+			method:     http.MethodGet,
+			path:       "/deep/nested/path/api/connections",
 			withToken:  true,
 			wantStatus: http.StatusOK,
 		},
@@ -724,6 +752,7 @@ func TestServer_APIRoutesRequireAuth(t *testing.T) {
 		{http.MethodDelete, "/api/sessions/test/windows/0"},
 		{http.MethodPatch, "/api/sessions/test/windows/0"},
 		{http.MethodGet, "/api/sessions/test/windows/0/attach"},
+		{http.MethodGet, "/api/connections"},
 	}
 
 	for _, route := range apiRoutes {
