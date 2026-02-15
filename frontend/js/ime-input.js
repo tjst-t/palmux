@@ -124,13 +124,10 @@ export class IMEInput {
    * IME 入力フィールドの表示/非表示をトグルする。
    */
   toggle() {
-    this._visible = !this._visible;
-    this._el.style.display = this._visible ? 'flex' : 'none';
     if (this._visible) {
-      this._input.focus();
-    }
-    if (this._onToggle) {
-      this._onToggle(this._visible);
+      this.hide();
+    } else {
+      this.show();
     }
   }
 
