@@ -698,3 +698,126 @@ func TestManager_KillWindow_TargetFormat(t *testing.T) {
 		})
 	}
 }
+
+func TestManager_GetSessionCwd(t *testing.T) {
+	tests := []struct {
+		name     string
+		session  string
+		output   []byte
+		err      error
+		want     string
+		wantErr  bool
+		wantArgs []string
+	}{
+		{
+			name:     "正常系: カレントパスを返す",
+			session:  "main",
+			output:   []byte("/home/user/projects/palmux\n"),
+			err:      nil,
+			want:     "/home/user/projects/palmux",
+			wantErr:  false,
+			wantArgs: []string{"display-message", "-p", "-t", "main", "#{pane_current_path}"},
+		},
+		{
+			name:     "正常系: ルートディレクトリ",
+			session:  "root",
+			output:   []byte("/\n"),
+			err:      nil,
+			want:     "/",
+			wantErr:  false,
+			wantArgs: []string{"display-message", "-p", "-t", "root", "#{pane_current_path}"},
+		},
+		{
+			name:     "正常系: 末尾改行なし",
+			session:  "dev",
+			output:   []byte("/tmp"),
+			err:      nil,
+			want:     "/tmp",
+			wantErr:  false,
+			wantArgs: []string{"display-message", "-p", "-t", "dev", "#{pane_current_path}"},
+		},
+		{
+			name:    "異常系: セッションが存在しない",
+			session: "nonexistent",
+			output:  nil,
+			err: &exec.ExitError{
+				ProcessState: nil,
+				Stderr:       []byte("can't find session: nonexistent"),
+			},
+			want:     "",
+			wantErr:  true,
+			wantArgs: []string{"display-message", "-p", "-t", "nonexistent", "#{pane_current_path}"},
+		},
+		{
+			name:     "異常系: その他のエラー",
+			session:  "main",
+			output:   nil,
+			err:      errors.New("connection refused"),
+			want:     "",
+			wantErr:  true,
+			wantArgs: []string{"display-message", "-p", "-t", "main", "#{pane_current_path}"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockExecutor{output: tt.output, err: tt.err}
+			m := &Manager{Exec: mock}
+
+			got, err := m.GetSessionCwd(tt.session)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetSessionCwd() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			assertArgs(t, mock, tt.wantArgs)
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("GetSessionCwd() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestManager_GetSessionCwd_SessionNotFound(t *testing.T) {
+	// セッションが存在しない場合、ErrSessionNotFound を返す
+	exitErr := &exec.ExitError{
+		ProcessState: nil,
+		Stderr:       []byte("can't find session: nonexistent"),
+	}
+	mock := &mockExecutor{output: nil, err: exitErr}
+	m := &Manager{Exec: mock}
+
+	_, err := m.GetSessionCwd("nonexistent")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrSessionNotFound) {
+		t.Errorf("error should be ErrSessionNotFound, got: %v", err)
+	}
+}
+
+func TestManager_GetSessionCwd_OtherError(t *testing.T) {
+	// セッション未存在以外のエラーは ErrSessionNotFound ではない
+	mock := &mockExecutor{output: nil, err: errors.New("connection refused")}
+	m := &Manager{Exec: mock}
+
+	_, err := m.GetSessionCwd("main")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if errors.Is(err, ErrSessionNotFound) {
+		t.Errorf("error should NOT be ErrSessionNotFound for non-session errors, got: %v", err)
+	}
+}
+
+func TestManager_GetSessionCwd_ErrorMessage(t *testing.T) {
+	mock := &mockExecutor{output: nil, err: errors.New("connection refused")}
+	m := &Manager{Exec: mock}
+
+	_, err := m.GetSessionCwd("main")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "get session cwd") {
+		t.Errorf("error message should contain context, got: %q", err.Error())
+	}
+}

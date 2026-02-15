@@ -28,6 +28,8 @@ type configurableMock struct {
 	newWinErr   error
 	killWinErr   error
 	renameWinErr error
+	cwd          string
+	cwdErr       error
 
 	// 呼び出し記録
 	calledListSessions bool
@@ -44,6 +46,7 @@ type configurableMock struct {
 		index   int
 		name    string
 	}
+	calledGetCwd string
 }
 
 func (m *configurableMock) ListSessions() ([]tmux.Session, error) {
@@ -90,6 +93,11 @@ func (m *configurableMock) RenameWindow(session string, index int, name string) 
 
 func (m *configurableMock) Attach(session string, windowIndex int) (*os.File, *exec.Cmd, error) {
 	return nil, nil, nil
+}
+
+func (m *configurableMock) GetSessionCwd(session string) (string, error) {
+	m.calledGetCwd = session
+	return m.cwd, m.cwdErr
 }
 
 // newTestServer はテスト用 Server を作成するヘルパー。
