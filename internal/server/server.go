@@ -3,6 +3,8 @@ package server
 import (
 	"io/fs"
 	"net/http"
+	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/tjst-t/palmux/internal/tmux"
@@ -17,6 +19,7 @@ type TmuxManager interface {
 	ListWindows(session string) ([]tmux.Window, error)
 	NewWindow(session, name string) (*tmux.Window, error)
 	KillWindow(session string, index int) error
+	Attach(session string) (*os.File, *exec.Cmd, error)
 }
 
 // Server は Palmux の HTTP サーバーを表す。
@@ -95,11 +98,4 @@ func NormalizeBasePath(path string) string {
 	}
 
 	return path
-}
-
-// handleAttach は WebSocket pty ブリッジのスタブハンドラ。実際の実装は Task 7 で行う。
-func (s *Server) handleAttach() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
 }

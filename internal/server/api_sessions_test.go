@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -69,6 +71,10 @@ func (m *configurableMock) KillWindow(session string, index int) error {
 		index   int
 	}{session, index}
 	return m.killWinErr
+}
+
+func (m *configurableMock) Attach(session string) (*os.File, *exec.Cmd, error) {
+	return nil, nil, nil
 }
 
 // newTestServer はテスト用 Server を作成するヘルパー。

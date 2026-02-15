@@ -1,6 +1,12 @@
 package tmux
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+	"os/exec"
+
+	"github.com/creack/pty"
+)
 
 // Manager は tmux の操作を管理する。
 // Executor を通じて tmux コマンドを実行し、結果をパースして返す。
@@ -108,4 +114,22 @@ func (m *Manager) KillWindow(session string, index int) error {
 	}
 
 	return nil
+}
+
+// Attach は tmux attach-session を pty 内で実行し、pty のマスター側ファイルと exec.Cmd を返す。
+// 呼び出し元は返されたファイルを通じて pty と双方向に通信できる。
+// 使用後は呼び出し元がファイルの Close とプロセスの Kill/Wait を行う必要がある。
+func (m *Manager) Attach(session string) (*os.File, *exec.Cmd, error) {
+	tmuxBin := "tmux"
+	if re, ok := m.Exec.(*RealExecutor); ok && re.TmuxBin != "" {
+		tmuxBin = re.TmuxBin
+	}
+
+	cmd := exec.Command(tmuxBin, "attach-session", "-t", session)
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		return nil, nil, fmt.Errorf("attach session %q: %w", session, err)
+	}
+
+	return ptmx, cmd, nil
 }
