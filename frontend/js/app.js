@@ -1,10 +1,12 @@
 // app.js - メインアプリケーションロジック
 // セッション一覧→選択→ターミナル表示のフロー
+// Drawer による セッション/ウィンドウ切り替え
 
 import { listSessions, listWindows, getWebSocketURL } from './api.js';
 import { PalmuxTerminal } from './terminal.js';
 import { Toolbar } from './toolbar.js';
 import { IMEInput } from './ime-input.js';
+import { Drawer } from './drawer.js';
 
 /** @type {PalmuxTerminal|null} */
 let terminal = null;
@@ -14,6 +16,9 @@ let toolbar = null;
 
 /** @type {IMEInput|null} */
 let imeInput = null;
+
+/** @type {Drawer|null} */
+let drawer = null;
 
 /** 現在接続中のセッション名 */
 let currentSession = null;
@@ -30,6 +35,7 @@ async function showSessionList() {
   const headerTitleEl = document.getElementById('header-title');
   const backBtnEl = document.getElementById('back-btn');
   const sessionItemsEl = document.getElementById('session-items');
+  const drawerBtnEl = document.getElementById('drawer-btn');
 
   // IME 入力のクリーンアップ
   if (imeInput) {
@@ -61,6 +67,11 @@ async function showSessionList() {
   const toolbarToggleBtnEl = document.getElementById('toolbar-toggle-btn');
   if (toolbarToggleBtnEl) {
     toolbarToggleBtnEl.classList.add('hidden');
+  }
+
+  // drawer ボタンを非表示（セッション一覧では不要）
+  if (drawerBtnEl) {
+    drawerBtnEl.classList.add('hidden');
   }
 
   // ローディング表示
@@ -164,6 +175,21 @@ function connectToWindow(sessionName, windowIndex) {
   const headerTitleEl = document.getElementById('header-title');
   const backBtnEl = document.getElementById('back-btn');
   const toolbarToggleBtnEl = document.getElementById('toolbar-toggle-btn');
+  const drawerBtnEl = document.getElementById('drawer-btn');
+
+  // 既存ターミナルをクリーンアップ
+  if (imeInput) {
+    imeInput.destroy();
+    imeInput = null;
+  }
+  if (toolbar) {
+    toolbar.dispose();
+    toolbar = null;
+  }
+  if (terminal) {
+    terminal.disconnect();
+    terminal = null;
+  }
 
   // UI 切り替え
   sessionListEl.classList.add('hidden');
@@ -176,8 +202,18 @@ function connectToWindow(sessionName, windowIndex) {
     toolbarToggleBtnEl.classList.remove('hidden');
   }
 
+  // drawer ボタンを表示（ターミナル接続中のみ）
+  if (drawerBtnEl) {
+    drawerBtnEl.classList.remove('hidden');
+  }
+
   currentSession = sessionName;
   currentWindowIndex = windowIndex;
+
+  // Drawer の現在位置を更新
+  if (drawer) {
+    drawer.setCurrent(sessionName, windowIndex);
+  }
 
   // ターミナル初期化・接続
   terminal = new PalmuxTerminal(terminalContainerEl);
@@ -214,6 +250,44 @@ function connectToWindow(sessionName, windowIndex) {
 }
 
 /**
+ * 同一セッション内のウィンドウを切り替える。
+ * tmux の prefix + コマンドモードで select-window を実行する。
+ * @param {string} sessionName - セッション名
+ * @param {number} windowIndex - ウィンドウインデックス
+ */
+function switchWindow(sessionName, windowIndex) {
+  if (!terminal) return;
+
+  // tmux prefix (Ctrl+B) + コマンドモード(:) + select-window コマンド + Enter
+  // \x02 = Ctrl+B (default tmux prefix)
+  terminal.sendInput('\x02:select-window -t :' + windowIndex + '\r');
+
+  // ヘッダータイトルを更新
+  const headerTitleEl = document.getElementById('header-title');
+  headerTitleEl.textContent = `${sessionName}:${windowIndex}`;
+
+  currentWindowIndex = windowIndex;
+
+  // Drawer の現在位置を更新
+  if (drawer) {
+    drawer.setCurrent(sessionName, windowIndex);
+  }
+
+  // ターミナルにフォーカスを戻す
+  terminal.focus();
+}
+
+/**
+ * 別セッションに切り替える（WebSocket 再接続）。
+ * @param {string} sessionName - セッション名
+ * @param {number} windowIndex - ウィンドウインデックス
+ */
+function switchSession(sessionName, windowIndex) {
+  // 完全に再接続する
+  connectToWindow(sessionName, windowIndex);
+}
+
+/**
  * HTML をエスケープする。
  * @param {string} str
  * @returns {string}
@@ -228,6 +302,28 @@ function escapeHTML(str) {
 document.addEventListener('DOMContentLoaded', () => {
   const backBtnEl = document.getElementById('back-btn');
   const toolbarToggleBtnEl = document.getElementById('toolbar-toggle-btn');
+  const drawerBtnEl = document.getElementById('drawer-btn');
+
+  // Drawer 初期化
+  drawer = new Drawer({
+    onSelectWindow: (session, windowIndex) => {
+      // 同一セッション内のウィンドウ切り替え
+      switchWindow(session, windowIndex);
+    },
+    onSelectSession: (sessionName, windowIndex) => {
+      // 別セッションへの切り替え（再接続）
+      switchSession(sessionName, windowIndex);
+    },
+  });
+
+  // drawer ボタンのイベント
+  if (drawerBtnEl) {
+    drawerBtnEl.addEventListener('click', () => {
+      if (drawer) {
+        drawer.open();
+      }
+    });
+  }
 
   // 戻るボタンのイベント
   backBtnEl.addEventListener('click', () => {
