@@ -532,18 +532,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Visual Viewport API: ソフトキーボード表示時にビューポートを追従
-  if (window.visualViewport) {
+  // #app の高さを可視領域に合わせる。ターミナルの再フィットは
+  // terminal.js の ResizeObserver がコンテナサイズ変更を検知して自動実行する。
+  const appEl = document.getElementById('app');
+  if (window.visualViewport && appEl) {
     const updateViewport = () => {
-      const appEl = document.getElementById('app');
-      if (appEl) {
-        appEl.style.height = window.visualViewport.height + 'px';
-      }
-      // ターミナルを再フィット
-      requestAnimationFrame(() => {
-        if (terminal) {
-          terminal.fit();
-        }
-      });
+      appEl.style.height = window.visualViewport.height + 'px';
     };
     window.visualViewport.addEventListener('resize', updateViewport);
     window.visualViewport.addEventListener('scroll', updateViewport);
