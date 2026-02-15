@@ -88,11 +88,24 @@ func TestNormalizeBasePath(t *testing.T) {
 	}
 }
 
+// testIndexHTML は テスト用の index.html テンプレート。
+// 実際のフロントエンドと同じ meta タグ構造を持つ。
+const testIndexHTML = `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="base-path" content="/">
+  <meta name="auth-token" content="">
+  <title>Palmux</title>
+</head>
+<body>Palmux</body>
+</html>`
+
 // newTestFrontendFS は テスト用の静的ファイル FS を返す。
 func newTestFrontendFS() fs.FS {
 	return fstest.MapFS{
 		"index.html": &fstest.MapFile{
-			Data: []byte("<html><head></head><body>Palmux</body></html>"),
+			Data: []byte(testIndexHTML),
 		},
 	}
 }
@@ -440,7 +453,7 @@ func TestServer_RoutingWithDeepNestedBasePath(t *testing.T) {
 func TestServer_StaticFileServing(t *testing.T) {
 	frontFS := fstest.MapFS{
 		"index.html": &fstest.MapFile{
-			Data: []byte("<html>Palmux App</html>"),
+			Data: []byte(testIndexHTML),
 		},
 		"css/style.css": &fstest.MapFile{
 			Data: []byte("body { margin: 0; }"),
@@ -466,8 +479,8 @@ func TestServer_StaticFileServing(t *testing.T) {
 		}
 
 		body := rec.Body.String()
-		if !strings.Contains(body, "Palmux App") {
-			t.Errorf("body should contain 'Palmux App', got %q", body)
+		if !strings.Contains(body, "Palmux") {
+			t.Errorf("body should contain 'Palmux', got %q", body)
 		}
 	})
 
@@ -490,7 +503,7 @@ func TestServer_StaticFileServing(t *testing.T) {
 func TestServer_StaticFileServingWithBasePath(t *testing.T) {
 	frontFS := fstest.MapFS{
 		"index.html": &fstest.MapFile{
-			Data: []byte("<html>Palmux App</html>"),
+			Data: []byte(testIndexHTML),
 		},
 	}
 
@@ -513,10 +526,139 @@ func TestServer_StaticFileServingWithBasePath(t *testing.T) {
 		}
 
 		body := rec.Body.String()
-		if !strings.Contains(body, "Palmux App") {
-			t.Errorf("body should contain 'Palmux App', got %q", body)
+		if !strings.Contains(body, "Palmux") {
+			t.Errorf("body should contain 'Palmux', got %q", body)
 		}
 	})
+}
+
+func TestServer_IndexHTMLInjection(t *testing.T) {
+	tests := []struct {
+		name         string
+		basePath     string
+		token        string
+		requestPath  string
+		wantBasePath string
+		wantToken    string
+	}{
+		{
+			name:         "ルートパス: basePathとtokenが注入される",
+			basePath:     "/",
+			token:        "my-secret-token",
+			requestPath:  "/",
+			wantBasePath: `content="/"`,
+			wantToken:    `content="my-secret-token"`,
+		},
+		{
+			name:         "/index.html でもbasePathとtokenが注入される",
+			basePath:     "/",
+			token:        "my-secret-token",
+			requestPath:  "/index.html",
+			wantBasePath: `content="/"`,
+			wantToken:    `content="my-secret-token"`,
+		},
+		{
+			name:         "カスタムbasePath: basePathが注入される",
+			basePath:     "/palmux/",
+			token:        "abc123",
+			requestPath:  "/palmux/",
+			wantBasePath: `content="/palmux/"`,
+			wantToken:    `content="abc123"`,
+		},
+		{
+			name:         "深いネストパス: basePathが注入される",
+			basePath:     "/deep/nested/path/",
+			token:        "deep-token",
+			requestPath:  "/deep/nested/path/",
+			wantBasePath: `content="/deep/nested/path/"`,
+			wantToken:    `content="deep-token"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			frontFS := fstest.MapFS{
+				"index.html": &fstest.MapFile{
+					Data: []byte(testIndexHTML),
+				},
+			}
+
+			srv := NewServer(Options{
+				Tmux:     &mockTmuxManager{},
+				Token:    tt.token,
+				BasePath: tt.basePath,
+				Frontend: frontFS,
+			})
+
+			handler := srv.Handler()
+
+			req := httptest.NewRequest(http.MethodGet, tt.requestPath, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+			}
+
+			body := rec.Body.String()
+
+			// base-path meta タグの値が注入されている
+			if !strings.Contains(body, `name="base-path"`) {
+				t.Errorf("body should contain base-path meta tag, got %q", body)
+			}
+			if !strings.Contains(body, tt.wantBasePath) {
+				t.Errorf("body should contain %q for base-path, got %q", tt.wantBasePath, body)
+			}
+
+			// auth-token meta タグの値が注入されている
+			if !strings.Contains(body, `name="auth-token"`) {
+				t.Errorf("body should contain auth-token meta tag, got %q", body)
+			}
+			if !strings.Contains(body, tt.wantToken) {
+				t.Errorf("body should contain %q for auth-token, got %q", tt.wantToken, body)
+			}
+
+			// Content-Type が text/html
+			ct := rec.Header().Get("Content-Type")
+			if !strings.Contains(ct, "text/html") {
+				t.Errorf("Content-Type = %q, want text/html", ct)
+			}
+		})
+	}
+}
+
+func TestServer_IndexHTMLInjection_OtherFilesNotAffected(t *testing.T) {
+	frontFS := fstest.MapFS{
+		"index.html": &fstest.MapFile{
+			Data: []byte(testIndexHTML),
+		},
+		"style.css": &fstest.MapFile{
+			Data: []byte("body { margin: 0; }"),
+		},
+	}
+
+	srv := NewServer(Options{
+		Tmux:     &mockTmuxManager{},
+		Token:    "test-token",
+		BasePath: "/",
+		Frontend: frontFS,
+	})
+
+	handler := srv.Handler()
+
+	// CSS ファイルは注入処理の影響を受けない
+	req := httptest.NewRequest(http.MethodGet, "/style.css", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	body := rec.Body.String()
+	if body != "body { margin: 0; }" {
+		t.Errorf("CSS file should not be modified, got %q", body)
+	}
 }
 
 func TestServer_NilFrontend(t *testing.T) {

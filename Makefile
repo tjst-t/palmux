@@ -1,4 +1,4 @@
-.PHONY: build frontend build-linux build-arm
+.PHONY: build frontend build-linux build-arm test clean
 
 frontend:
 	cd frontend && npx esbuild js/app.js \
@@ -15,3 +15,9 @@ build-linux: frontend
 
 build-arm: frontend
 	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o palmux-linux-arm64 .
+
+test:
+	go test ./...
+
+clean:
+	rm -rf frontend/build palmux palmux-linux-amd64 palmux-linux-arm64
