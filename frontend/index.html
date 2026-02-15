@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
   <meta name="base-path" content="/">
   <meta name="auth-token" content="">
   <meta name="theme-color" content="#16213e">
@@ -23,6 +23,14 @@
   <div id="drawer" class="drawer">
     <div class="drawer-header">
       <span class="drawer-header-title">Sessions</span>
+      <label class="drawer-sort-toggle" aria-label="Sort order">
+        <span class="drawer-sort-label drawer-sort-label--active" data-sort="activity">Recent</span>
+        <div class="drawer-sort-switch">
+          <input type="checkbox" id="drawer-sort-checkbox">
+          <span class="drawer-sort-slider"></span>
+        </div>
+        <span class="drawer-sort-label" data-sort="name">A-Z</span>
+      </label>
     </div>
     <div id="drawer-content" class="drawer-content"></div>
   </div>
@@ -31,11 +39,14 @@
     <!-- Header -->
     <div id="header">
       <button id="drawer-btn" class="hidden" aria-label="Open drawer">&#9776;</button>
-      <button id="back-btn" class="hidden" aria-label="Back">&#9664;</button>
       <div id="header-title">Palmux</div>
       <div id="connection-status" class="connection-status hidden">
         <span class="connection-dot"></span>
         <span class="connection-text"></span>
+      </div>
+      <div id="font-size-controls" class="font-size-controls hidden">
+        <button id="font-decrease-btn" class="font-size-btn" aria-label="Decrease font size">A&#x2212;</button>
+        <button id="font-increase-btn" class="font-size-btn" aria-label="Increase font size">A+</button>
       </div>
       <button id="toolbar-toggle-btn" class="hidden" aria-label="Toggle toolbar">&#9000;</button>
     </div>

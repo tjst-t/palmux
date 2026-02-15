@@ -531,6 +531,24 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Visual Viewport API: ソフトキーボード表示時にビューポートを追従
+  if (window.visualViewport) {
+    const updateViewport = () => {
+      const appEl = document.getElementById('app');
+      if (appEl) {
+        appEl.style.height = window.visualViewport.height + 'px';
+      }
+      // ターミナルを再フィット
+      requestAnimationFrame(() => {
+        if (terminal) {
+          terminal.fit();
+        }
+      });
+    };
+    window.visualViewport.addEventListener('resize', updateViewport);
+    window.visualViewport.addEventListener('scroll', updateViewport);
+  }
+
   // 初期表示: 最後のセッションに自動接続を試行
   autoConnect();
 });
