@@ -252,6 +252,8 @@ function connectToWindow(sessionName, windowIndex) {
         imeInput.toggle();
       }
     },
+    onFontDecrease: () => terminal.decreaseFontSize(),
+    onFontIncrease: () => terminal.increaseFontSize(),
   });
   terminal.setToolbar(toolbar);
 
@@ -272,7 +274,11 @@ function connectToWindow(sessionName, windowIndex) {
       }
     },
     onPinchZoom: (delta) => {
-      // ピンチズーム: Task 5 で実装予定（フォントサイズ調整）
+      if (delta > 0) {
+        terminal.increaseFontSize();
+      } else {
+        terminal.decreaseFontSize();
+      }
     },
   });
 
