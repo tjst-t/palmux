@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"os"
 	"sync"
 	"syscall"
@@ -118,6 +119,12 @@ type wsOutputMessage struct {
 func (s *Server) handleAttach() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		session := r.PathValue("session")
+		windowIndex := -1
+		if idxStr := r.PathValue("index"); idxStr != "" {
+			if idx, err := strconv.Atoi(idxStr); err == nil {
+				windowIndex = idx
+			}
+		}
 
 		// 接続数チェック（WebSocket upgrade の前に行う）
 		connID, err := s.connTracker.add(session, r.RemoteAddr)
@@ -137,8 +144,8 @@ func (s *Server) handleAttach() http.Handler {
 		}
 		defer conn.Close(websocket.StatusInternalError, "internal error")
 
-		// tmux attach
-		ptmx, cmd, err := s.tmux.Attach(session)
+		// tmux attach（ウィンドウインデックス指定付き）
+		ptmx, cmd, err := s.tmux.Attach(session, windowIndex)
 		if err != nil {
 			log.Printf("attach error: %v", err)
 			s.connTracker.remove(connID)

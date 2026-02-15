@@ -42,14 +42,14 @@ func TestManager_ListSessions(t *testing.T) {
 	}{
 		{
 			name:   "正常系: 複数セッションを返す",
-			output: []byte("main\t3\t1\t1704067200\ndev\t2\t0\t1704153600\n"),
+			output: []byte("main\t3\t1\t1704067200\t1704070800\ndev\t2\t0\t1704153600\t1704157200\n"),
 			err:    nil,
 			want: []Session{
-				{Name: "main", Windows: 3, Attached: true, Created: time.Unix(1704067200, 0)},
-				{Name: "dev", Windows: 2, Attached: false, Created: time.Unix(1704153600, 0)},
+				{Name: "main", Windows: 3, Attached: true, Created: time.Unix(1704067200, 0), Activity: time.Unix(1704070800, 0)},
+				{Name: "dev", Windows: 2, Attached: false, Created: time.Unix(1704153600, 0), Activity: time.Unix(1704157200, 0)},
 			},
 			wantErr:  false,
-			wantArgs: []string{"list-sessions", "-F", "#{session_name}\t#{session_windows}\t#{session_attached}\t#{session_created}"},
+			wantArgs: []string{"list-sessions", "-F", sessionFormat},
 		},
 		{
 			name:     "正常系: セッションが空の場合",
@@ -57,7 +57,7 @@ func TestManager_ListSessions(t *testing.T) {
 			err:      nil,
 			want:     []Session{},
 			wantErr:  false,
-			wantArgs: []string{"list-sessions", "-F", "#{session_name}\t#{session_windows}\t#{session_attached}\t#{session_created}"},
+			wantArgs: []string{"list-sessions", "-F", sessionFormat},
 		},
 		{
 			name:     "異常系: Executorがエラーを返す",
@@ -65,7 +65,7 @@ func TestManager_ListSessions(t *testing.T) {
 			err:      errors.New("tmux not found"),
 			want:     nil,
 			wantErr:  true,
-			wantArgs: []string{"list-sessions", "-F", "#{session_name}\t#{session_windows}\t#{session_attached}\t#{session_created}"},
+			wantArgs: []string{"list-sessions", "-F", sessionFormat},
 		},
 		{
 			name:     "異常系: パースエラー",
@@ -73,7 +73,7 @@ func TestManager_ListSessions(t *testing.T) {
 			err:      nil,
 			want:     nil,
 			wantErr:  true,
-			wantArgs: []string{"list-sessions", "-F", "#{session_name}\t#{session_windows}\t#{session_attached}\t#{session_created}"},
+			wantArgs: []string{"list-sessions", "-F", sessionFormat},
 		},
 	}
 
@@ -106,6 +106,9 @@ func TestManager_ListSessions(t *testing.T) {
 				}
 				if !got[i].Created.Equal(tt.want[i].Created) {
 					t.Errorf("session[%d].Created = %v, want %v", i, got[i].Created, tt.want[i].Created)
+				}
+				if !got[i].Activity.Equal(tt.want[i].Activity) {
+					t.Errorf("session[%d].Activity = %v, want %v", i, got[i].Activity, tt.want[i].Activity)
 				}
 			}
 		})
@@ -208,16 +211,17 @@ func TestManager_NewSession(t *testing.T) {
 		{
 			name:     "正常系: 新しいセッションを作成",
 			sessName: "myapp",
-			output:   []byte("myapp\t1\t0\t1704067200\n"),
+			output:   []byte("myapp\t1\t0\t1704067200\t1704067200\n"),
 			err:      nil,
 			want: &Session{
 				Name:     "myapp",
 				Windows:  1,
 				Attached: false,
 				Created:  time.Unix(1704067200, 0),
+				Activity: time.Unix(1704067200, 0),
 			},
 			wantErr:  false,
-			wantArgs: []string{"new-session", "-d", "-s", "myapp", "-P", "-F", "#{session_name}\t#{session_windows}\t#{session_attached}\t#{session_created}"},
+			wantArgs: []string{"new-session", "-d", "-s", "myapp", "-P", "-F", sessionFormat},
 		},
 		{
 			name:     "異常系: Executorがエラーを返す（重複セッション名など）",
@@ -226,7 +230,7 @@ func TestManager_NewSession(t *testing.T) {
 			err:      errors.New("duplicate session: existing"),
 			want:     nil,
 			wantErr:  true,
-			wantArgs: []string{"new-session", "-d", "-s", "existing", "-P", "-F", "#{session_name}\t#{session_windows}\t#{session_attached}\t#{session_created}"},
+			wantArgs: []string{"new-session", "-d", "-s", "existing", "-P", "-F", sessionFormat},
 		},
 		{
 			name:     "異常系: パースエラー（不正な出力）",
@@ -235,7 +239,7 @@ func TestManager_NewSession(t *testing.T) {
 			err:      nil,
 			want:     nil,
 			wantErr:  true,
-			wantArgs: []string{"new-session", "-d", "-s", "bad", "-P", "-F", "#{session_name}\t#{session_windows}\t#{session_attached}\t#{session_created}"},
+			wantArgs: []string{"new-session", "-d", "-s", "bad", "-P", "-F", sessionFormat},
 		},
 	}
 
@@ -267,6 +271,9 @@ func TestManager_NewSession(t *testing.T) {
 			}
 			if !got.Created.Equal(tt.want.Created) {
 				t.Errorf("session.Created = %v, want %v", got.Created, tt.want.Created)
+			}
+			if !got.Activity.Equal(tt.want.Activity) {
+				t.Errorf("session.Activity = %v, want %v", got.Activity, tt.want.Activity)
 			}
 		})
 	}

@@ -15,32 +15,35 @@ func TestParseSessions(t *testing.T) {
 	}{
 		{
 			name:  "複数セッションのパース",
-			input: []byte("main\t3\t1\t1704067200\ndev\t2\t0\t1704153600\n"),
+			input: []byte("main\t3\t1\t1704067200\t1704070800\ndev\t2\t0\t1704153600\t1704157200\n"),
 			want: []Session{
 				{
 					Name:     "main",
 					Windows:  3,
 					Attached: true,
 					Created:  time.Unix(1704067200, 0),
+					Activity: time.Unix(1704070800, 0),
 				},
 				{
 					Name:     "dev",
 					Windows:  2,
 					Attached: false,
 					Created:  time.Unix(1704153600, 0),
+					Activity: time.Unix(1704157200, 0),
 				},
 			},
 			wantErr: false,
 		},
 		{
 			name:  "単一セッションのパース",
-			input: []byte("work\t1\t0\t1704067200\n"),
+			input: []byte("work\t1\t0\t1704067200\t1704070800\n"),
 			want: []Session{
 				{
 					Name:     "work",
 					Windows:  1,
 					Attached: false,
 					Created:  time.Unix(1704067200, 0),
+					Activity: time.Unix(1704070800, 0),
 				},
 			},
 			wantErr: false,
@@ -59,46 +62,53 @@ func TestParseSessions(t *testing.T) {
 		},
 		{
 			name:    "フィールド数が不足している場合はエラー",
-			input:   []byte("main\t3\t1\n"),
+			input:   []byte("main\t3\t1\t1704067200\n"),
 			wantErr: true,
 		},
 		{
 			name:    "windowsが数値でない場合はエラー",
-			input:   []byte("main\tabc\t1\t1704067200\n"),
+			input:   []byte("main\tabc\t1\t1704067200\t1704070800\n"),
 			wantErr: true,
 		},
 		{
 			name:    "attachedが数値でない場合はエラー",
-			input:   []byte("main\t3\txyz\t1704067200\n"),
+			input:   []byte("main\t3\txyz\t1704067200\t1704070800\n"),
 			wantErr: true,
 		},
 		{
 			name:    "createdが数値でない場合はエラー",
-			input:   []byte("main\t3\t1\tnot-a-timestamp\n"),
+			input:   []byte("main\t3\t1\tnot-a-timestamp\t1704070800\n"),
+			wantErr: true,
+		},
+		{
+			name:    "activityが数値でない場合はエラー",
+			input:   []byte("main\t3\t1\t1704067200\tnot-a-timestamp\n"),
 			wantErr: true,
 		},
 		{
 			name:  "attached=0のパース",
-			input: []byte("test\t5\t0\t1704067200\n"),
+			input: []byte("test\t5\t0\t1704067200\t1704070800\n"),
 			want: []Session{
 				{
 					Name:     "test",
 					Windows:  5,
 					Attached: false,
 					Created:  time.Unix(1704067200, 0),
+					Activity: time.Unix(1704070800, 0),
 				},
 			},
 			wantErr: false,
 		},
 		{
 			name:  "末尾に改行がない場合もパースできる",
-			input: []byte("main\t3\t1\t1704067200"),
+			input: []byte("main\t3\t1\t1704067200\t1704070800"),
 			want: []Session{
 				{
 					Name:     "main",
 					Windows:  3,
 					Attached: true,
 					Created:  time.Unix(1704067200, 0),
+					Activity: time.Unix(1704070800, 0),
 				},
 			},
 			wantErr: false,
@@ -130,6 +140,9 @@ func TestParseSessions(t *testing.T) {
 				}
 				if !got[i].Created.Equal(tt.want[i].Created) {
 					t.Errorf("session[%d].Created = %v, want %v", i, got[i].Created, tt.want[i].Created)
+				}
+				if !got[i].Activity.Equal(tt.want[i].Activity) {
+					t.Errorf("session[%d].Activity = %v, want %v", i, got[i].Activity, tt.want[i].Activity)
 				}
 			}
 		})
@@ -261,6 +274,9 @@ func TestParseSessions_Testdata(t *testing.T) {
 		}
 		if !sessions[0].Created.Equal(time.Unix(1704067200, 0)) {
 			t.Errorf("sessions[0].Created = %v, want %v", sessions[0].Created, time.Unix(1704067200, 0))
+		}
+		if !sessions[0].Activity.Equal(time.Unix(1704070800, 0)) {
+			t.Errorf("sessions[0].Activity = %v, want %v", sessions[0].Activity, time.Unix(1704070800, 0))
 		}
 
 		// Verify last session

@@ -88,7 +88,7 @@ func (m *configurableMock) RenameWindow(session string, index int, name string) 
 	return m.renameWinErr
 }
 
-func (m *configurableMock) Attach(session string) (*os.File, *exec.Cmd, error) {
+func (m *configurableMock) Attach(session string, windowIndex int) (*os.File, *exec.Cmd, error) {
 	return nil, nil, nil
 }
 

@@ -20,7 +20,7 @@ type TmuxManager interface {
 	NewWindow(session, name string) (*tmux.Window, error)
 	KillWindow(session string, index int) error
 	RenameWindow(session string, index int, name string) error
-	Attach(session string) (*os.File, *exec.Cmd, error)
+	Attach(session string, windowIndex int) (*os.File, *exec.Cmd, error)
 }
 
 // Server は Palmux の HTTP サーバーを表す。
