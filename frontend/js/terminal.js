@@ -35,9 +35,13 @@ export class PalmuxTerminal {
 
     this._fitAddon = new FitAddon();
 
+    // localStorage からフォントサイズを復元（範囲: 8〜24px、デフォルト: 14px）
+    const savedSize = parseInt(localStorage.getItem('palmux-font-size'), 10);
+    const fontSize = (savedSize >= 8 && savedSize <= 24) ? savedSize : 14;
+
     this._term = new Terminal({
       cursorBlink: true,
-      fontSize: 14,
+      fontSize: fontSize,
       fontFamily: '"Cascadia Code", "Fira Code", "Source Code Pro", monospace',
       theme: {
         background: '#1a1a2e',
@@ -203,6 +207,46 @@ export class PalmuxTerminal {
     }
 
     return result;
+  }
+
+  /**
+   * フォントサイズを設定する（8〜24px にクランプ）。
+   * 変更後に fit() を呼んで再レイアウトし、localStorage に保存する。
+   * @param {number} size - 設定するフォントサイズ（px）
+   * @returns {number} クランプ後の実際のフォントサイズ
+   */
+  setFontSize(size) {
+    const clamped = Math.max(8, Math.min(24, size));
+    if (this._term) {
+      this._term.options.fontSize = clamped;
+      this.fit();
+    }
+    localStorage.setItem('palmux-font-size', clamped);
+    return clamped;
+  }
+
+  /**
+   * フォントサイズを 2px 大きくする。
+   * @returns {number} 変更後のフォントサイズ
+   */
+  increaseFontSize() {
+    return this.setFontSize((this._term?.options.fontSize || 14) + 2);
+  }
+
+  /**
+   * フォントサイズを 2px 小さくする。
+   * @returns {number} 変更後のフォントサイズ
+   */
+  decreaseFontSize() {
+    return this.setFontSize((this._term?.options.fontSize || 14) - 2);
+  }
+
+  /**
+   * 現在のフォントサイズを返す。
+   * @returns {number} フォントサイズ（px）
+   */
+  getFontSize() {
+    return this._term?.options.fontSize || 14;
   }
 
   /**

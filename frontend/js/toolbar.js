@@ -9,10 +9,10 @@
  * ボタン定義
  * @typedef {Object} ButtonDef
  * @property {string} label - 表示ラベル
- * @property {string} type - 'instant' | 'modifier' | 'toggle'
+ * @property {string} type - 'instant' | 'modifier' | 'toggle' | 'action'
  * @property {string} [key] - 送信するキーシーケンス（instant の場合）
  * @property {string} [modifier] - 修飾キー名（modifier の場合: 'ctrl' | 'alt'）
- * @property {string} [action] - トグルアクション名（toggle の場合: 'ime'）
+ * @property {string} [action] - アクション名（toggle: 'ime', action: 'font-decrease' | 'font-increase'）
  */
 
 /** @type {ButtonDef[]} */
@@ -28,6 +28,8 @@ const BUTTON_DEFS = [
   { label: 'PgUp', type: 'instant',  key: '\x1b[5~' },
   { label: 'PgDn', type: 'instant',  key: '\x1b[6~' },
   { label: '\u3042',    type: 'toggle',   action: 'ime' },
+  { label: 'A\u2212',  type: 'action',   action: 'font-decrease' },
+  { label: 'A+',  type: 'action',   action: 'font-increase' },
 ];
 
 /**
@@ -40,11 +42,15 @@ export class Toolbar {
    * @param {Object} options
    * @param {function(string): void} options.onSendKey - キーシーケンスを送信するコールバック
    * @param {function(): void} [options.onToggleIME] - IME トグルのコールバック
+   * @param {function(): void} [options.onFontDecrease] - フォントサイズ縮小のコールバック
+   * @param {function(): void} [options.onFontIncrease] - フォントサイズ拡大のコールバック
    */
   constructor(container, options) {
     this._container = container;
     this._onSendKey = options.onSendKey;
     this._onToggleIME = options.onToggleIME || null;
+    this._onFontDecrease = options.onFontDecrease || null;
+    this._onFontIncrease = options.onFontIncrease || null;
 
     /** @type {ModifierState} */
     this._ctrlState = 'off';
@@ -112,6 +118,16 @@ export class Toolbar {
         btn.addEventListener('touchend', (e) => {
           e.preventDefault();
           this._handleToggle(def.action);
+        });
+      } else if (def.type === 'action') {
+        btn.setAttribute('data-action', def.action);
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          this._handleAction(def.action);
+        });
+        btn.addEventListener('touchend', (e) => {
+          e.preventDefault();
+          this._handleAction(def.action);
         });
       }
 
@@ -189,6 +205,18 @@ export class Toolbar {
   _handleToggle(action) {
     if (action === 'ime' && this._onToggleIME) {
       this._onToggleIME();
+    }
+  }
+
+  /**
+   * アクションボタン（フォントサイズ調整等）をハンドルする。
+   * @param {string} action
+   */
+  _handleAction(action) {
+    if (action === 'font-decrease' && this._onFontDecrease) {
+      this._onFontDecrease();
+    } else if (action === 'font-increase' && this._onFontIncrease) {
+      this._onFontIncrease();
     }
   }
 
