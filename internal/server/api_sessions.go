@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/tjst-t/palmux/internal/tmux"
@@ -11,7 +12,9 @@ import (
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		log.Printf("writeJSON: failed to encode response: %v", err)
+	}
 }
 
 // writeError はエラーレスポンスを JSON 形式で書き込むヘルパー。

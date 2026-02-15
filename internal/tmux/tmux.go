@@ -1,9 +1,11 @@
 package tmux
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/creack/pty"
 )
@@ -20,10 +22,25 @@ const sessionFormat = "#{session_name}\t#{session_windows}\t#{session_attached}\
 // windowFormat は list-windows / new-window の出力フォーマット。
 const windowFormat = "#{window_index}\t#{window_name}\t#{window_active}"
 
+// isNoServerError は tmux サーバーが起動していない場合のエラーを判定する。
+// tmux サーバー未起動時は exit code 1 で "no server running" を含むメッセージを返す。
+func isNoServerError(err error) bool {
+	var exitErr *exec.ExitError
+	if ok := errors.As(err, &exitErr); ok {
+		stderr := string(exitErr.Stderr)
+		return strings.Contains(stderr, "no server running")
+	}
+	return false
+}
+
 // ListSessions は tmux のセッション一覧を返す。
+// tmux サーバーが起動していない場合は空のスライスを返す。
 func (m *Manager) ListSessions() ([]Session, error) {
 	out, err := m.Exec.Run("list-sessions", "-F", sessionFormat)
 	if err != nil {
+		if isNoServerError(err) {
+			return []Session{}, nil
+		}
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
 

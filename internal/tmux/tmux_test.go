@@ -3,6 +3,7 @@ package tmux
 import (
 	"errors"
 	"fmt"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -644,6 +645,25 @@ func TestManager_RenameWindow_TargetFormat(t *testing.T) {
 			wantArgs := []string{"rename-window", "-t", tt.wantTarget, tt.newName}
 			assertArgs(t, mock, wantArgs)
 		})
+	}
+}
+
+func TestManager_ListSessions_NoServerRunning(t *testing.T) {
+	// tmux サーバーが起動していない場合、exec.ExitError (exit status 1) + stderr "no server running" を返す。
+	// この場合は空のセッション一覧を返すべき。
+	exitErr := &exec.ExitError{
+		ProcessState: nil,
+		Stderr:       []byte("no server running on /tmp/tmux-1000/default"),
+	}
+	mock := &mockExecutor{output: nil, err: exitErr}
+	m := &Manager{Exec: mock}
+
+	got, err := m.ListSessions()
+	if err != nil {
+		t.Errorf("ListSessions() should return empty list for no server, got error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("ListSessions() should return empty list, got %d sessions", len(got))
 	}
 }
 

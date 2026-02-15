@@ -89,43 +89,26 @@ export class Toolbar {
       btn.setAttribute('data-type', def.type);
 
       if (def.type === 'instant') {
-        btn.addEventListener('click', (e) => {
-          e.preventDefault();
-          this._handleInstantKey(def.key);
-        });
-        // タッチでの遅延を防ぐ
-        btn.addEventListener('touchend', (e) => {
+        this._addButtonHandler(btn, (e) => {
           e.preventDefault();
           this._handleInstantKey(def.key);
         });
       } else if (def.type === 'modifier') {
         btn.setAttribute('data-modifier', def.modifier);
-        btn.addEventListener('click', (e) => {
-          e.preventDefault();
-          this._handleModifierTap(def.modifier);
-        });
-        btn.addEventListener('touchend', (e) => {
+        this._addButtonHandler(btn, (e) => {
           e.preventDefault();
           this._handleModifierTap(def.modifier);
         });
         this._buttons[def.modifier] = btn;
       } else if (def.type === 'toggle') {
         btn.setAttribute('data-action', def.action);
-        btn.addEventListener('click', (e) => {
-          e.preventDefault();
-          this._handleToggle(def.action);
-        });
-        btn.addEventListener('touchend', (e) => {
+        this._addButtonHandler(btn, (e) => {
           e.preventDefault();
           this._handleToggle(def.action);
         });
       } else if (def.type === 'action') {
         btn.setAttribute('data-action', def.action);
-        btn.addEventListener('click', (e) => {
-          e.preventDefault();
-          this._handleAction(def.action);
-        });
-        btn.addEventListener('touchend', (e) => {
+        this._addButtonHandler(btn, (e) => {
           e.preventDefault();
           this._handleAction(def.action);
         });
@@ -136,6 +119,27 @@ export class Toolbar {
 
     this._container.appendChild(row);
     this._updateButtonStates();
+  }
+
+  /**
+   * ボタンにイベントハンドラを登録する。
+   * touchend で処理した場合は後続の click を抑制し、モバイルでの二重発火を防ぐ。
+   * @param {HTMLButtonElement} btn
+   * @param {function(Event): void} handler
+   */
+  _addButtonHandler(btn, handler) {
+    let touchHandled = false;
+    btn.addEventListener('touchend', (e) => {
+      touchHandled = true;
+      handler(e);
+    });
+    btn.addEventListener('click', (e) => {
+      if (touchHandled) {
+        touchHandled = false;
+        return;
+      }
+      handler(e);
+    });
   }
 
   /**
