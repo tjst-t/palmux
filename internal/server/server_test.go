@@ -4,6 +4,8 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -24,6 +26,9 @@ func (m *mockTmuxManager) NewWindow(session, name string) (*tmux.Window, error) 
 	return &tmux.Window{}, nil
 }
 func (m *mockTmuxManager) KillWindow(session string, index int) error { return nil }
+func (m *mockTmuxManager) Attach(session string) (*os.File, *exec.Cmd, error) {
+	return nil, nil, nil
+}
 
 func TestNormalizeBasePath(t *testing.T) {
 	tests := []struct {
@@ -232,11 +237,11 @@ func TestServer_RoutingWithBasePathRoot(t *testing.T) {
 			wantStatus: http.StatusNoContent,
 		},
 		{
-			name:       "GET /api/sessions/main/windows/0/attach: 認証あり → 200",
+			name:       "GET /api/sessions/main/windows/0/attach: 認証あり → 426 (WebSocket Upgrade Required)",
 			method:     http.MethodGet,
 			path:       "/api/sessions/main/windows/0/attach",
 			withToken:  true,
-			wantStatus: http.StatusOK,
+			wantStatus: http.StatusUpgradeRequired,
 		},
 		{
 			name:       "GET /: 静的ファイル → 200 (認証不要)",
@@ -326,11 +331,11 @@ func TestServer_RoutingWithBasePathPalmux(t *testing.T) {
 			wantStatus: http.StatusNoContent,
 		},
 		{
-			name:       "GET /palmux/api/sessions/main/windows/0/attach: 認証あり → 200",
+			name:       "GET /palmux/api/sessions/main/windows/0/attach: 認証あり → 426 (WebSocket Upgrade Required)",
 			method:     http.MethodGet,
 			path:       "/palmux/api/sessions/main/windows/0/attach",
 			withToken:  true,
-			wantStatus: http.StatusOK,
+			wantStatus: http.StatusUpgradeRequired,
 		},
 		{
 			name:       "GET /palmux/: 静的ファイル → 200 (認証不要)",
