@@ -35,35 +35,6 @@ html, body {
   -webkit-user-select: none;
 }
 
-#back-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 44px;
-  min-height: 44px;
-  margin-right: 4px;
-  background: none;
-  border: none;
-  color: #7ec8e3;
-  font-size: 18px;
-  cursor: pointer;
-  border-radius: 4px;
-  transition: background 0.15s;
-  -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
-}
-
-#back-btn:hover {
-  background: rgba(126, 200, 227, 0.15);
-}
-
-#back-btn:active {
-  background: rgba(126, 200, 227, 0.25);
-}
-
-#back-btn.hidden {
-  display: none;
-}
 
 #header-title {
   flex: 1;
@@ -306,6 +277,42 @@ html, body {
   display: none;
 }
 
+/* Font Size Controls (Header) */
+.font-size-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.font-size-controls.hidden {
+  display: none;
+}
+
+.font-size-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  min-height: 36px;
+  background: none;
+  border: none;
+  color: #7ec8e3;
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.font-size-btn:hover {
+  background: rgba(126, 200, 227, 0.15);
+}
+
+.font-size-btn:active {
+  background: rgba(126, 200, 227, 0.25);
+}
+
 /* IME Input Bar */
 .ime-input-bar {
   display: flex;
@@ -404,25 +411,58 @@ html, body {
   transition: background 0.1s, border-color 0.1s, color 0.1s;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
+  position: relative;
 }
 
 .toolbar-btn:active {
   background: #2a2a4a;
 }
 
-/* Modifier button: oneshot (single tap - highlighted) */
+/* Modifier button: oneshot (tap - highlighted) */
 .toolbar-btn--oneshot {
   background: #1e3a5f;
-  border-color: #7ec8e3;
-  color: #7ec8e3;
+  border-color: #80DEEA;
+  color: #80DEEA;
 }
 
-/* Modifier button: locked (double tap - strong highlight) */
+/* Modifier button: locked (long-press - strong highlight) */
 .toolbar-btn--locked {
-  background: #7ec8e3;
-  border-color: #7ec8e3;
+  background: #80DEEA;
+  border-color: #80DEEA;
   color: #0f0f23;
   font-weight: 700;
+}
+
+/* Repeat button pressed state */
+.toolbar-btn--pressed {
+  background: #2a2a4a;
+}
+
+/* Popup key element (up swipe alternate key) */
+.toolbar-btn-popup {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 36px;
+  min-height: 36px;
+  padding: 6px 10px;
+  background: #1a1a2e;
+  border: 1px solid #80DEEA;
+  border-radius: 6px;
+  color: #80DEEA;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+  line-height: 24px;
+  pointer-events: none;
+  z-index: 50;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.toolbar-btn-popup--visible {
+  display: block;
 }
 
 /* Drawer Overlay */
@@ -478,6 +518,66 @@ html, body {
   font-size: 16px;
   font-weight: 600;
   color: #e0e0e0;
+}
+
+/* Drawer Sort Toggle */
+.drawer-sort-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.drawer-sort-label {
+  font-size: 11px;
+  color: #666;
+  transition: color 0.2s;
+}
+
+.drawer-sort-label--active {
+  color: #7ec8e3;
+}
+
+.drawer-sort-switch {
+  position: relative;
+  width: 32px;
+  height: 18px;
+}
+
+.drawer-sort-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.drawer-sort-slider {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #2a2a4a;
+  border-radius: 9px;
+  transition: background 0.2s;
+}
+
+.drawer-sort-slider::before {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  left: 2px;
+  bottom: 2px;
+  background: #7ec8e3;
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+
+.drawer-sort-switch input:checked + .drawer-sort-slider::before {
+  transform: translateX(14px);
 }
 
 .drawer-content {
@@ -537,7 +637,6 @@ html, body {
 .drawer-window-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   padding: 10px 16px 10px 36px;
   min-height: 44px;
   cursor: pointer;
@@ -560,6 +659,7 @@ html, body {
 }
 
 .drawer-window-name {
+  flex: 1;
   font-size: 14px;
   color: #e0e0e0;
   font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
@@ -597,7 +697,8 @@ html, body {
   color: #4caf50;
   font-size: 10px;
   flex-shrink: 0;
-  margin-left: 8px;
+  width: 18px;
+  text-align: center;
 }
 
 /* Drawer New Window Button */
@@ -922,6 +1023,92 @@ html, body {
   background: #d32f2f;
   color: #fff;
   box-shadow: 0 4px 16px rgba(211, 47, 47, 0.3);
+}
+
+/* Context Menu for window operations */
+.drawer-context-menu-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.drawer-context-menu-overlay--visible {
+  opacity: 1;
+}
+
+.drawer-context-menu {
+  background: #1a1a2e;
+  border: 1px solid #2a2a4a;
+  border-radius: 12px;
+  min-width: 200px;
+  max-width: 280px;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.drawer-context-menu-title {
+  padding: 14px 16px;
+  font-size: 13px;
+  color: #8888aa;
+  border-bottom: 1px solid #2a2a4a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drawer-context-menu-item {
+  display: block;
+  width: 100%;
+  padding: 14px 16px;
+  min-height: 44px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid rgba(42, 42, 74, 0.3);
+  color: #e0e0e0;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.drawer-context-menu-item:last-child {
+  border-bottom: none;
+}
+
+.drawer-context-menu-item:hover {
+  background: rgba(126, 200, 227, 0.1);
+}
+
+.drawer-context-menu-item:active {
+  background: rgba(126, 200, 227, 0.2);
+}
+
+.drawer-context-menu-item--danger {
+  color: #e57373;
+}
+
+.drawer-context-menu-item--danger:hover {
+  background: rgba(229, 115, 115, 0.1);
+}
+
+.drawer-context-menu-item:disabled {
+  color: #555;
+  cursor: not-allowed;
+}
+
+.drawer-context-menu-item:disabled:hover {
+  background: none;
 }
 
 /* Utility */
