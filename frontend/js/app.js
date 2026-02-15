@@ -8,6 +8,7 @@ import { Toolbar } from './toolbar.js';
 import { IMEInput } from './ime-input.js';
 import { Drawer } from './drawer.js';
 import { TouchHandler } from './touch.js';
+import { ConnectionManager } from './connection.js';
 
 /** @type {PalmuxTerminal|null} */
 let terminal = null;
@@ -23,6 +24,9 @@ let drawer = null;
 
 /** @type {import('./touch.js').TouchHandler|null} */
 let touchHandler = null;
+
+/** @type {ConnectionManager|null} */
+let connectionManager = null;
 
 /** 現在接続中のセッション名 */
 let currentSession = null;
@@ -59,6 +63,12 @@ async function showSessionList() {
     toolbar = null;
   }
 
+  // ConnectionManager のクリーンアップ（自動再接続を止める）
+  if (connectionManager) {
+    connectionManager.disconnect();
+    connectionManager = null;
+  }
+
   // ターミナルが接続中なら切断
   if (terminal) {
     terminal.disconnect();
@@ -66,6 +76,18 @@ async function showSessionList() {
   }
   currentSession = null;
   currentWindowIndex = null;
+
+  // 接続状態インジケーターを非表示
+  const connectionStatusEl = document.getElementById('connection-status');
+  if (connectionStatusEl) {
+    connectionStatusEl.classList.add('hidden');
+  }
+
+  // 再接続オーバーレイを非表示
+  const reconnectOverlayEl = document.getElementById('reconnect-overlay');
+  if (reconnectOverlayEl) {
+    reconnectOverlayEl.classList.add('hidden');
+  }
 
   // UI 切り替え
   sessionListEl.classList.remove('hidden');
@@ -200,6 +222,10 @@ function connectToWindow(sessionName, windowIndex) {
     toolbar.dispose();
     toolbar = null;
   }
+  if (connectionManager) {
+    connectionManager.disconnect();
+    connectionManager = null;
+  }
   if (terminal) {
     terminal.disconnect();
     terminal = null;
@@ -282,12 +308,67 @@ function connectToWindow(sessionName, windowIndex) {
     },
   });
 
-  const wsUrl = getWebSocketURL(sessionName, windowIndex);
-  terminal.connect(wsUrl, () => {
-    // 切断時はセッション一覧に戻る
-    console.log('WebSocket disconnected');
+  // ConnectionManager を作成して接続を管理
+  connectionManager = new ConnectionManager({
+    getWSUrl: () => getWebSocketURL(currentSession, currentWindowIndex),
+    onStateChange: (state) => updateConnectionUI(state),
+    terminal: terminal,
   });
+  connectionManager.connect();
   terminal.focus();
+}
+
+/**
+ * 接続状態に応じて UI を更新する。
+ * @param {string} state - 'connected' | 'connecting' | 'disconnected'
+ */
+function updateConnectionUI(state) {
+  const connectionStatusEl = document.getElementById('connection-status');
+  const connectionDotEl = connectionStatusEl?.querySelector('.connection-dot');
+  const connectionTextEl = connectionStatusEl?.querySelector('.connection-text');
+  const reconnectOverlayEl = document.getElementById('reconnect-overlay');
+
+  if (!connectionStatusEl || !connectionDotEl || !connectionTextEl) return;
+
+  // インジケーターを表示
+  connectionStatusEl.classList.remove('hidden');
+
+  // ドットのクラスをリセット
+  connectionDotEl.classList.remove(
+    'connection-dot--connected',
+    'connection-dot--connecting',
+    'connection-dot--disconnected'
+  );
+
+  // disconnected 状態のクリックハンドラー用クラスをリセット
+  connectionStatusEl.classList.remove('connection-status--disconnected');
+
+  switch (state) {
+    case 'connected':
+      connectionDotEl.classList.add('connection-dot--connected');
+      connectionTextEl.textContent = '';
+      if (reconnectOverlayEl) {
+        reconnectOverlayEl.classList.add('hidden');
+      }
+      break;
+
+    case 'connecting':
+      connectionDotEl.classList.add('connection-dot--connecting');
+      connectionTextEl.textContent = 'Reconnecting...';
+      if (reconnectOverlayEl) {
+        reconnectOverlayEl.classList.remove('hidden');
+      }
+      break;
+
+    case 'disconnected':
+      connectionDotEl.classList.add('connection-dot--disconnected');
+      connectionTextEl.textContent = 'Disconnected';
+      connectionStatusEl.classList.add('connection-status--disconnected');
+      if (reconnectOverlayEl) {
+        reconnectOverlayEl.classList.add('hidden');
+      }
+      break;
+  }
 }
 
 /**
@@ -421,6 +502,16 @@ document.addEventListener('DOMContentLoaded', () => {
             terminal.fit();
           });
         }
+      }
+    });
+  }
+
+  // 接続状態インジケーターのクリック（手動再接続）
+  const connectionStatusEl = document.getElementById('connection-status');
+  if (connectionStatusEl) {
+    connectionStatusEl.addEventListener('click', () => {
+      if (connectionManager && connectionManager.state !== 'connected') {
+        connectionManager.reconnectNow();
       }
     });
   }

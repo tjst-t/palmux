@@ -19,6 +19,8 @@ export class PalmuxTerminal {
     this._fitAddon = null;
     this._resizeObserver = null;
     this._onDisconnect = null;
+    /** @type {function|null} 接続成功時のコールバック */
+    this._onConnect = null;
     /** @type {import('./toolbar.js').Toolbar|null} */
     this._toolbar = null;
     /** @type {boolean} IME モード有効時は onData ハンドラからの入力送信を抑制する */
@@ -86,6 +88,9 @@ export class PalmuxTerminal {
     this._ws.onopen = () => {
       // 接続成功時にリサイズ情報を送信
       this._sendResize();
+      if (this._onConnect) {
+        this._onConnect();
+      }
     };
 
     this._ws.onmessage = (event) => {
@@ -274,6 +279,15 @@ export class PalmuxTerminal {
    */
   setIMEMode(enabled) {
     this._imeMode = enabled;
+  }
+
+  /**
+   * 接続成功時のコールバックを設定する。
+   * ConnectionManager が接続成功を検知するために使用する。
+   * @param {function|null} callback - 接続成功時に呼ばれるコールバック
+   */
+  setOnConnect(callback) {
+    this._onConnect = callback;
   }
 
   /**
