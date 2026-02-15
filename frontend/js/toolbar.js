@@ -1,4 +1,4 @@
-// toolbar.js - 修飾キーツールバー（ワンショット/ロックモード対応）
+// toolbar.js - 修飾キーツールバー（Termux 互換キーボードインターフェース）
 
 /**
  * 修飾キーの状態
@@ -9,10 +9,14 @@
  * ボタン定義
  * @typedef {Object} ButtonDef
  * @property {string} label - 表示ラベル
- * @property {string} type - 'instant' | 'modifier' | 'toggle' | 'action'
+ * @property {string} type - 'instant' | 'modifier' | 'toggle'
  * @property {string} [key] - 送信するキーシーケンス（instant の場合）
  * @property {string} [modifier] - 修飾キー名（modifier の場合: 'ctrl' | 'alt'）
- * @property {string} [action] - アクション名（toggle: 'ime', action: 'font-decrease' | 'font-increase'）
+ * @property {string} [action] - アクション名（toggle: 'ime'）
+ * @property {boolean} [repeat] - キーリピート対応（矢印キー、Backspace）
+ * @property {Object} [popup] - スワイプアップで表示する代替キー
+ * @property {string} [popup.label] - ポップアップの表示ラベル
+ * @property {string} [popup.key] - ポップアップで送信するキー
  */
 
 /** @type {ButtonDef[]} */
@@ -21,20 +25,19 @@ const BUTTON_DEFS = [
   { label: 'Tab',  type: 'instant',  key: '\t' },
   { label: 'Ctrl', type: 'modifier', modifier: 'ctrl' },
   { label: 'Alt',  type: 'modifier', modifier: 'alt' },
-  { label: '\u2191',    type: 'instant',  key: '\x1b[A' },
-  { label: '\u2193',    type: 'instant',  key: '\x1b[B' },
-  { label: '\u2190',    type: 'instant',  key: '\x1b[D' },
-  { label: '\u2192',    type: 'instant',  key: '\x1b[C' },
-  { label: 'PgUp', type: 'instant',  key: '\x1b[5~' },
-  { label: 'PgDn', type: 'instant',  key: '\x1b[6~' },
+  { label: '\u2191',    type: 'instant',  key: '\x1b[A', repeat: true },
+  { label: '\u2193',    type: 'instant',  key: '\x1b[B', repeat: true },
+  { label: '\u2190',    type: 'instant',  key: '\x1b[D', repeat: true },
+  { label: '\u2192',    type: 'instant',  key: '\x1b[C', repeat: true },
+  { label: '\u232B',    type: 'instant',  key: '\x7f',   repeat: true },
+  { label: '/',   type: 'instant',  key: '/',  popup: { label: '|', key: '|' } },
+  { label: '-',   type: 'instant',  key: '-',  popup: { label: '_', key: '_' } },
   { label: '\u3042',    type: 'toggle',   action: 'ime' },
-  { label: 'A\u2212',  type: 'action',   action: 'font-decrease' },
-  { label: 'A+',  type: 'action',   action: 'font-increase' },
 ];
 
 /**
  * Toolbar は修飾キーツールバーコンポーネント。
- * ワンショット（タップ1回）とロック（ダブルタップ）の2モードに対応する。
+ * ワンショット（タップ）とロック（長押し）の2モードに対応する（Termux スタイル）。
  */
 export class Toolbar {
   /**
@@ -42,15 +45,11 @@ export class Toolbar {
    * @param {Object} options
    * @param {function(string): void} options.onSendKey - キーシーケンスを送信するコールバック
    * @param {function(): void} [options.onToggleIME] - IME トグルのコールバック
-   * @param {function(): void} [options.onFontDecrease] - フォントサイズ縮小のコールバック
-   * @param {function(): void} [options.onFontIncrease] - フォントサイズ拡大のコールバック
    */
   constructor(container, options) {
     this._container = container;
     this._onSendKey = options.onSendKey;
     this._onToggleIME = options.onToggleIME || null;
-    this._onFontDecrease = options.onFontDecrease || null;
-    this._onFontIncrease = options.onFontIncrease || null;
 
     /** @type {ModifierState} */
     this._ctrlState = 'off';
@@ -63,11 +62,26 @@ export class Toolbar {
     /** @type {Object<string, HTMLButtonElement>} */
     this._buttons = {};
 
-    /** @type {Object<string, number|null>} ダブルタップ検出用タイマー */
-    this._tapTimers = { ctrl: null, alt: null };
+    /** @type {number|null} 長押しロック検出用タイマー */
+    this._longPressTimer = null;
 
-    /** @type {number} ダブルタップ判定の閾値（ミリ秒） */
-    this._doubleTapThreshold = 300;
+    /** @type {number} 長押し判定の閾値（ミリ秒） */
+    this._longPressThreshold = 400;
+
+    /** @type {boolean} 長押しが発火したかどうか */
+    this._longPressTriggered = false;
+
+    /** @type {number|null} キーリピート初回遅延タイマー */
+    this._repeatTimer = null;
+
+    /** @type {number|null} キーリピートインターバル */
+    this._repeatInterval = null;
+
+    /** @type {number} キーリピート開始までの遅延（ミリ秒） */
+    this._repeatInitialDelay = 400;
+
+    /** @type {number} キーリピートの間隔（ミリ秒） */
+    this._repeatIntervalMs = 80;
 
     this._render();
   }
@@ -88,29 +102,29 @@ export class Toolbar {
       btn.textContent = def.label;
       btn.setAttribute('data-type', def.type);
 
-      if (def.type === 'instant') {
+      if (def.type === 'instant' && def.repeat) {
+        // キーリピート対応ボタン（矢印キー、Backspace）
+        this._addRepeatableButtonHandler(btn, def.key);
+      } else if (def.type === 'instant' && def.popup) {
+        // ポップアップ対応ボタン（/, -）
+        this._addPopupButtonHandler(btn, def.key, def.popup);
+      } else if (def.type === 'instant') {
+        // 通常の即時送信ボタン（Esc, Tab）
         this._addButtonHandler(btn, (e) => {
           e.preventDefault();
           this._handleInstantKey(def.key);
         });
       } else if (def.type === 'modifier') {
+        // 修飾キーボタン（Ctrl, Alt）- 長押しロック対応
         btn.setAttribute('data-modifier', def.modifier);
-        this._addButtonHandler(btn, (e) => {
-          e.preventDefault();
-          this._handleModifierTap(def.modifier);
-        });
+        this._addModifierButtonHandler(btn, def.modifier);
         this._buttons[def.modifier] = btn;
       } else if (def.type === 'toggle') {
+        // トグルボタン（IME）
         btn.setAttribute('data-action', def.action);
         this._addButtonHandler(btn, (e) => {
           e.preventDefault();
           this._handleToggle(def.action);
-        });
-      } else if (def.type === 'action') {
-        btn.setAttribute('data-action', def.action);
-        this._addButtonHandler(btn, (e) => {
-          e.preventDefault();
-          this._handleAction(def.action);
         });
       }
 
@@ -143,7 +157,237 @@ export class Toolbar {
   }
 
   /**
-   * 即時送信キー（Esc, Tab, 矢印, PgUp/PgDn）をハンドルする。
+   * 修飾キーボタン（Ctrl/Alt）のイベントハンドラを登録する。
+   * タップ: off <-> oneshot トグル
+   * 長押し（400ms+）: locked 状態に遷移
+   * @param {HTMLButtonElement} btn
+   * @param {'ctrl' | 'alt'} modifier
+   */
+  _addModifierButtonHandler(btn, modifier) {
+    let touchHandled = false;
+
+    const startPress = () => {
+      this._longPressTriggered = false;
+      this._longPressTimer = setTimeout(() => {
+        this._longPressTriggered = true;
+        const stateKey = modifier === 'ctrl' ? '_ctrlState' : '_altState';
+        this[stateKey] = 'locked';
+        this._updateButtonStates();
+      }, this._longPressThreshold);
+    };
+
+    const endPress = (e) => {
+      e.preventDefault();
+      if (this._longPressTimer !== null) {
+        clearTimeout(this._longPressTimer);
+        this._longPressTimer = null;
+      }
+      if (!this._longPressTriggered) {
+        // 短いタップ: off <-> oneshot トグル
+        this._handleModifierTap(modifier);
+      }
+      this._longPressTriggered = false;
+    };
+
+    btn.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      touchHandled = true;
+      startPress();
+    }, { passive: false });
+
+    btn.addEventListener('touchend', (e) => {
+      endPress(e);
+    });
+
+    btn.addEventListener('touchcancel', () => {
+      if (this._longPressTimer !== null) {
+        clearTimeout(this._longPressTimer);
+        this._longPressTimer = null;
+      }
+      this._longPressTriggered = false;
+    });
+
+    btn.addEventListener('mousedown', (e) => {
+      if (touchHandled) {
+        touchHandled = false;
+        return;
+      }
+      e.preventDefault();
+      startPress();
+    });
+
+    btn.addEventListener('mouseup', (e) => {
+      if (touchHandled) {
+        return;
+      }
+      endPress(e);
+    });
+
+    btn.addEventListener('mouseleave', () => {
+      if (this._longPressTimer !== null) {
+        clearTimeout(this._longPressTimer);
+        this._longPressTimer = null;
+      }
+    });
+  }
+
+  /**
+   * キーリピート対応ボタン（矢印キー、Backspace）のイベントハンドラを登録する。
+   * 押下: 即座に1回発火 -> 400ms後から80msごとにリピート
+   * @param {HTMLButtonElement} btn
+   * @param {string} key - 送信するキーシーケンス
+   */
+  _addRepeatableButtonHandler(btn, key) {
+    let touchHandled = false;
+
+    const startRepeat = () => {
+      // 前回のリピートタイマーをクリア（二重起動防止）
+      this._clearRepeat();
+      // 即座に1回発火
+      this._handleInstantKey(key);
+      btn.classList.add('toolbar-btn--pressed');
+
+      // 初回遅延後にリピート開始
+      this._repeatTimer = setTimeout(() => {
+        this._repeatInterval = setInterval(() => {
+          this._handleInstantKey(key);
+        }, this._repeatIntervalMs);
+      }, this._repeatInitialDelay);
+    };
+
+    const stopRepeat = () => {
+      this._clearRepeat();
+      btn.classList.remove('toolbar-btn--pressed');
+    };
+
+    btn.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      touchHandled = true;
+      startRepeat();
+    }, { passive: false });
+
+    btn.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      stopRepeat();
+    });
+
+    btn.addEventListener('touchcancel', () => {
+      stopRepeat();
+    });
+
+    btn.addEventListener('mousedown', (e) => {
+      if (touchHandled) {
+        touchHandled = false;
+        return;
+      }
+      e.preventDefault();
+      startRepeat();
+    });
+
+    btn.addEventListener('mouseup', () => {
+      if (touchHandled) {
+        return;
+      }
+      stopRepeat();
+    });
+
+    btn.addEventListener('mouseleave', () => {
+      if (touchHandled) {
+        return;
+      }
+      stopRepeat();
+    });
+  }
+
+  /**
+   * ポップアップ対応ボタン（/, -）のイベントハンドラを登録する。
+   * タッチ: 押して上にスワイプするとポップアップ表示、離すとポップアップのキーを送信
+   * デスクトップ: クリックで通常キーを送信（ポップアップなし）
+   * @param {HTMLButtonElement} btn
+   * @param {string} key - 通常の送信キー
+   * @param {Object} popup - ポップアップ定義
+   * @param {string} popup.label - ポップアップの表示ラベル
+   * @param {string} popup.key - ポップアップで送信するキー
+   */
+  _addPopupButtonHandler(btn, key, popup) {
+    // ポップアップ DOM 要素を生成
+    const popupEl = document.createElement('span');
+    popupEl.className = 'toolbar-btn-popup';
+    popupEl.textContent = popup.label;
+    btn.appendChild(popupEl);
+
+    let touchHandled = false;
+    let popupVisible = false;
+
+    btn.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      touchHandled = true;
+      popupVisible = false;
+    }, { passive: false });
+
+    btn.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      const touch = e.touches[0];
+      const btnRect = btn.getBoundingClientRect();
+
+      if (touch.clientY < btnRect.top) {
+        // 指がボタンの上端より上に移動した
+        if (!popupVisible) {
+          popupEl.classList.add('toolbar-btn-popup--visible');
+          popupVisible = true;
+        }
+      } else {
+        // 指がボタン内に戻った
+        if (popupVisible) {
+          popupEl.classList.remove('toolbar-btn-popup--visible');
+          popupVisible = false;
+        }
+      }
+    }, { passive: false });
+
+    btn.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      if (popupVisible) {
+        popupEl.classList.remove('toolbar-btn-popup--visible');
+        popupVisible = false;
+        this._handleInstantKey(popup.key);
+      } else {
+        this._handleInstantKey(key);
+      }
+    });
+
+    btn.addEventListener('touchcancel', () => {
+      popupEl.classList.remove('toolbar-btn-popup--visible');
+      popupVisible = false;
+    });
+
+    // デスクトップ: クリックで通常キーを送信
+    btn.addEventListener('click', (e) => {
+      if (touchHandled) {
+        touchHandled = false;
+        return;
+      }
+      e.preventDefault();
+      this._handleInstantKey(key);
+    });
+  }
+
+  /**
+   * キーリピートのタイマーとインターバルをクリアする。
+   */
+  _clearRepeat() {
+    if (this._repeatTimer !== null) {
+      clearTimeout(this._repeatTimer);
+      this._repeatTimer = null;
+    }
+    if (this._repeatInterval !== null) {
+      clearInterval(this._repeatInterval);
+      this._repeatInterval = null;
+    }
+  }
+
+  /**
+   * 即時送信キー（Esc, Tab, 矢印, Backspace 等）をハンドルする。
    * 現在の修飾キー状態を適用してから送信する。
    * @param {string} key - エスケープシーケンス
    */
@@ -160,46 +404,20 @@ export class Toolbar {
 
   /**
    * 修飾キー（Ctrl/Alt）のタップをハンドルする。
-   * シングルタップ: off -> oneshot, oneshot -> off, locked -> off
-   * ダブルタップ: off/oneshot -> locked
+   * タップ: off -> oneshot, oneshot -> off, locked -> off
    * @param {'ctrl' | 'alt'} modifier
    */
   _handleModifierTap(modifier) {
     const stateKey = modifier === 'ctrl' ? '_ctrlState' : '_altState';
     const currentState = this[stateKey];
 
-    // ダブルタップ検出
-    if (this._tapTimers[modifier] !== null) {
-      // ダブルタップ: ロックモードに
-      clearTimeout(this._tapTimers[modifier]);
-      this._tapTimers[modifier] = null;
-      this[stateKey] = 'locked';
-      this._updateButtonStates();
-      return;
-    }
-
-    // シングルタップ: 遷移をスケジュール
     if (currentState === 'off') {
-      // off -> oneshot（ただしダブルタップの可能性があるので少し待つ）
       this[stateKey] = 'oneshot';
-      this._updateButtonStates();
-      this._tapTimers[modifier] = setTimeout(() => {
-        this._tapTimers[modifier] = null;
-        // タイマー消費時は既に oneshot になっているのでそのまま
-      }, this._doubleTapThreshold);
-    } else if (currentState === 'oneshot') {
-      // oneshot -> off
+    } else {
+      // oneshot -> off, locked -> off
       this[stateKey] = 'off';
-      this._updateButtonStates();
-      // ダブルタップ検出のためタイマーセット
-      this._tapTimers[modifier] = setTimeout(() => {
-        this._tapTimers[modifier] = null;
-      }, this._doubleTapThreshold);
-    } else if (currentState === 'locked') {
-      // locked -> off
-      this[stateKey] = 'off';
-      this._updateButtonStates();
     }
+    this._updateButtonStates();
   }
 
   /**
@@ -209,18 +427,6 @@ export class Toolbar {
   _handleToggle(action) {
     if (action === 'ime' && this._onToggleIME) {
       this._onToggleIME();
-    }
-  }
-
-  /**
-   * アクションボタン（フォントサイズ調整等）をハンドルする。
-   * @param {string} action
-   */
-  _handleAction(action) {
-    if (action === 'font-decrease' && this._onFontDecrease) {
-      this._onFontDecrease();
-    } else if (action === 'font-increase' && this._onFontIncrease) {
-      this._onFontIncrease();
     }
   }
 
@@ -311,11 +517,10 @@ export class Toolbar {
   dispose() {
     this._container.innerHTML = '';
     this._buttons = {};
-    if (this._tapTimers.ctrl !== null) {
-      clearTimeout(this._tapTimers.ctrl);
+    if (this._longPressTimer !== null) {
+      clearTimeout(this._longPressTimer);
+      this._longPressTimer = null;
     }
-    if (this._tapTimers.alt !== null) {
-      clearTimeout(this._tapTimers.alt);
-    }
+    this._clearRepeat();
   }
 }
