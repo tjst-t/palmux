@@ -63,7 +63,13 @@ func NewServer(opts Options) *Server {
 
 	// 静的ファイル配信
 	if opts.Frontend != nil {
-		mux.Handle("/", http.FileServerFS(opts.Frontend))
+		fileServer := http.FileServerFS(opts.Frontend)
+		mux.Handle("/", &indexInjector{
+			fs:       opts.Frontend,
+			basePath: s.basePath,
+			token:    s.token,
+			fallback: fileServer,
+		})
 	}
 
 	// ベースパスが "/" の場合は StripPrefix 不要
@@ -79,6 +85,45 @@ func NewServer(opts Options) *Server {
 // Handler は Server の http.Handler を返す。
 func (s *Server) Handler() http.Handler {
 	return s.handler
+}
+
+// indexInjector は index.html のリクエストを横取りして、
+// base-path と auth-token の meta タグに実際の値を注入するハンドラ。
+// それ以外のリクエストは fallback ハンドラに委譲する。
+type indexInjector struct {
+	fs       fs.FS
+	basePath string
+	token    string
+	fallback http.Handler
+}
+
+// ServeHTTP は "/" と "/index.html" へのリクエストを横取りして meta タグを注入する。
+func (h *indexInjector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+		data, err := fs.ReadFile(h.fs, "index.html")
+		if err != nil {
+			http.Error(w, "index.html not found", http.StatusInternalServerError)
+			return
+		}
+
+		html := string(data)
+		// base-path meta タグの content 属性を置換
+		html = strings.Replace(html,
+			`<meta name="base-path" content="/">`,
+			`<meta name="base-path" content="`+h.basePath+`">`,
+			1)
+		// auth-token meta タグの content 属性を置換
+		html = strings.Replace(html,
+			`<meta name="auth-token" content="">`,
+			`<meta name="auth-token" content="`+h.token+`">`,
+			1)
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(html))
+		return
+	}
+
+	h.fallback.ServeHTTP(w, r)
 }
 
 // NormalizeBasePath はベースパスを正規化する。

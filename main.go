@@ -1,0 +1,86 @@
+package main
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"flag"
+	"fmt"
+	"io/fs"
+	"log"
+	"net/http"
+	"os"
+	"os/exec"
+
+	"github.com/tjst-t/palmux/internal/server"
+	"github.com/tjst-t/palmux/internal/tmux"
+)
+
+func main() {
+	port := flag.Int("port", 8080, "Listen port")
+	host := flag.String("host", "0.0.0.0", "Listen address")
+	tmuxBin := flag.String("tmux", "tmux", "tmux binary path")
+	tlsCert := flag.String("tls-cert", "", "TLS certificate file")
+	tlsKey := flag.String("tls-key", "", "TLS private key file")
+	token := flag.String("token", "", "Fixed auth token (auto-generated if empty)")
+	basePath := flag.String("base-path", "/", "Base path")
+
+	flag.Parse()
+
+	// tmux の存在チェック
+	tmuxPath, err := exec.LookPath(*tmuxBin)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: tmux not found: %s\n", *tmuxBin)
+		os.Exit(1)
+	}
+
+	// TLS フラグの検証: 片方だけ指定はエラー
+	if (*tlsCert == "") != (*tlsKey == "") {
+		fmt.Fprintf(os.Stderr, "Error: both --tls-cert and --tls-key must be specified together\n")
+		os.Exit(1)
+	}
+
+	// トークン生成（未指定時）
+	authToken := *token
+	if authToken == "" {
+		tokenBytes := make([]byte, 32)
+		if _, err := rand.Read(tokenBytes); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: failed to generate token: %v\n", err)
+			os.Exit(1)
+		}
+		authToken = hex.EncodeToString(tokenBytes)
+	}
+
+	// フロントエンド FS を準備（embed.FS からサブディレクトリを取得）
+	frontFS, err := fs.Sub(frontendFS, "frontend/build")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: failed to access embedded frontend: %v\n", err)
+		os.Exit(1)
+	}
+
+	// tmux Manager を生成
+	mgr := &tmux.Manager{
+		Exec: &tmux.RealExecutor{
+			TmuxBin: tmuxPath,
+		},
+	}
+
+	// サーバーを生成
+	normalizedBasePath := server.NormalizeBasePath(*basePath)
+	srv := server.NewServer(server.Options{
+		Tmux:     mgr,
+		Token:    authToken,
+		BasePath: normalizedBasePath,
+		Frontend: frontFS,
+	})
+
+	addr := fmt.Sprintf("%s:%d", *host, *port)
+
+	fmt.Printf("Palmux started on %s (base path: %s)\n", addr, normalizedBasePath)
+	fmt.Printf("Auth token: %s\n", authToken)
+
+	if *tlsCert != "" {
+		log.Fatal(http.ListenAndServeTLS(addr, *tlsCert, *tlsKey, srv.Handler()))
+	} else {
+		log.Fatal(http.ListenAndServe(addr, srv.Handler()))
+	}
+}
