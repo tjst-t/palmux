@@ -553,6 +553,98 @@ func TestManager_ErrorMessages(t *testing.T) {
 			t.Errorf("error message should contain context, got: %q", err.Error())
 		}
 	})
+
+	t.Run("RenameWindowのエラーメッセージにコンテキストが含まれる", func(t *testing.T) {
+		mock := &mockExecutor{output: nil, err: errors.New("connection refused")}
+		m := &Manager{Exec: mock}
+
+		err := m.RenameWindow("main", 0, "new-name")
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "rename window") {
+			t.Errorf("error message should contain context, got: %q", err.Error())
+		}
+	})
+}
+
+func TestManager_RenameWindow(t *testing.T) {
+	tests := []struct {
+		name     string
+		session  string
+		index    int
+		newName  string
+		err      error
+		wantErr  bool
+		wantArgs []string
+	}{
+		{
+			name:     "正常系: ウィンドウをリネーム",
+			session:  "main",
+			index:    1,
+			newName:  "editor",
+			err:      nil,
+			wantErr:  false,
+			wantArgs: []string{"rename-window", "-t", "main:1", "editor"},
+		},
+		{
+			name:     "正常系: インデックス0のウィンドウをリネーム",
+			session:  "dev",
+			index:    0,
+			newName:  "shell",
+			err:      nil,
+			wantErr:  false,
+			wantArgs: []string{"rename-window", "-t", "dev:0", "shell"},
+		},
+		{
+			name:     "異常系: 存在しないウィンドウ",
+			session:  "main",
+			index:    99,
+			newName:  "test",
+			err:      errors.New("window not found"),
+			wantErr:  true,
+			wantArgs: []string{"rename-window", "-t", "main:99", "test"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockExecutor{output: nil, err: tt.err}
+			m := &Manager{Exec: mock}
+
+			err := m.RenameWindow(tt.session, tt.index, tt.newName)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("RenameWindow() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			assertArgs(t, mock, tt.wantArgs)
+		})
+	}
+}
+
+func TestManager_RenameWindow_TargetFormat(t *testing.T) {
+	// RenameWindow が session:index の形式で正しくターゲットを組み立てるか検証
+	tests := []struct {
+		session    string
+		index      int
+		newName    string
+		wantTarget string
+	}{
+		{"main", 0, "bash", "main:0"},
+		{"dev", 5, "vim", "dev:5"},
+		{"my-session", 10, "htop", "my-session:10"},
+	}
+
+	for _, tt := range tests {
+		name := fmt.Sprintf("session=%s,index=%d", tt.session, tt.index)
+		t.Run(name, func(t *testing.T) {
+			mock := &mockExecutor{output: nil, err: nil}
+			m := &Manager{Exec: mock}
+
+			_ = m.RenameWindow(tt.session, tt.index, tt.newName)
+			wantArgs := []string{"rename-window", "-t", tt.wantTarget, tt.newName}
+			assertArgs(t, mock, wantArgs)
+		})
+	}
 }
 
 func TestManager_KillWindow_TargetFormat(t *testing.T) {

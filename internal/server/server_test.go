@@ -26,6 +26,9 @@ func (m *mockTmuxManager) NewWindow(session, name string) (*tmux.Window, error) 
 	return &tmux.Window{}, nil
 }
 func (m *mockTmuxManager) KillWindow(session string, index int) error { return nil }
+func (m *mockTmuxManager) RenameWindow(session string, index int, name string) error {
+	return nil
+}
 func (m *mockTmuxManager) Attach(session string) (*os.File, *exec.Cmd, error) {
 	return nil, nil, nil
 }
@@ -719,6 +722,7 @@ func TestServer_APIRoutesRequireAuth(t *testing.T) {
 		{http.MethodGet, "/api/sessions/test/windows"},
 		{http.MethodPost, "/api/sessions/test/windows"},
 		{http.MethodDelete, "/api/sessions/test/windows/0"},
+		{http.MethodPatch, "/api/sessions/test/windows/0"},
 		{http.MethodGet, "/api/sessions/test/windows/0/attach"},
 	}
 

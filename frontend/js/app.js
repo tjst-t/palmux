@@ -378,6 +378,15 @@ document.addEventListener('DOMContentLoaded', () => {
         headerTitleEl.textContent = `${currentSession}:${currentWindowIndex}`;
       }
     },
+    onRenameWindow: (session, windowIndex, newName) => {
+      // ウィンドウリネーム後、現在表示中のウィンドウならヘッダータイトルを更新
+      if (session === currentSession && windowIndex === currentWindowIndex) {
+        const headerTitleEl = document.getElementById('header-title');
+        if (headerTitleEl) {
+          headerTitleEl.textContent = `${session}:${windowIndex}`;
+        }
+      }
+    },
   });
 
   // drawer ボタンのイベント
