@@ -282,17 +282,15 @@ function connectToWindow(sessionName, windowIndex) {
     onKeyboardMode: (mode) => {
       terminal.setKeyboardMode(mode);
       if (mode === 'ime') {
-        // IME モード: IME 入力バーを表示し、ターミナルの直接入力を抑制
+        // IME モード: IME 入力バーを表示（show() 内の onToggle で setIMEMode も実行される）
         if (imeInput) {
           imeInput.show();
         }
-        terminal.setIMEMode(true);
       } else {
-        // none / direct モード: IME 入力バーを非表示にし、ターミナルの直接入力を許可
+        // none / direct モード: IME 入力バーを非表示（hide() 内の onToggle で setIMEMode も実行される）
         if (imeInput) {
           imeInput.hide();
         }
-        terminal.setIMEMode(false);
       }
       requestAnimationFrame(() => {
         terminal.fit();
