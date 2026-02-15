@@ -75,6 +75,93 @@ html, body {
   text-overflow: ellipsis;
 }
 
+/* Connection Status Indicator */
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  flex-shrink: 0;
+  cursor: default;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.connection-status--disconnected {
+  cursor: pointer;
+}
+
+.connection-status--disconnected:hover {
+  background: rgba(244, 67, 54, 0.15);
+}
+
+.connection-status--disconnected:active {
+  background: rgba(244, 67, 54, 0.25);
+}
+
+.connection-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #888;
+}
+
+.connection-dot--connected {
+  background: #4caf50;
+}
+
+.connection-dot--connecting {
+  background: #ffc107;
+  animation: connection-pulse 1s infinite;
+}
+
+.connection-dot--disconnected {
+  background: #f44336;
+}
+
+@keyframes connection-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.connection-text {
+  font-size: 12px;
+  color: #8888aa;
+  white-space: nowrap;
+}
+
+/* Terminal Wrapper (position context for overlay) */
+#terminal-wrapper {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Reconnect Overlay */
+.reconnect-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.reconnect-overlay-text {
+  color: #ffc107;
+  font-size: 16px;
+  font-weight: 600;
+}
+
 /* Main Content Area */
 #main {
   flex: 1;
@@ -175,7 +262,8 @@ html, body {
 }
 
 #terminal-container {
-  flex: 1;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
   /* ダブルタップズームを無効化しつつ、xterm.js のスクロールは維持 */
   touch-action: manipulation;
@@ -935,6 +1023,20 @@ html, body {
   }
 
   .drawer-delete-modal-message {
+    font-size: 14px;
+  }
+
+  .connection-status {
+    gap: 4px;
+    margin-left: 4px;
+    padding: 4px 6px;
+  }
+
+  .connection-text {
+    font-size: 11px;
+  }
+
+  .reconnect-overlay-text {
     font-size: 14px;
   }
 }
