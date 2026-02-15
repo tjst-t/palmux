@@ -77,7 +77,7 @@ Palmux は、スマートフォンから快適に tmux セッション/ウィン
 
 | Component | Technology |
 |---|---|
-| ターミナルエミュレータ | xterm.js + xterm-addon-fit + xterm-addon-web-links |
+| ターミナルエミュレータ | @xterm/xterm + @xterm/addon-fit + @xterm/addon-web-links |
 | UI | Vanilla HTML/CSS/JS (フレームワーク不使用) |
 | ビルドツール | esbuild (xterm.js のバンドルのみ) |
 
@@ -110,6 +110,8 @@ example.com {
 ### REST API
 
 すべてのエンドポイントは `Authorization: Bearer <token>` ヘッダーを要求する。
+WebSocket 接続ではブラウザ API の制約によりカスタムヘッダーを設定できないため、
+クエリパラメータ `?token=xxx` による認証もサポートする。
 以下のパスはベースパスからの相対パス。
 
 #### Sessions
@@ -154,8 +156,25 @@ POST   {basePath}api/sessions/{session}/windows
 Body: { "name": "new-window" }  (optional)
 Response: { "index": 2, "name": "new-window" }
 
+PATCH  {basePath}api/sessions/{session}/windows/{index}
+Body: { "name": "new-name" }
+Response: { "index": 0, "name": "new-name", "active": true }
+
 DELETE {basePath}api/sessions/{session}/windows/{index}
 Response: 204 No Content
+```
+
+#### Connections
+
+```
+GET    {basePath}api/connections
+Response: [
+  {
+    "session": "main",
+    "connected_at": "2025-01-01T00:00:00Z",
+    "remote_addr": "192.168.1.10:54321"
+  }
+]
 ```
 
 ### WebSocket
@@ -229,6 +248,7 @@ func (m *Manager) KillSession(name string) error
 func (m *Manager) ListWindows(session string) ([]Window, error)
 func (m *Manager) NewWindow(session, name string) (*Window, error)
 func (m *Manager) KillWindow(session string, index int) error
+func (m *Manager) RenameWindow(session string, index int, name string) error
 
 func (m *Manager) Attach(session string) (*os.File, *exec.Cmd, error)
 // Attach は tmux attach を pty 内で実行し、pty の fd と cmd を返す
@@ -353,8 +373,8 @@ palmux/
 │   │   ├── auth_test.go
 │   │   ├── api_sessions.go # セッション系 API ハンドラ
 │   │   ├── api_sessions_test.go
-│   │   ├── api_windows.go  # ウィンドウ系 API ハンドラ
-│   │   ├── api_windows_test.go
+│   │   ├── api_window.go   # ウィンドウ系 API ハンドラ（※ _windows は Go ビルド制約と衝突）
+│   │   ├── api_window_test.go
 │   │   ├── ws.go           # WebSocket ハンドラ (pty <-> WS ブリッジ)
 │   │   └── ws_test.go
 │   └── tmux/
@@ -374,10 +394,16 @@ palmux/
 │   │   └── style.css
 │   ├── js/
 │   │   ├── app.js          # メインアプリケーションロジック
+│   │   ├── api.js          # REST API クライアント (base-path 対応)
 │   │   ├── terminal.js     # xterm.js ラッパー
 │   │   ├── toolbar.js      # 修飾キーツールバー
+│   │   ├── ime-input.js    # IME 入力フィールド
 │   │   ├── drawer.js       # セッション/ウィンドウ drawer
-│   │   └── api.js          # REST API クライアント (base-path 対応)
+│   │   ├── touch.js        # タッチジェスチャーハンドラ
+│   │   └── connection.js   # 接続状態管理・自動再接続
+│   ├── manifest.json       # PWA マニフェスト
+│   ├── sw.js               # Service Worker
+│   ├── icons/              # PWA アイコン (192x192, 512x512)
 │   └── build/              # esbuild 出力 (gitignore)
 ├── embed.go                # //go:embed frontend/build/*
 ├── Makefile
@@ -390,24 +416,35 @@ palmux/
 
 ```makefile
 # Makefile
-.PHONY: build frontend
+GO ?= $(shell which go 2>/dev/null || echo /usr/local/go/bin/go)
+
+.PHONY: build frontend build-linux build-arm test clean
 
 frontend:
 	cd frontend && npx esbuild js/app.js \
-	  --bundle --minify --outdir=build \
-	  --external:xterm --external:xterm-addon-fit
+	  --bundle --minify --outdir=build
 	cp frontend/index.html frontend/build/
 	cp frontend/css/style.css frontend/build/
+	cp frontend/node_modules/@xterm/xterm/css/xterm.css frontend/build/
+	cp frontend/manifest.json frontend/build/
+	cp frontend/sw.js frontend/build/
+	mkdir -p frontend/build/icons
+	cp -r frontend/icons/* frontend/build/icons/
 
 build: frontend
-	CGO_ENABLED=0 go build -o palmux .
+	CGO_ENABLED=0 $(GO) build -o palmux .
 
 # クロスコンパイル
-build-linux:
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o palmux-linux-amd64 .
-build-arm:
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o palmux-linux-arm64 .
+build-linux: frontend
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO) build -o palmux-linux-amd64 .
+build-arm: frontend
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GO) build -o palmux-linux-arm64 .
+
+test:
+	$(GO) test ./...
 ```
+
+> **Note:** xterm.js は `--external` を使わずバンドルに含める（`embed.FS` でシングルバイナリにするため）。
 
 ### 起動
 
@@ -433,6 +470,7 @@ Auth token: a1b2c3d4e5f6...
 | `--tls-key` | - | TLS private key file |
 | `--token` | (auto-generated) | 固定の認証トークンを指定 |
 | `--base-path` | `/` | ベースパス (例: `/palmux/`, `/hogehoge/`) |
+| `--max-connections` | `5` | セッションあたりの最大同時接続数 |
 
 ---
 
@@ -516,31 +554,31 @@ internal/tmux/testdata/
 
 ### Phase 1: MVP
 
-- [ ] tmux Executor インターフェース + モック実装
-- [ ] tmux Manager (ListSessions, ListWindows, Attach) — テストフィクスチャ付き
-- [ ] tmux 出力パーサー — テーブル駆動テスト
-- [ ] HTTP サーバー + ベースパス処理 — httptest でルーティング検証
-- [ ] Bearer token 認証ミドルウェア — 正常/異常系テスト
-- [ ] REST API ハンドラ — モック Manager 注入でテスト
-- [ ] WebSocket pty ブリッジ
-- [ ] 最小限のフロントエンド（xterm.js + セッション選択）
+- [x] tmux Executor インターフェース + モック実装
+- [x] tmux Manager (ListSessions, ListWindows, Attach) — テストフィクスチャ付き
+- [x] tmux 出力パーサー — テーブル駆動テスト
+- [x] HTTP サーバー + ベースパス処理 — httptest でルーティング検証
+- [x] Bearer token 認証ミドルウェア — 正常/異常系テスト
+- [x] REST API ハンドラ — モック Manager 注入でテスト
+- [x] WebSocket pty ブリッジ
+- [x] 最小限のフロントエンド（xterm.js + セッション選択）
 
 ### Phase 2: Mobile UX
 
-- [ ] 修飾キーツールバー（ワンショット/ロック）
-- [ ] IME 入力フィールド（Direct/IME モード切り替え）
-- [ ] セッション/ウィンドウ drawer UI
-- [ ] タッチ操作最適化（スワイプでウィンドウ切り替え等）
-- [ ] フォントサイズ調整
-- [ ] PWA 対応（ホーム画面に追加）
+- [x] 修飾キーツールバー（ワンショット/ロック）
+- [x] IME 入力フィールド（Direct/IME モード切り替え）
+- [x] セッション/ウィンドウ drawer UI
+- [x] タッチ操作最適化（スワイプでウィンドウ切り替え等）
+- [x] フォントサイズ調整
+- [x] PWA 対応（ホーム画面に追加）
 
 ### Phase 3: Enhanced Features
 
-- [ ] セッション/ウィンドウの作成・削除 UI
-- [ ] ウィンドウリネーム
-- [ ] 接続状態表示・自動再接続
-- [ ] TLS サポート
-- [ ] 複数端末からの同時接続
+- [x] セッション/ウィンドウの作成・削除 UI
+- [x] ウィンドウリネーム
+- [x] 接続状態表示・自動再接続
+- [x] TLS サポート
+- [x] 複数端末からの同時接続
 
 ---
 
@@ -552,3 +590,6 @@ internal/tmux/testdata/
 - ウィンドウ切り替え時は WebSocket を張り直さず、同一 pty 上で `tmux select-window` を実行する
 - `creack/pty` は `CGO_ENABLED=0` でもビルド可能（pure Go fallback あり、要確認）
 - tmux がインストールされていない場合は起動時にエラーで終了する
+- tmux サーバーが起動していない場合、`ListSessions` は空配列を返す（`no server running` エラーをハンドリング）
+- ファイル名に `_windows` サフィックスを使わない（Go が `GOOS=windows` のビルド制約と解釈するため `api_window.go` とする）
+- xterm.js パッケージはスコープ付き名前を使用: `@xterm/xterm`, `@xterm/addon-fit`, `@xterm/addon-web-links`

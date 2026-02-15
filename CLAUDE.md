@@ -48,10 +48,11 @@ Palmux（パーマックス）は、スマホから快適に tmux を操作で�
 ### タスク定義
 
 各フェーズの実装タスクは `docs/tasks/` 配下に配置する。
+Phase 1〜3 は全タスク実装済み。
 
-- `docs/tasks/phase1-mvp.md` — Phase 1: MVP
-- `docs/tasks/phase2-mobile-ux.md` — Phase 2: Mobile UX
-- `docs/tasks/phase3-enhanced.md` — Phase 3: Enhanced Features
+- `docs/tasks/phase1-mvp.md` — Phase 1: MVP (完了)
+- `docs/tasks/phase2-mobile-ux.md` — Phase 2: Mobile UX (完了)
+- `docs/tasks/phase3-enhanced.md` — Phase 3: Enhanced Features (完了)
 
 ## 技術スタック
 
@@ -71,19 +72,41 @@ Palmux（パーマックス）は、スマホから快適に tmux を操作で�
 palmux/
 ├── CLAUDE.md
 ├── DESIGN.md
+├── README.md
 ├── docs/
 │   └── tasks/       # フェーズ別タスク定義
 ├── main.go
 ├── go.mod
-├── embed.go
+├── embed.go         # //go:embed frontend/build/*
 ├── internal/
 │   ├── server/      # HTTP サーバー、API ハンドラ、WebSocket
+│   │   ├── server.go          # Server 構造体、ルーティング、TmuxManager インターフェース
+│   │   ├── auth.go            # Bearer token 認証ミドルウェア
+│   │   ├── api_sessions.go    # セッション API ハンドラ
+│   │   ├── api_window.go      # ウィンドウ API ハンドラ（※ _windows は Go ビルド制約と衝突するため _window）
+│   │   └── ws.go              # WebSocket pty ブリッジ、接続トラッカー
 │   └── tmux/        # tmux Manager、Executor インターフェース、パーサー
+│       ├── executor.go        # Executor インターフェース + RealExecutor
+│       ├── tmux.go            # Manager 構造体
+│       ├── parse.go           # tmux 出力パーサー
+│       └── testdata/          # テストフィクスチャ
 ├── frontend/
 │   ├── index.html
 │   ├── css/
+│   │   └── style.css
 │   ├── js/
-│   └── build/       # esbuild 出力 (gitignore)
+│   │   ├── app.js             # メインアプリケーション
+│   │   ├── api.js             # REST API クライアント
+│   │   ├── terminal.js        # xterm.js ラッパー
+│   │   ├── toolbar.js         # 修飾キーツールバー
+│   │   ├── ime-input.js       # IME 入力フィールド
+│   │   ├── drawer.js          # セッション/ウィンドウ Drawer
+│   │   ├── touch.js           # タッチジェスチャーハンドラ
+│   │   └── connection.js      # 接続状態管理・自動再接続
+│   ├── manifest.json          # PWA マニフェスト
+│   ├── sw.js                  # Service Worker
+│   ├── icons/                 # PWA アイコン
+│   └── build/                 # esbuild 出力 (gitignore)
 └── Makefile
 ```
 
@@ -108,7 +131,8 @@ palmux/
 ### 実行方法
 
 ```bash
-go test ./...                    # 全テスト
+make test                        # 全テスト（Makefile 経由、Go パス自動解決）
+go test ./...                    # 全テスト（go が PATH にある場合）
 go test ./internal/tmux/...      # tmux パッケージのみ
 go test -cover ./...             # カバレッジ付き
 go test -v -run TestParseSession # 特定テスト
@@ -135,9 +159,25 @@ go test -v -run TestParseSession # 特定テスト
 - フロントエンドへは `<meta name="base-path">` タグで注入
 - テストでは `/`, `/palmux/`, `/deep/nested/path/` 等の複数パターンを検証
 
+## ビルド
+
+```bash
+make build                       # フロントエンドビルド → Go バイナリ生成
+make frontend                    # フロントエンドのみビルド
+make build-linux                 # Linux amd64 向けクロスコンパイル
+make build-arm                   # Linux arm64 向けクロスコンパイル
+```
+
+Makefile は `GO` 変数で Go バイナリのパスを自動解決する（`which go` → `/usr/local/go/bin/go` にフォールバック）。
+明示指定も可能: `make build GO=/usr/local/go/bin/go`
+
 ## よくある注意点
 
 - `creack/pty` は Unix 系のみ対応（Windows では動かない）
 - tmux がインストールされていない環境ではサーバー起動時にエラー終了する
+- tmux サーバーが未起動の場合、`ListSessions` は空配列を返す（エラーではない）
 - WebSocket のメッセージは JSON 形式（`{"type": "input", "data": "..."}` 等）
+- WebSocket の認証はクエリパラメータ `?token=xxx` でも可能（ブラウザ WebSocket API はカスタムヘッダーを設定できないため）
 - フロントエンドのビルド成果物 (`frontend/build/`) は gitignore する
+- `api_window.go` のファイル名は単数形（`_windows` サフィックスは Go が `GOOS=windows` のビルド制約と解釈するため）
+- xterm.js のパッケージ名はスコープ付き: `@xterm/xterm`, `@xterm/addon-fit`, `@xterm/addon-web-links`
