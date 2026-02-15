@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
-	"net/http"
 	"os"
 	"os/exec"
 
@@ -75,12 +74,23 @@ func main() {
 
 	addr := fmt.Sprintf("%s:%d", *host, *port)
 
-	fmt.Printf("Palmux started on %s (base path: %s)\n", addr, normalizedBasePath)
-	fmt.Printf("Auth token: %s\n", authToken)
-
 	if *tlsCert != "" {
-		log.Fatal(http.ListenAndServeTLS(addr, *tlsCert, *tlsKey, srv.Handler()))
+		// TLS 証明書ファイルの存在チェック
+		if _, err := os.Stat(*tlsCert); os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Error: TLS certificate file not found: %s\n", *tlsCert)
+			os.Exit(1)
+		}
+		if _, err := os.Stat(*tlsKey); os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Error: TLS key file not found: %s\n", *tlsKey)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Palmux started on %s (TLS) (base path: %s)\n", addr, normalizedBasePath)
+		fmt.Printf("Auth token: %s\n", authToken)
+		log.Fatal(srv.ListenAndServeTLS(addr, *tlsCert, *tlsKey))
 	} else {
-		log.Fatal(http.ListenAndServe(addr, srv.Handler()))
+		fmt.Printf("Palmux started on %s (base path: %s)\n", addr, normalizedBasePath)
+		fmt.Printf("Auth token: %s\n", authToken)
+		log.Fatal(srv.ListenAndServe(addr))
 	}
 }

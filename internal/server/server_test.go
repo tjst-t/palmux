@@ -738,3 +738,210 @@ func TestServer_APIRoutesRequireAuth(t *testing.T) {
 		})
 	}
 }
+
+// --- TLS テスト ---
+
+func TestServer_TLS_APIAccessOverTLS(t *testing.T) {
+	const token = "test-token"
+	srv := NewServer(Options{
+		Tmux:     &mockTmuxManager{},
+		Token:    token,
+		BasePath: "/",
+		Frontend: newTestFrontendFS(),
+	})
+
+	// httptest.NewTLSServer は自己署名証明書で TLS サーバーを起動する
+	ts := httptest.NewTLSServer(srv.Handler())
+	defer ts.Close()
+
+	client := ts.Client()
+
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		withToken  bool
+		wantStatus int
+	}{
+		{
+			name:       "TLS経由でGET /api/sessions: 認証あり → 200",
+			method:     http.MethodGet,
+			path:       "/api/sessions",
+			withToken:  true,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "TLS経由でGET /api/sessions: 認証なし → 401",
+			method:     http.MethodGet,
+			path:       "/api/sessions",
+			withToken:  false,
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "TLS経由でGET /: 静的ファイル → 200",
+			method:     http.MethodGet,
+			path:       "/",
+			withToken:  false,
+			wantStatus: http.StatusOK,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest(tt.method, ts.URL+tt.path, nil)
+			if err != nil {
+				t.Fatalf("failed to create request: %v", err)
+			}
+			if tt.withToken {
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
+
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != tt.wantStatus {
+				t.Errorf("status = %d, want %d", resp.StatusCode, tt.wantStatus)
+			}
+		})
+	}
+}
+
+func TestServer_TLS_WithBasePath(t *testing.T) {
+	const token = "test-token"
+	srv := NewServer(Options{
+		Tmux:     &mockTmuxManager{},
+		Token:    token,
+		BasePath: "/palmux/",
+		Frontend: newTestFrontendFS(),
+	})
+
+	ts := httptest.NewTLSServer(srv.Handler())
+	defer ts.Close()
+
+	client := ts.Client()
+
+	tests := []struct {
+		name       string
+		path       string
+		withToken  bool
+		wantStatus int
+	}{
+		{
+			name:       "TLS + basePath: GET /palmux/api/sessions 認証あり → 200",
+			path:       "/palmux/api/sessions",
+			withToken:  true,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "TLS + basePath: GET /palmux/ 静的ファイル → 200",
+			path:       "/palmux/",
+			withToken:  false,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "TLS + basePath: ベースパスなし → 404",
+			path:       "/api/sessions",
+			withToken:  true,
+			wantStatus: http.StatusNotFound,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, ts.URL+tt.path, nil)
+			if err != nil {
+				t.Fatalf("failed to create request: %v", err)
+			}
+			if tt.withToken {
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
+
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != tt.wantStatus {
+				t.Errorf("status = %d, want %d", resp.StatusCode, tt.wantStatus)
+			}
+		})
+	}
+}
+
+func TestServer_TLS_IndexHTMLInjectionOverTLS(t *testing.T) {
+	const token = "tls-test-token"
+	srv := NewServer(Options{
+		Tmux:     &mockTmuxManager{},
+		Token:    token,
+		BasePath: "/secure/",
+		Frontend: newTestFrontendFS(),
+	})
+
+	ts := httptest.NewTLSServer(srv.Handler())
+	defer ts.Close()
+
+	client := ts.Client()
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/secure/", nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	bodyBytes := make([]byte, 4096)
+	n, _ := resp.Body.Read(bodyBytes)
+	body := string(bodyBytes[:n])
+
+	// base-path と token が注入されている
+	if !strings.Contains(body, `content="/secure/"`) {
+		t.Errorf("body should contain injected base-path '/secure/', got %q", body)
+	}
+	if !strings.Contains(body, `content="tls-test-token"`) {
+		t.Errorf("body should contain injected token, got %q", body)
+	}
+}
+
+func TestServer_ListenAndServe_MethodExists(t *testing.T) {
+	srv := NewServer(Options{
+		Tmux:     &mockTmuxManager{},
+		Token:    "test-token",
+		BasePath: "/",
+		Frontend: newTestFrontendFS(),
+	})
+
+	// ListenAndServe メソッドが存在することを確認
+	// ポート 0 で起動して即座に閉じるテストはできないが、
+	// メソッドのシグネチャが正しいことをコンパイル時に確認する
+	var fn func(string) error = srv.ListenAndServe
+	if fn == nil {
+		t.Fatal("ListenAndServe method should not be nil")
+	}
+}
+
+func TestServer_ListenAndServeTLS_MethodExists(t *testing.T) {
+	srv := NewServer(Options{
+		Tmux:     &mockTmuxManager{},
+		Token:    "test-token",
+		BasePath: "/",
+		Frontend: newTestFrontendFS(),
+	})
+
+	// ListenAndServeTLS メソッドが存在することを確認
+	var fn func(string, string, string) error = srv.ListenAndServeTLS
+	if fn == nil {
+		t.Fatal("ListenAndServeTLS method should not be nil")
+	}
+}

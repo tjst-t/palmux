@@ -89,6 +89,16 @@ func (s *Server) Handler() http.Handler {
 	return s.handler
 }
 
+// ListenAndServe は指定アドレスで HTTP サーバーを起動する。
+func (s *Server) ListenAndServe(addr string) error {
+	return http.ListenAndServe(addr, s.handler)
+}
+
+// ListenAndServeTLS は指定アドレスで TLS 付き HTTP サーバーを起動する。
+func (s *Server) ListenAndServeTLS(addr, certFile, keyFile string) error {
+	return http.ListenAndServeTLS(addr, certFile, keyFile, s.handler)
+}
+
 // indexInjector は index.html のリクエストを横取りして、
 // base-path と auth-token の meta タグに実際の値を注入するハンドラ。
 // それ以外のリクエストは fallback ハンドラに委譲する。
