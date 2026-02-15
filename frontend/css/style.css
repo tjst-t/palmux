@@ -39,9 +39,9 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  margin-right: 8px;
+  min-width: 44px;
+  min-height: 44px;
+  margin-right: 4px;
   background: none;
   border: none;
   color: #7ec8e3;
@@ -49,10 +49,16 @@ html, body {
   cursor: pointer;
   border-radius: 4px;
   transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 #back-btn:hover {
   background: rgba(126, 200, 227, 0.15);
+}
+
+#back-btn:active {
+  background: rgba(126, 200, 227, 0.25);
 }
 
 #back-btn.hidden {
@@ -93,12 +99,15 @@ html, body {
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px;
+  min-height: 44px;
   margin-bottom: 8px;
   background: #1a1a2e;
   border: 1px solid #2a2a4a;
   border-radius: 8px;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 .session-item:hover {
@@ -168,6 +177,9 @@ html, body {
 #terminal-container {
   flex: 1;
   overflow: hidden;
+  /* ダブルタップズームを無効化しつつ、xterm.js のスクロールは維持 */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* xterm.js のコンテナがフル幅・高さを取るようにする */
@@ -180,9 +192,9 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  margin-left: 8px;
+  min-width: 44px;
+  min-height: 44px;
+  margin-left: 4px;
   background: none;
   border: none;
   color: #7ec8e3;
@@ -190,10 +202,16 @@ html, body {
   cursor: pointer;
   border-radius: 4px;
   transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 #toolbar-toggle-btn:hover {
   background: rgba(126, 200, 227, 0.15);
+}
+
+#toolbar-toggle-btn:active {
+  background: rgba(126, 200, 227, 0.25);
 }
 
 #toolbar-toggle-btn.hidden {
@@ -241,7 +259,8 @@ html, body {
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  min-height: 36px;
+  min-width: 44px;
+  min-height: 44px;
   transition: background 0.15s;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
@@ -384,12 +403,14 @@ html, body {
   display: flex;
   align-items: center;
   padding: 12px 16px;
+  min-height: 44px;
   cursor: pointer;
   transition: background 0.15s;
   border-bottom: 1px solid rgba(42, 42, 74, 0.5);
   user-select: none;
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 .drawer-session-header:hover {
@@ -430,10 +451,12 @@ html, body {
   align-items: center;
   justify-content: space-between;
   padding: 10px 16px 10px 36px;
+  min-height: 44px;
   cursor: pointer;
   transition: background 0.15s;
   border-bottom: 1px solid rgba(42, 42, 74, 0.3);
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 .drawer-window-item:hover {
@@ -489,9 +512,9 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  margin-right: 8px;
+  min-width: 44px;
+  min-height: 44px;
+  margin-right: 4px;
   background: none;
   border: none;
   color: #7ec8e3;
@@ -500,10 +523,15 @@ html, body {
   border-radius: 4px;
   transition: background 0.15s;
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 #drawer-btn:hover {
   background: rgba(126, 200, 227, 0.15);
+}
+
+#drawer-btn:active {
+  background: rgba(126, 200, 227, 0.25);
 }
 
 #drawer-btn.hidden {
