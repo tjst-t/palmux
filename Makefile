@@ -1,0 +1,17 @@
+.PHONY: build frontend build-linux build-arm
+
+frontend:
+	cd frontend && npx esbuild js/app.js \
+	  --bundle --minify --outdir=build \
+	  --external:xterm --external:xterm-addon-fit
+	cp frontend/index.html frontend/build/
+	cp frontend/css/style.css frontend/build/
+
+build: frontend
+	CGO_ENABLED=0 go build -o palmux .
+
+build-linux: frontend
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o palmux-linux-amd64 .
+
+build-arm: frontend
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o palmux-linux-arm64 .

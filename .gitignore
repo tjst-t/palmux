@@ -1,0 +1,24 @@
+# Frontend build output
+frontend/build/
+
+# Go binaries
+palmux
+palmux-linux-amd64
+palmux-linux-arm64
+
+# Node modules (if frontend dependencies are installed locally)
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Test coverage
+coverage.out
