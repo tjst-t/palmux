@@ -26,6 +26,8 @@ export class PalmuxTerminal {
     this._toolbar = null;
     /** @type {boolean} IME モード有効時は onData ハンドラからの入力送信を抑制する */
     this._imeMode = false;
+    /** @type {boolean} 修飾キー即時送信で処理済みフラグ（onData 二重送信防止） */
+    this._modifierHandled = false;
   }
 
   /**
@@ -81,9 +83,8 @@ export class PalmuxTerminal {
     this._resizeObserver.observe(this._container);
 
     // 修飾キー有効時の即時送信: IME の composing を待たずに制御文字を送信
-    const textarea = this._container.querySelector('.xterm-helper-textarea');
-    if (textarea) {
-      textarea.addEventListener('input', (e) => {
+    if (helperTextarea) {
+      helperTextarea.addEventListener('input', (e) => {
         if (!this._toolbar) return;
         if (this._toolbar.ctrlState === 'off' && this._toolbar.altState === 'off') return;
 
@@ -95,8 +96,9 @@ export class PalmuxTerminal {
         const modified = this._applyModifiers(char, mods);
         this._sendInput(modified);
 
-        // composing をキャンセル
-        textarea.value = '';
+        // composing をキャンセルし、onData での二重送信を防止
+        helperTextarea.value = '';
+        this._modifierHandled = true;
       });
     }
   }
@@ -146,6 +148,11 @@ export class PalmuxTerminal {
     // IME モード有効時は直接入力を抑制する（IME フィールド経由で送信）
     this._term.onData((data) => {
       if (this._imeMode) {
+        return;
+      }
+      // 修飾キー即時送信で既に処理済みの場合はスキップ（二重送信防止）
+      if (this._modifierHandled) {
+        this._modifierHandled = false;
         return;
       }
       if (this._toolbar) {

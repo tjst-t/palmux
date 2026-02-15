@@ -17,6 +17,7 @@ export class IMEInput {
    * @param {Object} options
    * @param {function(string): void} options.onSend - テキストを送信するコールバック
    * @param {function(boolean): void} [options.onToggle] - IME モード変更時のコールバック
+   * @param {import('./toolbar.js').Toolbar|null} [options.toolbar] - ツールバー参照（修飾キー即時送信用）
    */
   constructor(container, options) {
     this._container = container;
