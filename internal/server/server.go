@@ -49,7 +49,7 @@ func NewServer(opts Options) *Server {
 	// 認証ミドルウェア
 	auth := AuthMiddleware(s.token)
 
-	// API ルート（スタブハンドラ、実装は Task 6, 7 で行う）
+	// API ルート
 	mux.Handle("GET /api/sessions", auth(s.handleListSessions()))
 	mux.Handle("POST /api/sessions", auth(s.handleCreateSession()))
 	mux.Handle("DELETE /api/sessions/{name}", auth(s.handleDeleteSession()))
@@ -97,44 +97,7 @@ func NormalizeBasePath(path string) string {
 	return path
 }
 
-// 以下はスタブハンドラ。実際の実装は Task 6, 7 で行う。
-
-func (s *Server) handleListSessions() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-}
-
-func (s *Server) handleCreateSession() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-}
-
-func (s *Server) handleDeleteSession() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-}
-
-func (s *Server) handleListWindows() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-}
-
-func (s *Server) handleCreateWindow() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-}
-
-func (s *Server) handleDeleteWindow() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-}
-
+// handleAttach は WebSocket pty ブリッジのスタブハンドラ。実際の実装は Task 7 で行う。
 func (s *Server) handleAttach() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
