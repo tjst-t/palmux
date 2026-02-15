@@ -23,6 +23,7 @@ export class IMEInput {
     this._visible = false;
     this._onSend = options.onSend;
     this._onToggle = options.onToggle || null;
+    this._toolbar = options.toolbar || null;
     this._render();
   }
 
@@ -75,6 +76,22 @@ export class IMEInput {
     this._sendBtn.addEventListener('click', () => {
       this._send(true);
     });
+
+    // 修飾キー有効時の即時送信
+    this._input.addEventListener('input', (e) => {
+      if (!this._toolbar) return;
+      if (this._toolbar.ctrlState === 'off' && this._toolbar.altState === 'off') return;
+
+      const char = e.data;
+      if (!char) return;
+
+      const mods = this._toolbar.consumeModifiers();
+      const modified = this._applyModifiers(char, mods);
+      this._onSend(modified);
+
+      // フィールドをクリアして composing をキャンセル
+      this._input.value = '';
+    });
   }
 
   /**
@@ -91,6 +108,36 @@ export class IMEInput {
       this._onSend('\r');
     }
     this._input.focus();
+  }
+
+  /**
+   * 修飾キー状態を入力データに適用する。
+   * Ctrl: 単一文字の場合、制御文字に変換する（例: 'c' -> \x03）
+   * Alt: ESC プレフィクスを付与する（例: 'x' -> \x1bx）
+   * @param {string} data - 元の入力データ
+   * @param {{ ctrl: boolean, alt: boolean }} mods - 修飾キー状態
+   * @returns {string} 修飾適用後のデータ
+   */
+  _applyModifiers(data, mods) {
+    let result = data;
+    if (mods.ctrl && result.length === 1) {
+      const code = result.toUpperCase().charCodeAt(0);
+      if (code >= 64 && code <= 95) {
+        result = String.fromCharCode(code - 64);
+      }
+    }
+    if (mods.alt) {
+      result = '\x1b' + result;
+    }
+    return result;
+  }
+
+  /**
+   * ツールバーを設定する。
+   * @param {import('./toolbar.js').Toolbar|null} toolbar
+   */
+  setToolbar(toolbar) {
+    this._toolbar = toolbar;
   }
 
   /**

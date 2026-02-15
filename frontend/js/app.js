@@ -298,6 +298,7 @@ function connectToWindow(sessionName, windowIndex) {
     },
   });
   terminal.setToolbar(toolbar);
+  imeInput.setToolbar(toolbar);
 
   // デスクトップではツールバーをデフォルト非表示
   if (!isMobileDevice()) {

@@ -79,6 +79,26 @@ export class PalmuxTerminal {
       this.fit();
     });
     this._resizeObserver.observe(this._container);
+
+    // 修飾キー有効時の即時送信: IME の composing を待たずに制御文字を送信
+    const textarea = this._container.querySelector('.xterm-helper-textarea');
+    if (textarea) {
+      textarea.addEventListener('input', (e) => {
+        if (!this._toolbar) return;
+        if (this._toolbar.ctrlState === 'off' && this._toolbar.altState === 'off') return;
+
+        // 修飾キーが有効な場合、入力された文字を即座に制御文字として送信
+        const char = e.data;
+        if (!char) return;
+
+        const mods = this._toolbar.consumeModifiers();
+        const modified = this._applyModifiers(char, mods);
+        this._sendInput(modified);
+
+        // composing をキャンセル
+        textarea.value = '';
+      });
+    }
   }
 
   /**
