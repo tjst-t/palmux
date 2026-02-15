@@ -81,7 +81,7 @@ export class IMEInput {
     // 修飾キー有効時の即時送信
     this._input.addEventListener('input', (e) => {
       if (!this._toolbar) return;
-      if (this._toolbar.ctrlState === 'off' && this._toolbar.altState === 'off') return;
+      if (!this._toolbar.hasCtrl() && !this._toolbar.hasAlt()) return;
 
       const char = e.data;
       if (!char) return;
