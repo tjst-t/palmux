@@ -1,0 +1,186 @@
+// app.js - メインアプリケーションロジック
+// セッション一覧→選択→ターミナル表示のフロー
+
+import { listSessions, listWindows, getWebSocketURL } from './api.js';
+import { PalmuxTerminal } from './terminal.js';
+
+/** @type {PalmuxTerminal|null} */
+let terminal = null;
+
+/** 現在接続中のセッション名 */
+let currentSession = null;
+
+/** 現在接続中のウィンドウインデックス */
+let currentWindowIndex = null;
+
+/**
+ * セッション一覧画面を表示する。
+ */
+async function showSessionList() {
+  const sessionListEl = document.getElementById('session-list');
+  const terminalViewEl = document.getElementById('terminal-view');
+  const headerTitleEl = document.getElementById('header-title');
+  const backBtnEl = document.getElementById('back-btn');
+  const sessionItemsEl = document.getElementById('session-items');
+
+  // ターミナルが接続中なら切断
+  if (terminal) {
+    terminal.disconnect();
+    terminal = null;
+  }
+  currentSession = null;
+  currentWindowIndex = null;
+
+  // UI 切り替え
+  sessionListEl.classList.remove('hidden');
+  terminalViewEl.classList.add('hidden');
+  headerTitleEl.textContent = 'Palmux';
+  backBtnEl.classList.add('hidden');
+
+  // ローディング表示
+  sessionItemsEl.innerHTML = '<div class="loading">Loading sessions...</div>';
+
+  try {
+    const sessions = await listSessions();
+
+    if (!sessions || sessions.length === 0) {
+      sessionItemsEl.innerHTML = '<div class="empty-message">No tmux sessions found.</div>';
+      return;
+    }
+
+    sessionItemsEl.innerHTML = '';
+
+    for (const session of sessions) {
+      const item = document.createElement('div');
+      item.className = 'session-item';
+      item.addEventListener('click', () => showWindowList(session.name));
+
+      const nameEl = document.createElement('div');
+      nameEl.className = 'session-name';
+      nameEl.textContent = session.name;
+
+      const infoEl = document.createElement('div');
+      infoEl.className = 'session-info';
+      const windowCount = session.windows || 0;
+      const attachedText = session.attached ? 'attached' : 'detached';
+      infoEl.textContent = `${windowCount} window${windowCount !== 1 ? 's' : ''} | ${attachedText}`;
+
+      item.appendChild(nameEl);
+      item.appendChild(infoEl);
+      sessionItemsEl.appendChild(item);
+    }
+  } catch (err) {
+    console.error('Failed to load sessions:', err);
+    sessionItemsEl.innerHTML = `<div class="error-message">Failed to load sessions: ${escapeHTML(err.message)}</div>`;
+  }
+}
+
+/**
+ * 指定セッションのウィンドウ一覧を表示する。
+ * @param {string} sessionName - セッション名
+ */
+async function showWindowList(sessionName) {
+  const sessionItemsEl = document.getElementById('session-items');
+  const headerTitleEl = document.getElementById('header-title');
+  const backBtnEl = document.getElementById('back-btn');
+
+  headerTitleEl.textContent = sessionName;
+  backBtnEl.classList.remove('hidden');
+
+  sessionItemsEl.innerHTML = '<div class="loading">Loading windows...</div>';
+
+  try {
+    const windows = await listWindows(sessionName);
+
+    if (!windows || windows.length === 0) {
+      sessionItemsEl.innerHTML = '<div class="empty-message">No windows found.</div>';
+      return;
+    }
+
+    sessionItemsEl.innerHTML = '';
+
+    for (const win of windows) {
+      const item = document.createElement('div');
+      item.className = 'session-item window-item';
+      item.addEventListener('click', () => connectToWindow(sessionName, win.index));
+
+      const nameEl = document.createElement('div');
+      nameEl.className = 'session-name';
+      nameEl.textContent = `${win.index}: ${win.name}`;
+
+      const infoEl = document.createElement('div');
+      infoEl.className = 'session-info';
+      if (win.active) {
+        infoEl.innerHTML = '<span class="active-indicator">&#9679;</span> active';
+      }
+
+      item.appendChild(nameEl);
+      item.appendChild(infoEl);
+      sessionItemsEl.appendChild(item);
+    }
+  } catch (err) {
+    console.error('Failed to load windows:', err);
+    sessionItemsEl.innerHTML = `<div class="error-message">Failed to load windows: ${escapeHTML(err.message)}</div>`;
+  }
+}
+
+/**
+ * 指定セッションのウィンドウにターミナル接続する。
+ * @param {string} sessionName - セッション名
+ * @param {number} windowIndex - ウィンドウインデックス
+ */
+function connectToWindow(sessionName, windowIndex) {
+  const sessionListEl = document.getElementById('session-list');
+  const terminalViewEl = document.getElementById('terminal-view');
+  const terminalContainerEl = document.getElementById('terminal-container');
+  const headerTitleEl = document.getElementById('header-title');
+  const backBtnEl = document.getElementById('back-btn');
+
+  // UI 切り替え
+  sessionListEl.classList.add('hidden');
+  terminalViewEl.classList.remove('hidden');
+  headerTitleEl.textContent = `${sessionName}:${windowIndex}`;
+  backBtnEl.classList.remove('hidden');
+
+  currentSession = sessionName;
+  currentWindowIndex = windowIndex;
+
+  // ターミナル初期化・接続
+  terminal = new PalmuxTerminal(terminalContainerEl);
+  const wsUrl = getWebSocketURL(sessionName, windowIndex);
+  terminal.connect(wsUrl, () => {
+    // 切断時はセッション一覧に戻る
+    console.log('WebSocket disconnected');
+  });
+  terminal.focus();
+}
+
+/**
+ * HTML をエスケープする。
+ * @param {string} str
+ * @returns {string}
+ */
+function escapeHTML(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// アプリケーション初期化
+document.addEventListener('DOMContentLoaded', () => {
+  const backBtnEl = document.getElementById('back-btn');
+
+  // 戻るボタンのイベント
+  backBtnEl.addEventListener('click', () => {
+    if (terminal && currentSession !== null) {
+      // ターミナル表示中 → セッション一覧に戻る
+      showSessionList();
+    } else if (currentSession === null) {
+      // ウィンドウ一覧表示中は既に showSessionList で処理される
+      showSessionList();
+    }
+  });
+
+  // 初期表示: セッション一覧
+  showSessionList();
+});

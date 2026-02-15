@@ -2,10 +2,10 @@
 
 frontend:
 	cd frontend && npx esbuild js/app.js \
-	  --bundle --minify --outdir=build \
-	  --external:xterm --external:xterm-addon-fit
+	  --bundle --minify --outdir=build
 	cp frontend/index.html frontend/build/
 	cp frontend/css/style.css frontend/build/
+	cp frontend/node_modules/@xterm/xterm/css/xterm.css frontend/build/
 
 build: frontend
 	CGO_ENABLED=0 go build -o palmux .
