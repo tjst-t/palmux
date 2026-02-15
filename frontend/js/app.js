@@ -3,9 +3,13 @@
 
 import { listSessions, listWindows, getWebSocketURL } from './api.js';
 import { PalmuxTerminal } from './terminal.js';
+import { Toolbar } from './toolbar.js';
 
 /** @type {PalmuxTerminal|null} */
 let terminal = null;
+
+/** @type {Toolbar|null} */
+let toolbar = null;
 
 /** 現在接続中のセッション名 */
 let currentSession = null;
@@ -23,6 +27,12 @@ async function showSessionList() {
   const backBtnEl = document.getElementById('back-btn');
   const sessionItemsEl = document.getElementById('session-items');
 
+  // ツールバーのクリーンアップ
+  if (toolbar) {
+    toolbar.dispose();
+    toolbar = null;
+  }
+
   // ターミナルが接続中なら切断
   if (terminal) {
     terminal.disconnect();
@@ -36,6 +46,12 @@ async function showSessionList() {
   terminalViewEl.classList.add('hidden');
   headerTitleEl.textContent = 'Palmux';
   backBtnEl.classList.add('hidden');
+
+  // ツールバートグルボタンを非表示
+  const toolbarToggleBtnEl = document.getElementById('toolbar-toggle-btn');
+  if (toolbarToggleBtnEl) {
+    toolbarToggleBtnEl.classList.add('hidden');
+  }
 
   // ローディング表示
   sessionItemsEl.innerHTML = '<div class="loading">Loading sessions...</div>';
@@ -133,8 +149,10 @@ function connectToWindow(sessionName, windowIndex) {
   const sessionListEl = document.getElementById('session-list');
   const terminalViewEl = document.getElementById('terminal-view');
   const terminalContainerEl = document.getElementById('terminal-container');
+  const toolbarContainerEl = document.getElementById('toolbar-container');
   const headerTitleEl = document.getElementById('header-title');
   const backBtnEl = document.getElementById('back-btn');
+  const toolbarToggleBtnEl = document.getElementById('toolbar-toggle-btn');
 
   // UI 切り替え
   sessionListEl.classList.add('hidden');
@@ -142,11 +160,26 @@ function connectToWindow(sessionName, windowIndex) {
   headerTitleEl.textContent = `${sessionName}:${windowIndex}`;
   backBtnEl.classList.remove('hidden');
 
+  // ツールバートグルボタンを表示
+  if (toolbarToggleBtnEl) {
+    toolbarToggleBtnEl.classList.remove('hidden');
+  }
+
   currentSession = sessionName;
   currentWindowIndex = windowIndex;
 
   // ターミナル初期化・接続
   terminal = new PalmuxTerminal(terminalContainerEl);
+
+  // ツールバー初期化
+  toolbar = new Toolbar(toolbarContainerEl, {
+    onSendKey: (key) => terminal.sendInput(key),
+    onToggleIME: () => {
+      // Phase 2 Task 2 で実装する
+    },
+  });
+  terminal.setToolbar(toolbar);
+
   const wsUrl = getWebSocketURL(sessionName, windowIndex);
   terminal.connect(wsUrl, () => {
     // 切断時はセッション一覧に戻る
@@ -169,6 +202,7 @@ function escapeHTML(str) {
 // アプリケーション初期化
 document.addEventListener('DOMContentLoaded', () => {
   const backBtnEl = document.getElementById('back-btn');
+  const toolbarToggleBtnEl = document.getElementById('toolbar-toggle-btn');
 
   // 戻るボタンのイベント
   backBtnEl.addEventListener('click', () => {
@@ -180,6 +214,22 @@ document.addEventListener('DOMContentLoaded', () => {
       showSessionList();
     }
   });
+
+  // ツールバートグルボタンのイベント
+  if (toolbarToggleBtnEl) {
+    toolbarToggleBtnEl.addEventListener('click', () => {
+      if (toolbar) {
+        toolbar.toggleVisibility();
+        // ツールバー表示/非表示でターミナルを再フィット
+        if (terminal) {
+          // 少し待ってからフィット（DOM 更新後）
+          requestAnimationFrame(() => {
+            terminal.fit();
+          });
+        }
+      }
+    });
+  }
 
   // 初期表示: セッション一覧
   showSessionList();

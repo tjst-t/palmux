@@ -19,6 +19,8 @@ export class PalmuxTerminal {
     this._fitAddon = null;
     this._resizeObserver = null;
     this._onDisconnect = null;
+    /** @type {import('./toolbar.js').Toolbar|null} */
+    this._toolbar = null;
   }
 
   /**
@@ -101,8 +103,12 @@ export class PalmuxTerminal {
       console.error('WebSocket error:', event);
     };
 
-    // ターミナル入力を WebSocket に送信
+    // ターミナル入力を WebSocket に送信（修飾キー合成付き）
     this._term.onData((data) => {
+      if (this._toolbar) {
+        const mods = this._toolbar.consumeModifiers();
+        data = this._applyModifiers(data, mods);
+      }
       this._sendInput(data);
     });
   }
@@ -164,6 +170,50 @@ export class PalmuxTerminal {
         rows: this._term.rows,
       }));
     }
+  }
+
+  /**
+   * 修飾キー状態を入力データに適用する。
+   * Ctrl: 単一文字の場合、制御文字に変換する（例: 'c' -> \x03）
+   * Alt: ESC プレフィクスを付与する（例: 'x' -> \x1bx）
+   * @param {string} data - 元の入力データ
+   * @param {{ ctrl: boolean, alt: boolean }} mods - 修飾キー状態
+   * @returns {string} 修飾適用後のデータ
+   */
+  _applyModifiers(data, mods) {
+    let result = data;
+
+    if (mods.ctrl && result.length === 1) {
+      const code = result.toUpperCase().charCodeAt(0);
+      // @ (64) から _ (95) の範囲で制御文字に変換
+      // Ctrl+@ = \x00, Ctrl+A = \x01, ..., Ctrl+Z = \x1a, ..., Ctrl+_ = \x1f
+      if (code >= 64 && code <= 95) {
+        result = String.fromCharCode(code - 64);
+      }
+    }
+
+    if (mods.alt) {
+      result = '\x1b' + result;
+    }
+
+    return result;
+  }
+
+  /**
+   * 入力データを WebSocket 経由でサーバーに送信する（公開メソッド）。
+   * ツールバーからの直接送信に使用する。
+   * @param {string} data - 送信するデータ
+   */
+  sendInput(data) {
+    this._sendInput(data);
+  }
+
+  /**
+   * ツールバーを設定する。
+   * @param {import('./toolbar.js').Toolbar|null} toolbar
+   */
+  setToolbar(toolbar) {
+    this._toolbar = toolbar;
   }
 
   /**
