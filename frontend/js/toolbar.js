@@ -9,10 +9,9 @@
  * ボタン定義
  * @typedef {Object} ButtonDef
  * @property {string} label - 表示ラベル
- * @property {string} type - 'instant' | 'modifier' | 'toggle'
+ * @property {string} type - 'instant' | 'modifier' | 'keyboard-mode'
  * @property {string} [key] - 送信するキーシーケンス（instant の場合）
  * @property {string} [modifier] - 修飾キー名（modifier の場合: 'ctrl' | 'alt'）
- * @property {string} [action] - アクション名（toggle: 'ime'）
  * @property {boolean} [repeat] - キーリピート対応（矢印キー、Backspace）
  * @property {Object} [popup] - スワイプアップで表示する代替キー
  * @property {string} [popup.label] - ポップアップの表示ラベル
@@ -32,7 +31,7 @@ const BUTTON_DEFS = [
   { label: '\u232B',    type: 'instant',  key: '\x7f',   repeat: true },
   { label: '/',   type: 'instant',  key: '/',  popup: { label: '|', key: '|' } },
   { label: '-',   type: 'instant',  key: '-',  popup: { label: '_', key: '_' } },
-  { label: '\u3042',    type: 'toggle',   action: 'ime' },
+  { label: '\u3042',    type: 'keyboard-mode' },
 ];
 
 /**
@@ -44,12 +43,18 @@ export class Toolbar {
    * @param {HTMLElement} container - ツールバーをマウントする DOM 要素
    * @param {Object} options
    * @param {function(string): void} options.onSendKey - キーシーケンスを送信するコールバック
-   * @param {function(): void} [options.onToggleIME] - IME トグルのコールバック
+   * @param {function(string): void} [options.onKeyboardMode] - キーボードモード変更時のコールバック（mode: 'none' | 'direct' | 'ime'）
    */
   constructor(container, options) {
     this._container = container;
     this._onSendKey = options.onSendKey;
-    this._onToggleIME = options.onToggleIME || null;
+    this._onKeyboardMode = options.onKeyboardMode || null;
+
+    /** @type {'none' | 'direct' | 'ime'} キーボードモード */
+    this._keyboardMode = 'none';
+
+    /** @type {HTMLButtonElement|null} キーボードモードボタンの参照 */
+    this._keyboardModeBtn = null;
 
     /** @type {ModifierState} */
     this._ctrlState = 'off';
@@ -119,12 +124,12 @@ export class Toolbar {
         btn.setAttribute('data-modifier', def.modifier);
         this._addModifierButtonHandler(btn, def.modifier);
         this._buttons[def.modifier] = btn;
-      } else if (def.type === 'toggle') {
-        // トグルボタン（IME）
-        btn.setAttribute('data-action', def.action);
+      } else if (def.type === 'keyboard-mode') {
+        // キーボードモード切替ボタン（none → direct → ime → none）
+        this._keyboardModeBtn = btn;
         this._addButtonHandler(btn, (e) => {
           e.preventDefault();
-          this._handleToggle(def.action);
+          this._handleKeyboardModeToggle();
         });
       }
 
@@ -421,12 +426,55 @@ export class Toolbar {
   }
 
   /**
-   * トグルボタン（IME）をハンドルする。
-   * @param {string} action
+   * キーボードモードを次のモードに切り替える。
+   * サイクル: none → direct → ime → none
    */
-  _handleToggle(action) {
-    if (action === 'ime' && this._onToggleIME) {
-      this._onToggleIME();
+  _handleKeyboardModeToggle() {
+    switch (this._keyboardMode) {
+      case 'none':
+        this._keyboardMode = 'direct';
+        break;
+      case 'direct':
+        this._keyboardMode = 'ime';
+        break;
+      case 'ime':
+        this._keyboardMode = 'none';
+        break;
+      default:
+        this._keyboardMode = 'none';
+        break;
+    }
+
+    this._updateKeyboardModeButton();
+
+    if (this._onKeyboardMode) {
+      this._onKeyboardMode(this._keyboardMode);
+    }
+  }
+
+  /**
+   * キーボードモードボタンの表示ラベルとスタイルを更新する。
+   * - 'none': ラベル 'あ'、ハイライトなし
+   * - 'direct': ラベル 'A'、oneshot スタイルハイライト
+   * - 'ime': ラベル 'あ'、oneshot スタイルハイライト
+   */
+  _updateKeyboardModeButton() {
+    if (!this._keyboardModeBtn) return;
+
+    this._keyboardModeBtn.classList.remove('toolbar-btn--oneshot');
+
+    switch (this._keyboardMode) {
+      case 'none':
+        this._keyboardModeBtn.textContent = '\u3042';
+        break;
+      case 'direct':
+        this._keyboardModeBtn.textContent = 'A';
+        this._keyboardModeBtn.classList.add('toolbar-btn--oneshot');
+        break;
+      case 'ime':
+        this._keyboardModeBtn.textContent = '\u3042';
+        this._keyboardModeBtn.classList.add('toolbar-btn--oneshot');
+        break;
     }
   }
 
@@ -509,6 +557,14 @@ export class Toolbar {
    */
   get altState() {
     return this._altState;
+  }
+
+  /**
+   * 現在のキーボードモードを返す。
+   * @returns {'none' | 'direct' | 'ime'}
+   */
+  get keyboardMode() {
+    return this._keyboardMode;
   }
 
   /**

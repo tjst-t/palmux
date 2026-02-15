@@ -3,6 +3,7 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
 
 /**
  * PalmuxTerminal は xterm.js のラッパー。
@@ -42,6 +43,7 @@ export class PalmuxTerminal {
     const fontSize = (savedSize >= 8 && savedSize <= 24) ? savedSize : 14;
 
     this._term = new Terminal({
+      allowProposedApi: true,
       cursorBlink: true,
       fontSize: fontSize,
       fontFamily: '"Cascadia Code", "Fira Code", "Source Code Pro", monospace',
@@ -58,10 +60,16 @@ export class PalmuxTerminal {
 
     this._term.open(this._container);
 
-    // inputmode="none" でスマホの IME を抑制（DESIGN.md の指示）
-    const textarea = this._container.querySelector('.xterm-helper-textarea');
-    if (textarea) {
-      textarea.setAttribute('inputmode', 'none');
+    // Unicode 11 の文字幅テーブルを使用し、CJK 文字の幅を正しく計算する
+    const unicode11Addon = new Unicode11Addon();
+    this._term.loadAddon(unicode11Addon);
+    this._term.unicode.activeVersion = '11';
+
+    // デフォルトは 'none' モード（ソフトキーボード非表示）
+    // ツールバーのキーボードモード切替で 'direct'/'ime' に変更可能
+    const helperTextarea = this._container.querySelector('.xterm-helper-textarea');
+    if (helperTextarea) {
+      helperTextarea.setAttribute('inputmode', 'none');
     }
 
     this.fit();
@@ -279,6 +287,33 @@ export class PalmuxTerminal {
    */
   setIMEMode(enabled) {
     this._imeMode = enabled;
+  }
+
+  /**
+   * キーボードモードを設定する。
+   * - 'none': inputmode="none"（ソフトキーボード非表示、外部キーボード用）
+   * - 'direct': inputmode="url"（ソフトキーボード表示、ASCII 直接入力。Android IME の変換下線を回避）
+   * - 'ime': inputmode="none"（ソフトキーボード非表示、IME 入力バー経由で入力）
+   * @param {'none' | 'direct' | 'ime'} mode - キーボードモード
+   */
+  setKeyboardMode(mode) {
+    const helperTextarea = this._container.querySelector('.xterm-helper-textarea');
+    if (!helperTextarea) return;
+
+    switch (mode) {
+      case 'none':
+        helperTextarea.setAttribute('inputmode', 'none');
+        break;
+      case 'direct':
+        helperTextarea.setAttribute('inputmode', 'url');
+        break;
+      case 'ime':
+        helperTextarea.setAttribute('inputmode', 'none');
+        break;
+      default:
+        helperTextarea.setAttribute('inputmode', 'none');
+        break;
+    }
   }
 
   /**

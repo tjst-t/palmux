@@ -41,7 +41,6 @@ async function showSessionList() {
   const sessionListEl = document.getElementById('session-list');
   const terminalViewEl = document.getElementById('terminal-view');
   const headerTitleEl = document.getElementById('header-title');
-  const backBtnEl = document.getElementById('back-btn');
   const sessionItemsEl = document.getElementById('session-items');
   const drawerBtnEl = document.getElementById('drawer-btn');
 
@@ -93,12 +92,17 @@ async function showSessionList() {
   sessionListEl.classList.remove('hidden');
   terminalViewEl.classList.add('hidden');
   headerTitleEl.textContent = 'Palmux';
-  backBtnEl.classList.add('hidden');
 
   // ツールバートグルボタンを非表示
   const toolbarToggleBtnEl = document.getElementById('toolbar-toggle-btn');
   if (toolbarToggleBtnEl) {
     toolbarToggleBtnEl.classList.add('hidden');
+  }
+
+  // フォントサイズコントロールを非表示
+  const fontSizeControlsEl = document.getElementById('font-size-controls');
+  if (fontSizeControlsEl) {
+    fontSizeControlsEl.classList.add('hidden');
   }
 
   // drawer ボタンを非表示（セッション一覧では不要）
@@ -151,10 +155,8 @@ async function showSessionList() {
 async function showWindowList(sessionName) {
   const sessionItemsEl = document.getElementById('session-items');
   const headerTitleEl = document.getElementById('header-title');
-  const backBtnEl = document.getElementById('back-btn');
 
   headerTitleEl.textContent = sessionName;
-  backBtnEl.classList.remove('hidden');
 
   sessionItemsEl.innerHTML = '<div class="loading">Loading windows...</div>';
 
@@ -205,7 +207,6 @@ function connectToWindow(sessionName, windowIndex) {
   const imeContainerEl = document.getElementById('ime-container');
   const toolbarContainerEl = document.getElementById('toolbar-container');
   const headerTitleEl = document.getElementById('header-title');
-  const backBtnEl = document.getElementById('back-btn');
   const toolbarToggleBtnEl = document.getElementById('toolbar-toggle-btn');
   const drawerBtnEl = document.getElementById('drawer-btn');
 
@@ -235,11 +236,16 @@ function connectToWindow(sessionName, windowIndex) {
   sessionListEl.classList.add('hidden');
   terminalViewEl.classList.remove('hidden');
   headerTitleEl.textContent = `${sessionName}:${windowIndex}`;
-  backBtnEl.classList.remove('hidden');
 
   // ツールバートグルボタンを表示
   if (toolbarToggleBtnEl) {
     toolbarToggleBtnEl.classList.remove('hidden');
+  }
+
+  // フォントサイズコントロールを表示
+  const fontSizeControlsEl = document.getElementById('font-size-controls');
+  if (fontSizeControlsEl) {
+    fontSizeControlsEl.classList.remove('hidden');
   }
 
   // drawer ボタンを表示（ターミナル接続中のみ）
@@ -273,15 +279,32 @@ function connectToWindow(sessionName, windowIndex) {
   // ツールバー初期化
   toolbar = new Toolbar(toolbarContainerEl, {
     onSendKey: (key) => terminal.sendInput(key),
-    onToggleIME: () => {
-      if (imeInput) {
-        imeInput.toggle();
+    onKeyboardMode: (mode) => {
+      terminal.setKeyboardMode(mode);
+      if (mode === 'ime') {
+        // IME モード: IME 入力バーを表示し、ターミナルの直接入力を抑制
+        if (imeInput) {
+          imeInput.show();
+        }
+        terminal.setIMEMode(true);
+      } else {
+        // none / direct モード: IME 入力バーを非表示にし、ターミナルの直接入力を許可
+        if (imeInput) {
+          imeInput.hide();
+        }
+        terminal.setIMEMode(false);
       }
+      requestAnimationFrame(() => {
+        terminal.fit();
+      });
     },
-    onFontDecrease: () => terminal.decreaseFontSize(),
-    onFontIncrease: () => terminal.increaseFontSize(),
   });
   terminal.setToolbar(toolbar);
+
+  // デスクトップではツールバーをデフォルト非表示
+  if (!isMobileDevice()) {
+    toolbar.toggleVisibility();
+  }
 
   // タッチハンドラー初期化（スワイプでウィンドウ切り替え）
   touchHandler = new TouchHandler(terminalContainerEl, {
@@ -373,30 +396,12 @@ function updateConnectionUI(state) {
 
 /**
  * 同一セッション内のウィンドウを切り替える。
- * tmux の prefix + コマンドモードで select-window を実行する。
+ * WebSocket を再接続して指定ウィンドウに接続する。
  * @param {string} sessionName - セッション名
  * @param {number} windowIndex - ウィンドウインデックス
  */
 function switchWindow(sessionName, windowIndex) {
-  if (!terminal) return;
-
-  // tmux prefix (Ctrl+B) + コマンドモード(:) + select-window コマンド + Enter
-  // \x02 = Ctrl+B (default tmux prefix)
-  terminal.sendInput('\x02:select-window -t :' + windowIndex + '\r');
-
-  // ヘッダータイトルを更新
-  const headerTitleEl = document.getElementById('header-title');
-  headerTitleEl.textContent = `${sessionName}:${windowIndex}`;
-
-  currentWindowIndex = windowIndex;
-
-  // Drawer の現在位置を更新
-  if (drawer) {
-    drawer.setCurrent(sessionName, windowIndex);
-  }
-
-  // ターミナルにフォーカスを戻す
-  terminal.focus();
+  connectToWindow(sessionName, windowIndex);
 }
 
 /**
@@ -420,9 +425,17 @@ function escapeHTML(str) {
   return div.innerHTML;
 }
 
+/**
+ * モバイルデバイスかどうかを判定する。
+ * タッチ対応かつ画面幅が狭い場合にモバイルと判定する。
+ * @returns {boolean}
+ */
+function isMobileDevice() {
+  return 'ontouchstart' in window && window.innerWidth <= 1024;
+}
+
 // アプリケーション初期化
 document.addEventListener('DOMContentLoaded', () => {
-  const backBtnEl = document.getElementById('back-btn');
   const toolbarToggleBtnEl = document.getElementById('toolbar-toggle-btn');
   const drawerBtnEl = document.getElementById('drawer-btn');
 
@@ -479,17 +492,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 戻るボタンのイベント
-  backBtnEl.addEventListener('click', () => {
-    if (terminal && currentSession !== null) {
-      // ターミナル表示中 → セッション一覧に戻る
-      showSessionList();
-    } else if (currentSession === null) {
-      // ウィンドウ一覧表示中は既に showSessionList で処理される
-      showSessionList();
-    }
-  });
-
   // ツールバートグルボタンのイベント
   if (toolbarToggleBtnEl) {
     toolbarToggleBtnEl.addEventListener('click', () => {
@@ -516,6 +518,58 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 初期表示: セッション一覧
-  showSessionList();
+  // フォントサイズボタンのイベント
+  const fontDecreaseBtn = document.getElementById('font-decrease-btn');
+  const fontIncreaseBtn = document.getElementById('font-increase-btn');
+  if (fontDecreaseBtn) {
+    fontDecreaseBtn.addEventListener('click', () => {
+      if (terminal) terminal.decreaseFontSize();
+    });
+  }
+  if (fontIncreaseBtn) {
+    fontIncreaseBtn.addEventListener('click', () => {
+      if (terminal) terminal.increaseFontSize();
+    });
+  }
+
+  // 初期表示: 最後のセッションに自動接続を試行
+  autoConnect();
 });
+
+/**
+ * 最後のセッション（Activity が最も新しいセッション）のアクティブウィンドウに自動接続する。
+ * セッションが存在しない場合やエラー時はセッション一覧を表示する。
+ */
+async function autoConnect() {
+  try {
+    const sessions = await listSessions();
+
+    if (!sessions || sessions.length === 0) {
+      showSessionList();
+      return;
+    }
+
+    // Activity が最も新しいセッションを選択
+    let latest = sessions[0];
+    for (let i = 1; i < sessions.length; i++) {
+      if (new Date(sessions[i].activity) > new Date(latest.activity)) {
+        latest = sessions[i];
+      }
+    }
+
+    // そのセッションのウィンドウ一覧を取得し、アクティブウィンドウに接続
+    const windows = await listWindows(latest.name);
+
+    if (!windows || windows.length === 0) {
+      showSessionList();
+      return;
+    }
+
+    // アクティブウィンドウを探す。なければ最初のウィンドウ
+    const activeWindow = windows.find((w) => w.active) || windows[0];
+    connectToWindow(latest.name, activeWindow.index);
+  } catch (err) {
+    console.error('Auto-connect failed, showing session list:', err);
+    showSessionList();
+  }
+}
