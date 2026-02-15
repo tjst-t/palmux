@@ -512,6 +512,22 @@ export class Toolbar {
   }
 
   /**
+   * Ctrl が有効（oneshot または locked）かどうかを返す。
+   * @returns {boolean}
+   */
+  hasCtrl() {
+    return this._ctrlState !== 'off';
+  }
+
+  /**
+   * Alt が有効（oneshot または locked）かどうかを返す。
+   * @returns {boolean}
+   */
+  hasAlt() {
+    return this._altState !== 'off';
+  }
+
+  /**
    * リソースを解放する。
    */
   dispose() {
