@@ -7,6 +7,7 @@ import { PalmuxTerminal } from './terminal.js';
 import { Toolbar } from './toolbar.js';
 import { IMEInput } from './ime-input.js';
 import { Drawer } from './drawer.js';
+import { TouchHandler } from './touch.js';
 
 /** @type {PalmuxTerminal|null} */
 let terminal = null;
@@ -19,6 +20,9 @@ let imeInput = null;
 
 /** @type {Drawer|null} */
 let drawer = null;
+
+/** @type {import('./touch.js').TouchHandler|null} */
+let touchHandler = null;
 
 /** 現在接続中のセッション名 */
 let currentSession = null;
@@ -36,6 +40,12 @@ async function showSessionList() {
   const backBtnEl = document.getElementById('back-btn');
   const sessionItemsEl = document.getElementById('session-items');
   const drawerBtnEl = document.getElementById('drawer-btn');
+
+  // タッチハンドラーのクリーンアップ
+  if (touchHandler) {
+    touchHandler.destroy();
+    touchHandler = null;
+  }
 
   // IME 入力のクリーンアップ
   if (imeInput) {
@@ -178,6 +188,10 @@ function connectToWindow(sessionName, windowIndex) {
   const drawerBtnEl = document.getElementById('drawer-btn');
 
   // 既存ターミナルをクリーンアップ
+  if (touchHandler) {
+    touchHandler.destroy();
+    touchHandler = null;
+  }
   if (imeInput) {
     imeInput.destroy();
     imeInput = null;
@@ -240,6 +254,27 @@ function connectToWindow(sessionName, windowIndex) {
     },
   });
   terminal.setToolbar(toolbar);
+
+  // タッチハンドラー初期化（スワイプでウィンドウ切り替え）
+  touchHandler = new TouchHandler(terminalContainerEl, {
+    onSwipeLeft: () => {
+      // 左スワイプ: 次のウィンドウに切り替え
+      if (currentSession !== null && currentWindowIndex !== null) {
+        const nextIndex = currentWindowIndex + 1;
+        switchWindow(currentSession, nextIndex);
+      }
+    },
+    onSwipeRight: () => {
+      // 右スワイプ: 前のウィンドウに切り替え
+      if (currentSession !== null && currentWindowIndex !== null && currentWindowIndex > 0) {
+        const prevIndex = currentWindowIndex - 1;
+        switchWindow(currentSession, prevIndex);
+      }
+    },
+    onPinchZoom: (delta) => {
+      // ピンチズーム: Task 5 で実装予定（フォントサイズ調整）
+    },
+  });
 
   const wsUrl = getWebSocketURL(sessionName, windowIndex);
   terminal.connect(wsUrl, () => {
