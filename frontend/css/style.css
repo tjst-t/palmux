@@ -487,6 +487,38 @@ html, body {
   margin-left: 8px;
 }
 
+/* Drawer New Window Button */
+.drawer-new-window-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px 8px 36px;
+  min-height: 40px;
+  color: #7ec8e3;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-bottom: 1px solid rgba(42, 42, 74, 0.3);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.drawer-new-window-btn:hover {
+  background: rgba(126, 200, 227, 0.08);
+}
+
+.drawer-new-window-btn:active {
+  background: rgba(126, 200, 227, 0.15);
+}
+
+.drawer-new-window-btn--disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 /* Drawer Loading / Empty / Error */
 .drawer-loading,
 .drawer-empty,
@@ -848,6 +880,11 @@ html, body {
 
   .drawer-window-item {
     padding: 8px 14px 8px 32px;
+  }
+
+  .drawer-new-window-btn {
+    padding: 6px 14px 6px 32px;
+    font-size: 12px;
   }
 
   .drawer-session-name {

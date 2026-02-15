@@ -363,6 +363,21 @@ document.addEventListener('DOMContentLoaded', () => {
       // セッション削除後の処理（現在は特に何もしない。
       // 現在接続中のセッション削除は drawer 側でブロックされている）
     },
+    onCreateWindow: (session, windowIndex) => {
+      // ウィンドウ作成後、ヘッダータイトルを更新
+      const headerTitleEl = document.getElementById('header-title');
+      if (headerTitleEl && session === currentSession) {
+        headerTitleEl.textContent = `${session}:${windowIndex}`;
+      }
+    },
+    onDeleteWindow: () => {
+      // ウィンドウ削除後、ヘッダータイトルを更新
+      const headerTitleEl = document.getElementById('header-title');
+      if (headerTitleEl && currentSession !== null && drawer) {
+        // drawer の現在ウィンドウインデックスを反映
+        headerTitleEl.textContent = `${currentSession}:${currentWindowIndex}`;
+      }
+    },
   });
 
   // drawer ボタンのイベント
