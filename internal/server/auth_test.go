@@ -156,3 +156,83 @@ func TestAuthMiddleware_CallsNextOnSuccess(t *testing.T) {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 }
+
+func TestAuthMiddleware_QueryParamToken(t *testing.T) {
+	const validToken = "test-secret-token-12345"
+
+	innerHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
+
+	tests := []struct {
+		name       string
+		queryToken string
+		authHeader string
+		wantStatus int
+		wantBody   string
+	}{
+		{
+			name:       "クエリパラメータのトークンのみ: 200を返しハンドラに委譲",
+			queryToken: validToken,
+			authHeader: "",
+			wantStatus: http.StatusOK,
+			wantBody:   "ok",
+		},
+		{
+			name:       "不正なクエリパラメータトークン: 401を返す",
+			queryToken: "wrong-token",
+			authHeader: "",
+			wantStatus: http.StatusUnauthorized,
+			wantBody:   "",
+		},
+		{
+			name:       "空のクエリパラメータトークン: 401を返す",
+			queryToken: "",
+			authHeader: "",
+			wantStatus: http.StatusUnauthorized,
+			wantBody:   "",
+		},
+		{
+			name:       "Authorizationヘッダーが優先される: ヘッダー正しい場合は200",
+			queryToken: "wrong-token",
+			authHeader: "Bearer " + validToken,
+			wantStatus: http.StatusOK,
+			wantBody:   "ok",
+		},
+		{
+			name:       "Authorizationヘッダーが優先される: ヘッダー不正でもクエリ正しい場合は401",
+			queryToken: validToken,
+			authHeader: "Bearer wrong-token",
+			wantStatus: http.StatusUnauthorized,
+			wantBody:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			middleware := AuthMiddleware(validToken)
+			handler := middleware(innerHandler)
+
+			url := "/api/sessions"
+			if tt.queryToken != "" {
+				url += "?token=" + tt.queryToken
+			}
+			req := httptest.NewRequest(http.MethodGet, url, nil)
+			if tt.authHeader != "" {
+				req.Header.Set("Authorization", tt.authHeader)
+			}
+
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d", rec.Code, tt.wantStatus)
+			}
+
+			if tt.wantBody != "" && rec.Body.String() != tt.wantBody {
+				t.Errorf("body = %q, want %q", rec.Body.String(), tt.wantBody)
+			}
+		})
+	}
+}

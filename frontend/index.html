@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="base-path" content="/">
+  <meta name="auth-token" content="">
+  <title>Palmux</title>
+  <link rel="stylesheet" href="xterm.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <div id="header">
+      <button id="back-btn" class="hidden" aria-label="Back">&#9664;</button>
+      <div id="header-title">Palmux</div>
+    </div>
+
+    <!-- Main Content -->
+    <div id="main">
+      <!-- Session/Window List -->
+      <div id="session-list">
+        <div id="session-items"></div>
+      </div>
+
+      <!-- Terminal View -->
+      <div id="terminal-view" class="hidden">
+        <div id="terminal-container"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
