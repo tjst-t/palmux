@@ -5,8 +5,9 @@
  * IMEInput はターミナル下部に配置される IME 入力フィールド。
  * 通常は非表示で、ツールバーの [あ] ボタンでトグルする。
  *
- * - Enter: 確定テキスト + '\n' を送信し、フィールドクリア
- * - Shift+Enter: 確定テキストのみ送信（'\n' なし）、フィールドクリア
+ * - Enter（テキストあり）: 確定テキストのみ送信し、フィールドクリア
+ * - Enter（テキストなし）: '\r'（Enter キー）をターミナルに送信
+ * - Shift+Enter: 確定テキスト + '\r' を一括送信し、フィールドクリア
  * - 送信後もフォーカスを維持（連続入力可能）
  * - e.isComposing チェックで未確定の IME 入力中は送信しない
  */
@@ -54,14 +55,20 @@ export class IMEInput {
    */
   _setupEvents() {
     this._input.addEventListener('keydown', (e) => {
-      // IME 変換中（isComposing）は何もしない
-      if (e.key === 'Enter' && !e.isComposing) {
+      if (e.isComposing) {
+        return; // IME 変換中は何もしない
+      }
+      if (e.key === 'Enter') {
         e.preventDefault();
         if (e.shiftKey) {
-          this._send(false); // 改行なし
+          this._send(true); // テキスト + Enter を一括送信
         } else {
-          this._send(true); // 改行あり
+          this._send(false); // テキストのみ、または空なら Enter
         }
+      } else if (e.key === 'Backspace' && !this._input.value) {
+        // フィールドが空の場合、ターミナルに Backspace を送信
+        e.preventDefault();
+        this._onSend('\x7f');
       }
     });
 
@@ -72,15 +79,45 @@ export class IMEInput {
 
   /**
    * 入力テキストを送信する。
-   * @param {boolean} withNewline - 末尾に '\n' を付与するか
+   * @param {boolean} withEnter - テキストと一緒に '\r' も送信するか
    */
-  _send(withNewline) {
+  _send(withEnter) {
     const text = this._input.value;
     if (text) {
-      this._onSend(withNewline ? text + '\n' : text);
+      this._onSend(withEnter ? text + '\r' : text);
       this._input.value = '';
+    } else {
+      // テキストが空の場合は Enter を送信
+      this._onSend('\r');
     }
     this._input.focus();
+  }
+
+  /**
+   * IME 入力フィールドを表示する。
+   */
+  show() {
+    if (!this._visible) {
+      this._visible = true;
+      this._el.style.display = 'flex';
+      this._input.focus();
+      if (this._onToggle) {
+        this._onToggle(true);
+      }
+    }
+  }
+
+  /**
+   * IME 入力フィールドを非表示にする。
+   */
+  hide() {
+    if (this._visible) {
+      this._visible = false;
+      this._el.style.display = 'none';
+      if (this._onToggle) {
+        this._onToggle(false);
+      }
+    }
   }
 
   /**
