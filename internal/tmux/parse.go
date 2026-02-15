@@ -13,6 +13,7 @@ type Session struct {
 	Windows  int       `json:"windows"`
 	Attached bool      `json:"attached"`
 	Created  time.Time `json:"created"`
+	Activity time.Time `json:"activity"`
 }
 
 // Window は tmux ウィンドウの情報を表す。
@@ -23,15 +24,15 @@ type Window struct {
 }
 
 // ParseSessions は tmux list-sessions の出力をパースして Session スライスを返す。
-// フォーマット: #{session_name}\t#{session_windows}\t#{session_attached}\t#{session_created}
+// フォーマット: #{session_name}\t#{session_windows}\t#{session_attached}\t#{session_created}\t#{session_activity}
 func ParseSessions(data []byte) ([]Session, error) {
 	lines := splitLines(data)
 	sessions := make([]Session, 0, len(lines))
 
 	for _, line := range lines {
 		fields := strings.Split(line, "\t")
-		if len(fields) != 4 {
-			return nil, fmt.Errorf("invalid session line: expected 4 fields, got %d: %q", len(fields), line)
+		if len(fields) != 5 {
+			return nil, fmt.Errorf("invalid session line: expected 5 fields, got %d: %q", len(fields), line)
 		}
 
 		windows, err := strconv.Atoi(fields[1])
@@ -49,11 +50,17 @@ func ParseSessions(data []byte) ([]Session, error) {
 			return nil, fmt.Errorf("invalid session created timestamp %q: %w", fields[3], err)
 		}
 
+		activityUnix, err := strconv.ParseInt(fields[4], 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid session activity timestamp %q: %w", fields[4], err)
+		}
+
 		sessions = append(sessions, Session{
 			Name:     fields[0],
 			Windows:  windows,
 			Attached: attached != 0,
 			Created:  time.Unix(createdUnix, 0),
+			Activity: time.Unix(activityUnix, 0),
 		})
 	}
 

@@ -29,7 +29,7 @@ func (m *mockTmuxManager) KillWindow(session string, index int) error { return n
 func (m *mockTmuxManager) RenameWindow(session string, index int, name string) error {
 	return nil
 }
-func (m *mockTmuxManager) Attach(session string) (*os.File, *exec.Cmd, error) {
+func (m *mockTmuxManager) Attach(session string, windowIndex int) (*os.File, *exec.Cmd, error) {
 	return nil, nil, nil
 }
 

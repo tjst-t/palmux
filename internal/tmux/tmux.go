@@ -17,7 +17,7 @@ type Manager struct {
 }
 
 // sessionFormat は list-sessions / new-session の出力フォーマット。
-const sessionFormat = "#{session_name}\t#{session_windows}\t#{session_attached}\t#{session_created}"
+const sessionFormat = "#{session_name}\t#{session_windows}\t#{session_attached}\t#{session_created}\t#{session_activity}"
 
 // windowFormat は list-windows / new-window の出力フォーマット。
 const windowFormat = "#{window_index}\t#{window_name}\t#{window_active}"
@@ -145,15 +145,22 @@ func (m *Manager) RenameWindow(session string, index int, name string) error {
 }
 
 // Attach は tmux attach-session を pty 内で実行し、pty のマスター側ファイルと exec.Cmd を返す。
+// windowIndex が 0 以上の場合、接続後に指定ウィンドウを選択する。
 // 呼び出し元は返されたファイルを通じて pty と双方向に通信できる。
 // 使用後は呼び出し元がファイルの Close とプロセスの Kill/Wait を行う必要がある。
-func (m *Manager) Attach(session string) (*os.File, *exec.Cmd, error) {
+func (m *Manager) Attach(session string, windowIndex int) (*os.File, *exec.Cmd, error) {
 	tmuxBin := "tmux"
 	if re, ok := m.Exec.(*RealExecutor); ok && re.TmuxBin != "" {
 		tmuxBin = re.TmuxBin
 	}
 
-	cmd := exec.Command(tmuxBin, "attach-session", "-t", session)
+	args := []string{"attach-session", "-t", session}
+	if windowIndex >= 0 {
+		target := fmt.Sprintf("%s:%d", session, windowIndex)
+		args = append(args, ";", "select-window", "-t", target)
+	}
+
+	cmd := exec.Command(tmuxBin, args...)
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		return nil, nil, fmt.Errorf("attach session %q: %w", session, err)

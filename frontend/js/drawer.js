@@ -53,10 +53,13 @@ export class Drawer {
     this._creating = false;
     /** @type {boolean} ウィンドウ作成中フラグ */
     this._creatingWindow = false;
+    /** @type {'activity'|'name'} セッション並び順 */
+    this._sortOrder = 'activity';
 
     this._el = document.getElementById('drawer');
     this._overlay = document.getElementById('drawer-overlay');
     this._content = document.getElementById('drawer-content');
+    this._sortCheckbox = document.getElementById('drawer-sort-checkbox');
 
     this._setupEvents();
   }
@@ -89,6 +92,15 @@ export class Drawer {
         this.close();
       }
     }, { passive: true });
+
+    // ソートトグルスイッチ
+    if (this._sortCheckbox) {
+      this._sortCheckbox.addEventListener('change', () => {
+        this._sortOrder = this._sortCheckbox.checked ? 'name' : 'activity';
+        this._updateSortLabels();
+        this._renderContent();
+      });
+    }
   }
 
   /**
@@ -99,7 +111,8 @@ export class Drawer {
     this._el.classList.add('drawer--open');
     this._overlay.classList.add('drawer-overlay--visible');
 
-    // 現在のセッションは自動展開
+    // 現在のセッションだけ自動展開（アコーディオン）
+    this._expandedSessions.clear();
     if (this._currentSession) {
       this._expandedSessions.add(this._currentSession);
     }
@@ -171,6 +184,35 @@ export class Drawer {
   }
 
   /**
+   * セッションをソートして返す。元の配列は変更しない。
+   * @returns {Array}
+   */
+  _getSortedSessions() {
+    const sessions = [...this._sessions];
+    if (this._sortOrder === 'name') {
+      sessions.sort((a, b) => a.name.localeCompare(b.name));
+    } else {
+      // activity 降順（新しい順）
+      sessions.sort((a, b) => new Date(b.activity) - new Date(a.activity));
+    }
+    return sessions;
+  }
+
+  /**
+   * ソートトグルのラベルのアクティブ状態を更新する。
+   */
+  _updateSortLabels() {
+    const labels = this._el.querySelectorAll('.drawer-sort-label');
+    for (const label of labels) {
+      if (label.dataset.sort === this._sortOrder) {
+        label.classList.add('drawer-sort-label--active');
+      } else {
+        label.classList.remove('drawer-sort-label--active');
+      }
+    }
+  }
+
+  /**
    * Drawer の内容を描画する。
    */
   _renderContent() {
@@ -182,7 +224,8 @@ export class Drawer {
       emptyEl.textContent = 'No sessions';
       this._content.appendChild(emptyEl);
     } else {
-      for (const session of this._sessions) {
+      const sorted = this._getSortedSessions();
+      for (const session of sorted) {
         const sessionEl = this._createSessionElement(session);
         this._content.appendChild(sessionEl);
       }
@@ -406,6 +449,8 @@ export class Drawer {
         this._expandedSessions.delete(session.name);
         this._renderContent();
       } else {
+        // 他のセッションを閉じて、このセッションだけ展開（アコーディオン）
+        this._expandedSessions.clear();
         this._expandedSessions.add(session.name);
         // ウィンドウ一覧をロード
         try {
@@ -657,29 +702,19 @@ export class Drawer {
     nameEl.className = 'drawer-window-name';
     nameEl.textContent = win.name;
 
-    // ウィンドウ名タップでインライン編集
-    nameEl.addEventListener('click', (e) => {
-      e.stopPropagation();
-      // 長押し後のクリックイベントは無視
-      if (this._longPressDetected) {
-        this._longPressDetected = false;
-        return;
-      }
-      this._startWindowRename(el, indexEl, nameEl, sessionName, win);
-    });
+    // インジケーターは常に配置し、アクティブ/現在でない場合は非表示
+    const indicator = document.createElement('span');
+    indicator.className = 'drawer-window-active';
+    if (win.active || isCurrent) {
+      indicator.textContent = '\u25CF';
+    }
 
     el.appendChild(indexEl);
     el.appendChild(nameEl);
+    el.appendChild(indicator);
 
-    if (win.active || isCurrent) {
-      const indicator = document.createElement('span');
-      indicator.className = 'drawer-window-active';
-      indicator.textContent = '\u25CF';
-      el.appendChild(indicator);
-    }
-
-    // 長押しでウィンドウ削除オプション表示
-    this._setupWindowLongPress(el, sessionName, win, windowCount);
+    // 長押しでウィンドウ操作メニュー表示（Rename / Delete）
+    this._setupWindowLongPress(el, sessionName, win, windowCount, indexEl, nameEl);
 
     // ウィンドウタップでの挙動（名前以外の部分をタップした場合）
     el.addEventListener('click', () => {
@@ -807,15 +842,21 @@ export class Drawer {
 
   /**
    * ウィンドウ要素に長押し検出を設定する。
-   * 500ms の長押しで削除確認モーダルを表示する。
+   * 500ms の長押しで操作メニュー（Rename / Delete）を表示する。
    * @param {HTMLElement} el - ウィンドウ要素
    * @param {string} sessionName - セッション名
    * @param {Object} win - ウィンドウ情報
    * @param {number} windowCount - セッション内のウィンドウ総数
+   * @param {HTMLElement} indexEl - インデックス表示要素
+   * @param {HTMLElement} nameEl - 名前表示要素
    */
-  _setupWindowLongPress(el, sessionName, win, windowCount) {
+  _setupWindowLongPress(el, sessionName, win, windowCount, indexEl, nameEl) {
     let startX = 0;
     let startY = 0;
+
+    const showMenu = () => {
+      this._showWindowContextMenu(el, sessionName, win, windowCount, indexEl, nameEl);
+    };
 
     el.addEventListener('touchstart', (e) => {
       startX = e.touches[0].clientX;
@@ -824,7 +865,7 @@ export class Drawer {
 
       this._longPressTimer = window.setTimeout(() => {
         this._longPressDetected = true;
-        this._showWindowDeleteConfirmation(sessionName, win, windowCount);
+        showMenu();
       }, 500);
     }, { passive: true });
 
@@ -832,7 +873,6 @@ export class Drawer {
       if (this._longPressTimer !== null) {
         const moveX = e.touches[0].clientX;
         const moveY = e.touches[0].clientY;
-        // 10px 以上動いたら長押しキャンセル
         if (Math.abs(moveX - startX) > 10 || Math.abs(moveY - startY) > 10) {
           this._clearLongPressTimer();
         }
@@ -847,10 +887,82 @@ export class Drawer {
       this._clearLongPressTimer();
     }, { passive: true });
 
-    // デスクトップ: 右クリック（contextmenu）でも削除オプション表示
+    // デスクトップ: 右クリック（contextmenu）でも操作メニュー表示
     el.addEventListener('contextmenu', (e) => {
       e.preventDefault();
+      showMenu();
+    });
+  }
+
+  /**
+   * ウィンドウ操作メニュー（Rename / Delete）を表示する。
+   * @param {HTMLElement} el - ウィンドウ要素
+   * @param {string} sessionName - セッション名
+   * @param {Object} win - ウィンドウ情報
+   * @param {number} windowCount - セッション内のウィンドウ総数
+   * @param {HTMLElement} indexEl - インデックス表示要素
+   * @param {HTMLElement} nameEl - 名前表示要素
+   */
+  _showWindowContextMenu(el, sessionName, win, windowCount, indexEl, nameEl) {
+    // 既にメニューが表示中なら除去
+    const existing = document.querySelector('.drawer-context-menu-overlay');
+    if (existing) {
+      existing.remove();
+    }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'drawer-context-menu-overlay';
+
+    const menu = document.createElement('div');
+    menu.className = 'drawer-context-menu';
+
+    const title = document.createElement('div');
+    title.className = 'drawer-context-menu-title';
+    title.textContent = `${win.index}: ${win.name}`;
+    menu.appendChild(title);
+
+    // Rename
+    const renameBtn = document.createElement('button');
+    renameBtn.className = 'drawer-context-menu-item';
+    renameBtn.textContent = 'Rename';
+    renameBtn.addEventListener('click', () => {
+      closeMenu();
+      this._startWindowRename(el, indexEl, nameEl, sessionName, win);
+    });
+    menu.appendChild(renameBtn);
+
+    // Delete
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'drawer-context-menu-item drawer-context-menu-item--danger';
+    if (windowCount <= 1) {
+      deleteBtn.disabled = true;
+      deleteBtn.title = 'Cannot delete the last window';
+    }
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', () => {
+      closeMenu();
       this._showWindowDeleteConfirmation(sessionName, win, windowCount);
+    });
+    menu.appendChild(deleteBtn);
+
+    overlay.appendChild(menu);
+    document.body.appendChild(overlay);
+
+    requestAnimationFrame(() => {
+      overlay.classList.add('drawer-context-menu-overlay--visible');
+    });
+
+    const closeMenu = () => {
+      overlay.classList.remove('drawer-context-menu-overlay--visible');
+      setTimeout(() => {
+        overlay.remove();
+      }, 200);
+    };
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        closeMenu();
+      }
     });
   }
 

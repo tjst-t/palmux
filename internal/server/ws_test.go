@@ -28,14 +28,16 @@ type wsMock struct {
 	multiPty bool
 	ptsPairs []*os.File // テスト側がアクセスするスレーブ側の一覧
 
-	calledAttach string
-	mu           sync.Mutex
+	calledAttach       string
+	calledWindowIndex  int
+	mu                 sync.Mutex
 }
 
-func (m *wsMock) Attach(session string) (*os.File, *exec.Cmd, error) {
+func (m *wsMock) Attach(session string, windowIndex int) (*os.File, *exec.Cmd, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calledAttach = session
+	m.calledWindowIndex = windowIndex
 	if m.attachErr != nil {
 		return nil, nil, m.attachErr
 	}
@@ -159,6 +161,64 @@ func TestHandleAttach_WebSocketConnect(t *testing.T) {
 
 	if calledSession != "main" {
 		t.Errorf("Attach called with session %q, want %q", calledSession, "main")
+	}
+}
+
+func TestHandleAttach_WindowIndex(t *testing.T) {
+	tests := []struct {
+		name            string
+		path            string
+		wantSession     string
+		wantWindowIndex int
+	}{
+		{
+			name:            "ウィンドウインデックス0",
+			path:            "/api/sessions/main/windows/0/attach",
+			wantSession:     "main",
+			wantWindowIndex: 0,
+		},
+		{
+			name:            "ウィンドウインデックス3",
+			path:            "/api/sessions/dev/windows/3/attach",
+			wantSession:     "dev",
+			wantWindowIndex: 3,
+		},
+		{
+			name:            "大きなウィンドウインデックス",
+			path:            "/api/sessions/main/windows/99/attach",
+			wantSession:     "main",
+			wantWindowIndex: 99,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pts, mock, cleanup := setupWSTest(t)
+			defer cleanup()
+			_ = pts
+
+			srv, token := newTestServerWithWS(mock)
+			ts := httptest.NewServer(srv.Handler())
+			defer ts.Close()
+
+			conn, _, cancel := dialWS(t, ts.URL, tt.path, token)
+			defer cancel()
+			defer conn.Close(websocket.StatusNormalClosure, "")
+
+			time.Sleep(100 * time.Millisecond)
+
+			mock.mu.Lock()
+			gotSession := mock.calledAttach
+			gotIndex := mock.calledWindowIndex
+			mock.mu.Unlock()
+
+			if gotSession != tt.wantSession {
+				t.Errorf("Attach session = %q, want %q", gotSession, tt.wantSession)
+			}
+			if gotIndex != tt.wantWindowIndex {
+				t.Errorf("Attach windowIndex = %d, want %d", gotIndex, tt.wantWindowIndex)
+			}
+		})
 	}
 }
 
