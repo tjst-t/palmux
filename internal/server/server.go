@@ -21,6 +21,7 @@ type TmuxManager interface {
 	KillWindow(session string, index int) error
 	RenameWindow(session string, index int, name string) error
 	Attach(session string, windowIndex int) (*os.File, *exec.Cmd, error)
+	GetSessionCwd(session string) (string, error)
 }
 
 // Server は Palmux の HTTP サーバーを表す。
@@ -65,6 +66,7 @@ func NewServer(opts Options) *Server {
 	mux.Handle("DELETE /api/sessions/{session}/windows/{index}", auth(s.handleDeleteWindow()))
 	mux.Handle("PATCH /api/sessions/{session}/windows/{index}", auth(s.handleRenameWindow()))
 	mux.Handle("GET /api/sessions/{session}/windows/{index}/attach", auth(s.handleAttach()))
+	mux.Handle("GET /api/sessions/{session}/cwd", auth(s.handleGetCwd()))
 	mux.Handle("GET /api/connections", auth(s.handleListConnections()))
 
 	// 静的ファイル配信

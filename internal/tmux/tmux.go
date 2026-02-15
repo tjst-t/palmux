@@ -22,6 +22,9 @@ const sessionFormat = "#{session_name}\t#{session_windows}\t#{session_attached}\
 // windowFormat は list-windows / new-window の出力フォーマット。
 const windowFormat = "#{window_index}\t#{window_name}\t#{window_active}"
 
+// ErrSessionNotFound はセッションが見つからない場合のエラー。
+var ErrSessionNotFound = errors.New("session not found")
+
 // isNoServerError は tmux サーバーが起動していない場合のエラーを判定する。
 // tmux サーバー未起動時は exit code 1 で "no server running" を含むメッセージを返す。
 func isNoServerError(err error) bool {
@@ -29,6 +32,17 @@ func isNoServerError(err error) bool {
 	if ok := errors.As(err, &exitErr); ok {
 		stderr := string(exitErr.Stderr)
 		return strings.Contains(stderr, "no server running")
+	}
+	return false
+}
+
+// isSessionNotFoundError はセッションが見つからない場合のエラーを判定する。
+// tmux がセッションを見つけられない場合、exit code 1 で "can't find session" を含むメッセージを返す。
+func isSessionNotFoundError(err error) bool {
+	var exitErr *exec.ExitError
+	if ok := errors.As(err, &exitErr); ok {
+		stderr := string(exitErr.Stderr)
+		return strings.Contains(stderr, "can't find session")
 	}
 	return false
 }
@@ -142,6 +156,20 @@ func (m *Manager) RenameWindow(session string, index int, name string) error {
 	}
 
 	return nil
+}
+
+// GetSessionCwd はセッションのアクティブ pane のカレントパスを返す。
+// セッションが存在しない場合は ErrSessionNotFound を返す。
+func (m *Manager) GetSessionCwd(session string) (string, error) {
+	out, err := m.Exec.Run("display-message", "-p", "-t", session, "#{pane_current_path}")
+	if err != nil {
+		if isSessionNotFoundError(err) {
+			return "", fmt.Errorf("get session cwd: %w", ErrSessionNotFound)
+		}
+		return "", fmt.Errorf("get session cwd: %w", err)
+	}
+
+	return strings.TrimRight(string(out), "\n"), nil
 }
 
 // Attach は tmux attach-session を pty 内で実行し、pty のマスター側ファイルと exec.Cmd を返す。

@@ -32,6 +32,7 @@ func (m *mockTmuxManager) RenameWindow(session string, index int, name string) e
 func (m *mockTmuxManager) Attach(session string, windowIndex int) (*os.File, *exec.Cmd, error) {
 	return nil, nil, nil
 }
+func (m *mockTmuxManager) GetSessionCwd(session string) (string, error) { return "", nil }
 
 func TestNormalizeBasePath(t *testing.T) {
 	tests := []struct {
