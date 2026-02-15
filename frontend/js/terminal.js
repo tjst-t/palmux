@@ -86,7 +86,7 @@ export class PalmuxTerminal {
     if (helperTextarea) {
       helperTextarea.addEventListener('input', (e) => {
         if (!this._toolbar) return;
-        if (this._toolbar.ctrlState === 'off' && this._toolbar.altState === 'off') return;
+        if (!this._toolbar.hasCtrl() && !this._toolbar.hasAlt()) return;
 
         // 修飾キーが有効な場合、入力された文字を即座に制御文字として送信
         const char = e.data;
