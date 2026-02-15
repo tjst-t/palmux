@@ -21,6 +21,8 @@ export class PalmuxTerminal {
     this._onDisconnect = null;
     /** @type {import('./toolbar.js').Toolbar|null} */
     this._toolbar = null;
+    /** @type {boolean} IME モード有効時は onData ハンドラからの入力送信を抑制する */
+    this._imeMode = false;
   }
 
   /**
@@ -104,7 +106,11 @@ export class PalmuxTerminal {
     };
 
     // ターミナル入力を WebSocket に送信（修飾キー合成付き）
+    // IME モード有効時は直接入力を抑制する（IME フィールド経由で送信）
     this._term.onData((data) => {
+      if (this._imeMode) {
+        return;
+      }
       if (this._toolbar) {
         const mods = this._toolbar.consumeModifiers();
         data = this._applyModifiers(data, mods);
@@ -214,6 +220,16 @@ export class PalmuxTerminal {
    */
   setToolbar(toolbar) {
     this._toolbar = toolbar;
+  }
+
+  /**
+   * IME モードの有効/無効を切り替える。
+   * IME モード有効時はターミナルへの直接キー入力を無効化し、
+   * IME 入力フィールド経由でのみテキストを送信する。
+   * @param {boolean} enabled - true で IME モード有効
+   */
+  setIMEMode(enabled) {
+    this._imeMode = enabled;
   }
 
   /**

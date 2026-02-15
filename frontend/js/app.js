@@ -4,12 +4,16 @@
 import { listSessions, listWindows, getWebSocketURL } from './api.js';
 import { PalmuxTerminal } from './terminal.js';
 import { Toolbar } from './toolbar.js';
+import { IMEInput } from './ime-input.js';
 
 /** @type {PalmuxTerminal|null} */
 let terminal = null;
 
 /** @type {Toolbar|null} */
 let toolbar = null;
+
+/** @type {IMEInput|null} */
+let imeInput = null;
 
 /** 現在接続中のセッション名 */
 let currentSession = null;
@@ -26,6 +30,12 @@ async function showSessionList() {
   const headerTitleEl = document.getElementById('header-title');
   const backBtnEl = document.getElementById('back-btn');
   const sessionItemsEl = document.getElementById('session-items');
+
+  // IME 入力のクリーンアップ
+  if (imeInput) {
+    imeInput.destroy();
+    imeInput = null;
+  }
 
   // ツールバーのクリーンアップ
   if (toolbar) {
@@ -149,6 +159,7 @@ function connectToWindow(sessionName, windowIndex) {
   const sessionListEl = document.getElementById('session-list');
   const terminalViewEl = document.getElementById('terminal-view');
   const terminalContainerEl = document.getElementById('terminal-container');
+  const imeContainerEl = document.getElementById('ime-container');
   const toolbarContainerEl = document.getElementById('toolbar-container');
   const headerTitleEl = document.getElementById('header-title');
   const backBtnEl = document.getElementById('back-btn');
@@ -171,11 +182,25 @@ function connectToWindow(sessionName, windowIndex) {
   // ターミナル初期化・接続
   terminal = new PalmuxTerminal(terminalContainerEl);
 
+  // IME 入力フィールド初期化
+  imeInput = new IMEInput(imeContainerEl, {
+    onSend: (text) => terminal.sendInput(text),
+    onToggle: (visible) => {
+      terminal.setIMEMode(visible);
+      // IME 表示/非表示でレイアウトが変わるのでターミナルを再フィット
+      requestAnimationFrame(() => {
+        terminal.fit();
+      });
+    },
+  });
+
   // ツールバー初期化
   toolbar = new Toolbar(toolbarContainerEl, {
     onSendKey: (key) => terminal.sendInput(key),
     onToggleIME: () => {
-      // Phase 2 Task 2 で実装する
+      if (imeInput) {
+        imeInput.toggle();
+      }
     },
   });
   terminal.setToolbar(toolbar);
