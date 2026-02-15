@@ -355,6 +355,14 @@ document.addEventListener('DOMContentLoaded', () => {
       // 別セッションへの切り替え（再接続）
       switchSession(sessionName, windowIndex);
     },
+    onCreateSession: (sessionName) => {
+      // 新セッション作成後、最初のウィンドウ（index 0）に自動接続
+      connectToWindow(sessionName, 0);
+    },
+    onDeleteSession: () => {
+      // セッション削除後の処理（現在は特に何もしない。
+      // 現在接続中のセッション削除は drawer 側でブロックされている）
+    },
   });
 
   // drawer ボタンのイベント

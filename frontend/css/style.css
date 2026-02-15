@@ -538,6 +538,247 @@ html, body {
   display: none;
 }
 
+/* Drawer New Session Button */
+.drawer-new-session {
+  padding: 12px 16px;
+  border-top: 1px solid #2a2a4a;
+}
+
+.drawer-new-session-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 10px 16px;
+  min-height: 44px;
+  background: rgba(126, 200, 227, 0.1);
+  border: 1px dashed rgba(126, 200, 227, 0.4);
+  border-radius: 8px;
+  color: #7ec8e3;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.drawer-new-session-btn:hover {
+  background: rgba(126, 200, 227, 0.18);
+  border-color: rgba(126, 200, 227, 0.6);
+}
+
+.drawer-new-session-btn:active {
+  background: rgba(126, 200, 227, 0.25);
+}
+
+/* Drawer New Session Input Form */
+.drawer-new-session-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.drawer-new-session-input {
+  width: 100%;
+  padding: 8px 12px;
+  min-height: 40px;
+  background: #1a1a2e;
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  color: #e0e0e0;
+  font-size: 16px; /* 16px prevents iOS Safari auto-zoom on focus */
+  outline: none;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.drawer-new-session-input::placeholder {
+  color: #6a6a8a;
+}
+
+.drawer-new-session-input:focus {
+  border-color: #7ec8e3;
+}
+
+.drawer-new-session-input:disabled {
+  opacity: 0.5;
+}
+
+.drawer-new-session-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.drawer-new-session-create {
+  padding: 8px 16px;
+  min-height: 40px;
+  background: #7ec8e3;
+  color: #0f0f23;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.drawer-new-session-create:hover {
+  background: #6ab8d3;
+}
+
+.drawer-new-session-create:active {
+  background: #5aa8c3;
+}
+
+.drawer-new-session-cancel {
+  padding: 8px 16px;
+  min-height: 40px;
+  background: none;
+  color: #8888aa;
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.drawer-new-session-cancel:hover {
+  background: rgba(136, 136, 170, 0.1);
+  color: #e0e0e0;
+}
+
+/* Drawer Inline Error */
+.drawer-inline-error {
+  font-size: 13px;
+  color: #e57373;
+  padding: 4px 0;
+}
+
+/* Delete Confirmation Modal */
+.drawer-delete-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.drawer-delete-modal-overlay--visible {
+  opacity: 1;
+}
+
+.drawer-delete-modal {
+  background: #1a1a2e;
+  border: 1px solid #2a2a4a;
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 300px;
+  width: calc(100% - 48px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.drawer-delete-modal-message {
+  font-size: 15px;
+  color: #e0e0e0;
+  text-align: center;
+  margin-bottom: 20px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.drawer-delete-modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.drawer-delete-modal-cancel {
+  flex: 1;
+  padding: 10px 16px;
+  min-height: 44px;
+  background: none;
+  color: #8888aa;
+  border: 1px solid #2a2a4a;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.drawer-delete-modal-cancel:hover {
+  background: rgba(136, 136, 170, 0.1);
+  color: #e0e0e0;
+}
+
+.drawer-delete-modal-delete {
+  flex: 1;
+  padding: 10px 16px;
+  min-height: 44px;
+  background: #e57373;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.drawer-delete-modal-delete:hover {
+  background: #d32f2f;
+}
+
+.drawer-delete-modal-delete:active {
+  background: #c62828;
+}
+
+.drawer-delete-modal-delete:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Toast notification for errors */
+.drawer-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(100px);
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  z-index: 300;
+  transition: transform 0.3s ease;
+  max-width: calc(100% - 32px);
+  text-align: center;
+  word-break: break-word;
+}
+
+.drawer-toast--visible {
+  transform: translateX(-50%) translateY(0);
+}
+
+.drawer-toast--error {
+  background: #d32f2f;
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(211, 47, 47, 0.3);
+}
+
 /* Utility */
 .hidden {
   display: none !important;
@@ -615,5 +856,23 @@ html, body {
 
   .drawer-window-name {
     font-size: 13px;
+  }
+
+  .drawer-new-session {
+    padding: 10px 14px;
+  }
+
+  .drawer-new-session-btn {
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+
+  .drawer-delete-modal {
+    padding: 20px;
+    max-width: 260px;
+  }
+
+  .drawer-delete-modal-message {
+    font-size: 14px;
   }
 }
