@@ -25,6 +25,9 @@ jobs:
       - name: Install frontend dependencies
         run: cd frontend && npm ci
 
+      - name: Build frontend
+        run: make frontend
+
       - name: Run tests
         run: make test
 
