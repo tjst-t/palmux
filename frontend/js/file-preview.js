@@ -331,29 +331,13 @@ export class FilePreview {
       gfm: true,
       breaks: false,
       renderer: renderer,
-      highlight: function(code, lang) {
-        if (lang && hljs.getLanguage(lang)) {
-          try {
-            return hljs.highlight(code, { language: lang }).value;
-          } catch (_) {
-            // fall through
-          }
-        }
-        try {
-          return hljs.highlightAuto(code).value;
-        } catch (_) {
-          return escapeHTML(code);
-        }
-      },
     });
     mdContainer.innerHTML = DOMPurify.sanitize(rawHTML, { ADD_ATTR: ['class'] });
 
-    // Highlight code blocks that marked didn't highlight
+    // Apply syntax highlighting to all code blocks after rendering
     const codeBlocks = mdContainer.querySelectorAll('pre code');
     for (const block of codeBlocks) {
-      if (!block.classList.contains('hljs')) {
-        hljs.highlightElement(block);
-      }
+      hljs.highlightElement(block);
     }
 
     this._contentEl.appendChild(mdContainer);
