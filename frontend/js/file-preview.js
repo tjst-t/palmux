@@ -2,6 +2,7 @@
 // Renders file content based on file type: Markdown, code, images, etc.
 
 import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import hljs from 'highlight.js/lib/core';
 
 // Import specific languages to keep bundle size small
@@ -347,6 +348,12 @@ export class FilePreview {
           if (dirPath && !imgPath.startsWith('/')) {
             resolvedPath = dirPath + '/' + resolvedPath;
           }
+          // Normalize path segments (resolve .. and .)
+          resolvedPath = resolvedPath.split('/').reduce((parts, segment) => {
+            if (segment === '..') parts.pop();
+            else if (segment !== '.' && segment !== '') parts.push(segment);
+            return parts;
+          }, []).join('/');
           const url = getRawURL(session, resolvedPath);
           return `![${alt}](${url})`;
         }
@@ -356,7 +363,7 @@ export class FilePreview {
     // Configure marked renderer with highlight.js for code blocks
     const renderer = new marked.Renderer();
 
-    mdContainer.innerHTML = marked.parse(processedContent, {
+    const rawHTML = marked.parse(processedContent, {
       gfm: true,
       breaks: false,
       renderer: renderer,
@@ -375,6 +382,7 @@ export class FilePreview {
         }
       },
     });
+    mdContainer.innerHTML = DOMPurify.sanitize(rawHTML, { ADD_ATTR: ['class'] });
 
     // Highlight code blocks that marked didn't highlight
     const codeBlocks = mdContainer.querySelectorAll('pre code');
