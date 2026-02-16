@@ -1,6 +1,8 @@
 package fileserver
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +14,12 @@ import (
 )
 
 const maxReadSize = 1024 * 1024 // 1MB
+
+var (
+	ErrPathOutsideRoot = errors.New("path outside root")
+	ErrAbsolutePath    = errors.New("absolute path not allowed")
+	ErrNotDirectory    = errors.New("not a directory")
+)
 
 // DirEntry はディレクトリ内のエントリ（ファイルまたはサブディレクトリ）を表す。
 type DirEntry struct {
@@ -58,7 +66,7 @@ func (fs *FileServer) ValidatePath(relPath string) (string, error) {
 
 	// 絶対パスの場合はルート外アクセスとして拒否
 	if filepath.IsAbs(relPath) {
-		return "", fmt.Errorf("absolute path not allowed: %s", relPath)
+		return "", fmt.Errorf("validate path: %w", ErrAbsolutePath)
 	}
 
 	// パスをクリーンアップして結合
@@ -74,7 +82,7 @@ func (fs *FileServer) ValidatePath(relPath string) (string, error) {
 	// 解決後のパスがルート内であることを検証
 	// ルートそのものか、ルート+セパレータで始まるか
 	if resolved != rootReal && !strings.HasPrefix(resolved, rootReal+string(filepath.Separator)) {
-		return "", fmt.Errorf("path outside root: %s", relPath)
+		return "", fmt.Errorf("validate path: %w", ErrPathOutsideRoot)
 	}
 
 	return resolved, nil
@@ -94,7 +102,7 @@ func (fs *FileServer) List(relPath string) (*DirListing, error) {
 		return nil, err
 	}
 	if !info.IsDir() {
-		return nil, fmt.Errorf("not a directory: %s", relPath)
+		return nil, fmt.Errorf("list: %w", ErrNotDirectory)
 	}
 
 	// .git ディレクトリの中身は除外
@@ -198,6 +206,12 @@ func (fs *FileServer) Read(relPath string) (*FileContent, error) {
 	detectedType := http.DetectContentType(header)
 	fc.ContentType = classifyContentType(detectedType)
 
+	// classifyContentType が "binary" を返した場合、ヌルバイトチェックで再判定
+	// ソースコードファイル (.go, .js, .py 等) は application/octet-stream と検出されるため
+	if fc.ContentType == "binary" && isTextContent(header) {
+		fc.ContentType = "text"
+	}
+
 	// バイナリファイルの場合は内容を返さない
 	if fc.ContentType != "text" {
 		return fc, nil
@@ -273,6 +287,14 @@ func classifyContentType(contentType string) string {
 		return "text"
 	}
 	return "binary"
+}
+
+// isTextContent はデータにヌルバイト (0x00) が含まれていないかチェックする。
+// ヌルバイトがなければテキストファイルとみなす。
+// ソースコードファイル (.go, .js, .py 等) は http.DetectContentType が
+// application/octet-stream を返すため、このフォールバックで正しくテキスト判定する。
+func isTextContent(data []byte) bool {
+	return !bytes.Contains(data, []byte{0})
 }
 
 // isGitDir は指定パスが .git ディレクトリ（またはそのサブディレクトリ）かどうかを判定する。

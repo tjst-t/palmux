@@ -1,6 +1,7 @@
 package fileserver
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -573,4 +574,140 @@ func TestPathTraversal(t *testing.T) {
 			}
 		})
 	}
+}
+
+// --- isTextContent テスト ---
+
+func TestIsTextContent(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+		want bool
+	}{
+		{
+			name: "テキストデータ: ヌルバイトなし",
+			data: []byte("package main\n\nfunc main() {}"),
+			want: true,
+		},
+		{
+			name: "バイナリデータ: ヌルバイトあり",
+			data: []byte{0x89, 0x50, 0x4E, 0x47, 0x00, 0x0A},
+			want: false,
+		},
+		{
+			name: "空データ",
+			data: []byte{},
+			want: true,
+		},
+		{
+			name: "ヌルバイトのみ",
+			data: []byte{0x00},
+			want: false,
+		},
+		{
+			name: "UTF-8マルチバイト文字",
+			data: []byte("こんにちは世界"),
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isTextContent(tt.data)
+			if got != tt.want {
+				t.Errorf("isTextContent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// --- ソースコードファイルのテキスト判定テスト ---
+
+func TestRead_SourceCodeFiles(t *testing.T) {
+	root := t.TempDir()
+	fs := &FileServer{RootDir: root}
+
+	tests := []struct {
+		name    string
+		file    string
+		content string
+	}{
+		{
+			name:    "Goソースコード",
+			file:    "main.go",
+			content: "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"hello\")\n}\n",
+		},
+		{
+			name:    "Pythonソースコード",
+			file:    "script.py",
+			content: "#!/usr/bin/env python3\nprint('hello')\n",
+		},
+		{
+			name:    "JavaScriptソースコード",
+			file:    "app.js",
+			content: "const x = 42;\nconsole.log(x);\n",
+		},
+		{
+			name:    "シェルスクリプト",
+			file:    "run.sh",
+			content: "#!/bin/bash\necho 'hello'\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := os.WriteFile(filepath.Join(root, tt.file), []byte(tt.content), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			fc, err := fs.Read(tt.file)
+			if err != nil {
+				t.Fatalf("Read(%q) = %v", tt.file, err)
+			}
+
+			if fc.ContentType != "text" {
+				t.Errorf("ContentType = %q, want %q for source code file %s", fc.ContentType, "text", tt.file)
+			}
+			if fc.Content != tt.content {
+				t.Errorf("Content = %q, want %q", fc.Content, tt.content)
+			}
+		})
+	}
+}
+
+// --- センチネルエラーテスト ---
+
+func TestSentinelErrors(t *testing.T) {
+	root := setupTestDir(t)
+	fs := &FileServer{RootDir: root}
+
+	t.Run("絶対パス → ErrAbsolutePath", func(t *testing.T) {
+		_, err := fs.ValidatePath("/etc/passwd")
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !errors.Is(err, ErrAbsolutePath) {
+			t.Errorf("error should wrap ErrAbsolutePath, got: %v", err)
+		}
+	})
+
+	t.Run("ルート外パス → ErrPathOutsideRoot", func(t *testing.T) {
+		_, err := fs.ValidatePath("../..")
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !errors.Is(err, ErrPathOutsideRoot) {
+			t.Errorf("error should wrap ErrPathOutsideRoot, got: %v", err)
+		}
+	})
+
+	t.Run("ファイルにListを呼ぶ → ErrNotDirectory", func(t *testing.T) {
+		_, err := fs.List("file.txt")
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !errors.Is(err, ErrNotDirectory) {
+			t.Errorf("error should wrap ErrNotDirectory, got: %v", err)
+		}
+	})
 }
