@@ -1,7 +1,7 @@
 // filebrowser.js - ファイルブラウザ UI
 // セッションの CWD をルートとしてディレクトリを閲覧する
 
-import { getSessionCwd, listFiles, getFileRawURL } from './api.js';
+import { getSessionCwd, listFiles, getFileContent, getFileRawURL } from './api.js';
 import { FilePreview } from './file-preview.js';
 
 /**
@@ -453,7 +453,7 @@ export class FileBrowser {
         this._loadDirectory(this._currentPath);
       },
       getRawURL: (s, p) => getFileRawURL(s, p),
-      fetchFile: (s, p) => listFiles(s, p),
+      fetchFile: (s, p) => getFileContent(s, p),
     });
   }
 

@@ -171,6 +171,16 @@ export async function listFiles(session, path = '.') {
 }
 
 /**
+ * ファイルの内容を取得する。
+ * @param {string} session - セッション名
+ * @param {string} path - ファイルの相対パス
+ * @returns {Promise<{content: string, truncated: boolean}>}
+ */
+export async function getFileContent(session, path) {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/files?path=${encodeURIComponent(path)}`);
+}
+
+/**
  * ファイルの raw コンテンツ URL を生成する。
  * 認証トークンをクエリパラメータに付与する（ブラウザの img/iframe 等で使用するため）。
  * @param {string} session - セッション名
