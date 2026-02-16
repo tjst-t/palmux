@@ -7,6 +7,7 @@ frontend:
 	  --bundle --minify --outdir=build
 	cp frontend/index.html frontend/build/
 	cp frontend/css/style.css frontend/build/
+	cp frontend/css/filebrowser.css frontend/build/
 	cp frontend/node_modules/@xterm/xterm/css/xterm.css frontend/build/
 	cp frontend/manifest.json frontend/build/
 	cp frontend/sw.js frontend/build/

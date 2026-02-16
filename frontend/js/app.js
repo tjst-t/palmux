@@ -9,6 +9,7 @@ import { IMEInput } from './ime-input.js';
 import { Drawer } from './drawer.js';
 import { TouchHandler } from './touch.js';
 import { ConnectionManager } from './connection.js';
+import { FileBrowser } from './filebrowser.js';
 
 /** @type {PalmuxTerminal|null} */
 let terminal = null;
@@ -28,11 +29,17 @@ let touchHandler = null;
 /** @type {ConnectionManager|null} */
 let connectionManager = null;
 
+/** @type {FileBrowser|null} */
+let fileBrowser = null;
+
 /** 現在接続中のセッション名 */
 let currentSession = null;
 
 /** 現在接続中のウィンドウインデックス */
 let currentWindowIndex = null;
+
+/** 現在の表示モード: 'terminal' | 'filebrowser' */
+let currentViewMode = 'terminal';
 
 /**
  * セッション一覧画面を表示する。
@@ -88,10 +95,27 @@ async function showSessionList() {
     reconnectOverlayEl.classList.add('hidden');
   }
 
+  // FileBrowser のクリーンアップ
+  if (fileBrowser) {
+    fileBrowser.dispose();
+    fileBrowser = null;
+  }
+  currentViewMode = 'terminal';
+
   // UI 切り替え
   sessionListEl.classList.remove('hidden');
   terminalViewEl.classList.add('hidden');
+  const filebrowserViewEl = document.getElementById('filebrowser-view');
+  if (filebrowserViewEl) {
+    filebrowserViewEl.classList.add('hidden');
+  }
   headerTitleEl.textContent = 'Palmux';
+
+  // ヘッダータブを非表示
+  const headerTabsEl = document.getElementById('header-tabs');
+  if (headerTabsEl) {
+    headerTabsEl.classList.add('hidden');
+  }
 
   // ツールバートグルボタンを非表示
   const toolbarToggleBtnEl = document.getElementById('toolbar-toggle-btn');
@@ -235,7 +259,26 @@ function connectToWindow(sessionName, windowIndex) {
   // UI 切り替え
   sessionListEl.classList.add('hidden');
   terminalViewEl.classList.remove('hidden');
+  const filebrowserViewEl = document.getElementById('filebrowser-view');
+  if (filebrowserViewEl) {
+    filebrowserViewEl.classList.add('hidden');
+  }
   headerTitleEl.textContent = `${sessionName}:${windowIndex}`;
+  currentViewMode = 'terminal';
+
+  // ヘッダータブを表示してターミナルをアクティブにする
+  const headerTabsEl = document.getElementById('header-tabs');
+  if (headerTabsEl) {
+    headerTabsEl.classList.remove('hidden');
+  }
+  const headerTabTerminal = document.getElementById('header-tab-terminal');
+  const headerTabFiles = document.getElementById('header-tab-files');
+  if (headerTabTerminal) {
+    headerTabTerminal.classList.add('header-tab-btn--active');
+  }
+  if (headerTabFiles) {
+    headerTabFiles.classList.remove('header-tab-btn--active');
+  }
 
   // ツールバートグルボタンを表示
   if (toolbarToggleBtnEl) {
@@ -414,6 +457,98 @@ function switchSession(sessionName, windowIndex) {
 }
 
 /**
+ * ファイルブラウザ表示に切り替える。
+ * ターミナルビューを隠し、ファイラーパネルを表示する。
+ * @param {string} sessionName - セッション名
+ */
+function showFileBrowser(sessionName) {
+  const terminalViewEl = document.getElementById('terminal-view');
+  const filebrowserViewEl = document.getElementById('filebrowser-view');
+  const filebrowserContainerEl = document.getElementById('filebrowser-container');
+  const headerTabTerminal = document.getElementById('header-tab-terminal');
+  const headerTabFiles = document.getElementById('header-tab-files');
+
+  // ターミナルを隠してファイラーを表示
+  terminalViewEl.classList.add('hidden');
+  filebrowserViewEl.classList.remove('hidden');
+
+  // ツールバートグルとフォントサイズを非表示
+  const toolbarToggleBtnEl = document.getElementById('toolbar-toggle-btn');
+  if (toolbarToggleBtnEl) {
+    toolbarToggleBtnEl.classList.add('hidden');
+  }
+  const fontSizeControlsEl = document.getElementById('font-size-controls');
+  if (fontSizeControlsEl) {
+    fontSizeControlsEl.classList.add('hidden');
+  }
+
+  // タブの状態を更新
+  if (headerTabTerminal) {
+    headerTabTerminal.classList.remove('header-tab-btn--active');
+  }
+  if (headerTabFiles) {
+    headerTabFiles.classList.add('header-tab-btn--active');
+  }
+
+  currentViewMode = 'filebrowser';
+
+  // FileBrowser インスタンスの作成 or 再利用
+  if (!fileBrowser) {
+    fileBrowser = new FileBrowser(filebrowserContainerEl, {
+      onFileSelect: (session, path, entry) => {
+        // Task 4 でプレビューを実装予定
+        console.log('File selected:', session, path, entry);
+      },
+    });
+  }
+
+  fileBrowser.open(sessionName);
+}
+
+/**
+ * ターミナル表示に戻す。
+ * ファイラーパネルを隠し、ターミナルビューを表示する。
+ */
+function showTerminalView() {
+  const terminalViewEl = document.getElementById('terminal-view');
+  const filebrowserViewEl = document.getElementById('filebrowser-view');
+  const headerTabTerminal = document.getElementById('header-tab-terminal');
+  const headerTabFiles = document.getElementById('header-tab-files');
+
+  // ファイラーを隠してターミナルを表示
+  filebrowserViewEl.classList.add('hidden');
+  terminalViewEl.classList.remove('hidden');
+
+  // ツールバートグルとフォントサイズを再表示
+  const toolbarToggleBtnEl = document.getElementById('toolbar-toggle-btn');
+  if (toolbarToggleBtnEl) {
+    toolbarToggleBtnEl.classList.remove('hidden');
+  }
+  const fontSizeControlsEl = document.getElementById('font-size-controls');
+  if (fontSizeControlsEl) {
+    fontSizeControlsEl.classList.remove('hidden');
+  }
+
+  // タブの状態を更新
+  if (headerTabTerminal) {
+    headerTabTerminal.classList.add('header-tab-btn--active');
+  }
+  if (headerTabFiles) {
+    headerTabFiles.classList.remove('header-tab-btn--active');
+  }
+
+  currentViewMode = 'terminal';
+
+  // ターミナルを再フィット
+  if (terminal) {
+    requestAnimationFrame(() => {
+      terminal.fit();
+      terminal.focus();
+    });
+  }
+}
+
+/**
  * HTML をエスケープする。
  * @param {string} str
  * @returns {string}
@@ -480,6 +615,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
     },
+    onOpenFileBrowser: (sessionName) => {
+      showFileBrowser(sessionName);
+    },
   });
 
   // drawer ボタンのイベント
@@ -513,6 +651,26 @@ document.addEventListener('DOMContentLoaded', () => {
     connectionStatusEl.addEventListener('click', () => {
       if (connectionManager && connectionManager.state !== 'connected') {
         connectionManager.reconnectNow();
+      }
+    });
+  }
+
+  // ヘッダータブのイベント
+  const headerTabTerminal = document.getElementById('header-tab-terminal');
+  const headerTabFiles = document.getElementById('header-tab-files');
+
+  if (headerTabTerminal) {
+    headerTabTerminal.addEventListener('click', () => {
+      if (currentViewMode !== 'terminal' && currentSession !== null) {
+        showTerminalView();
+      }
+    });
+  }
+
+  if (headerTabFiles) {
+    headerTabFiles.addEventListener('click', () => {
+      if (currentViewMode !== 'filebrowser' && currentSession !== null) {
+        showFileBrowser(currentSession);
       }
     });
   }

@@ -14,6 +14,7 @@
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="xterm.css">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="filebrowser.css">
 </head>
 <body>
   <!-- Drawer Overlay -->
@@ -40,6 +41,10 @@
     <div id="header">
       <button id="drawer-btn" class="hidden" aria-label="Open drawer">&#9776;</button>
       <div id="header-title">Palmux</div>
+      <div id="header-tabs" class="header-tabs hidden">
+        <button id="header-tab-terminal" class="header-tab-btn header-tab-btn--active">Terminal</button>
+        <button id="header-tab-files" class="header-tab-btn">\uD83D\uDCC1</button>
+      </div>
       <div id="connection-status" class="connection-status hidden">
         <span class="connection-dot"></span>
         <span class="connection-text"></span>
@@ -68,6 +73,11 @@
         </div>
         <div id="ime-container"></div>
         <div id="toolbar-container"></div>
+      </div>
+
+      <!-- File Browser View -->
+      <div id="filebrowser-view" class="hidden">
+        <div id="filebrowser-container"></div>
       </div>
     </div>
   </div>
