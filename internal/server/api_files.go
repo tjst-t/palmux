@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/tjst-t/palmux/internal/fileserver"
 	"github.com/tjst-t/palmux/internal/tmux"
@@ -100,17 +99,14 @@ func (s *Server) handleGetFiles() http.Handler {
 
 // writeFilesError はファイル操作のエラーを適切な HTTP ステータスコードで返す。
 func writeFilesError(w http.ResponseWriter, err error, path string) {
-	errMsg := err.Error()
-
 	// パストラバーサル系エラー
-	if strings.Contains(errMsg, "path outside root") ||
-		strings.Contains(errMsg, "absolute path not allowed") {
+	if errors.Is(err, fileserver.ErrPathOutsideRoot) || errors.Is(err, fileserver.ErrAbsolutePath) {
 		writeError(w, http.StatusForbidden, "access denied: "+path)
 		return
 	}
 
 	// ファイル/ディレクトリが見つからない
-	if os.IsNotExist(err) || strings.Contains(errMsg, "resolve path") {
+	if errors.Is(err, os.ErrNotExist) {
 		writeError(w, http.StatusNotFound, "not found: "+path)
 		return
 	}
