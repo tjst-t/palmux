@@ -6,6 +6,7 @@ import DOMPurify from 'dompurify';
 import hljs from 'highlight.js/lib/core';
 
 // Import specific languages to keep bundle size small
+// Limited to 10 languages: go, javascript, python, bash, yaml, json, html(xml), css, sql, typescript
 import javascript from 'highlight.js/lib/languages/javascript';
 import go from 'highlight.js/lib/languages/go';
 import python from 'highlight.js/lib/languages/python';
@@ -16,18 +17,6 @@ import xml from 'highlight.js/lib/languages/xml'; // also handles HTML
 import css from 'highlight.js/lib/languages/css';
 import sql from 'highlight.js/lib/languages/sql';
 import typescript from 'highlight.js/lib/languages/typescript';
-import rust from 'highlight.js/lib/languages/rust';
-import cpp from 'highlight.js/lib/languages/cpp';
-import c from 'highlight.js/lib/languages/c';
-import java from 'highlight.js/lib/languages/java';
-import ruby from 'highlight.js/lib/languages/ruby';
-import php from 'highlight.js/lib/languages/php';
-import swift from 'highlight.js/lib/languages/swift';
-import kotlin from 'highlight.js/lib/languages/kotlin';
-import ini from 'highlight.js/lib/languages/ini'; // handles .toml too
-import dockerfile from 'highlight.js/lib/languages/dockerfile';
-import makefile from 'highlight.js/lib/languages/makefile';
-import markdown from 'highlight.js/lib/languages/markdown';
 
 // Register languages
 hljs.registerLanguage('javascript', javascript);
@@ -49,24 +38,6 @@ hljs.registerLanguage('sql', sql);
 hljs.registerLanguage('typescript', typescript);
 hljs.registerLanguage('ts', typescript);
 hljs.registerLanguage('tsx', typescript);
-hljs.registerLanguage('rust', rust);
-hljs.registerLanguage('rs', rust);
-hljs.registerLanguage('cpp', cpp);
-hljs.registerLanguage('c', c);
-hljs.registerLanguage('h', c);
-hljs.registerLanguage('java', java);
-hljs.registerLanguage('ruby', ruby);
-hljs.registerLanguage('rb', ruby);
-hljs.registerLanguage('php', php);
-hljs.registerLanguage('swift', swift);
-hljs.registerLanguage('kotlin', kotlin);
-hljs.registerLanguage('kt', kotlin);
-hljs.registerLanguage('ini', ini);
-hljs.registerLanguage('toml', ini);
-hljs.registerLanguage('dockerfile', dockerfile);
-hljs.registerLanguage('makefile', makefile);
-hljs.registerLanguage('markdown', markdown);
-hljs.registerLanguage('md', markdown);
 
 // Configure marked for GFM with highlight.js
 marked.setOptions({
@@ -80,12 +51,15 @@ marked.setOptions({
 const MARKDOWN_EXTS = ['.md'];
 
 const CODE_EXTS = [
-  '.go', '.js', '.py', '.sh', '.yaml', '.yml', '.json', '.toml', '.css',
-  '.html', '.htm', '.sql', '.rs', '.ts', '.tsx', '.jsx', '.c', '.h',
-  '.cpp', '.java', '.rb', '.php', '.swift', '.kt',
+  '.go', '.js', '.py', '.sh', '.yaml', '.yml', '.json', '.css',
+  '.html', '.htm', '.sql', '.ts', '.tsx', '.jsx',
 ];
 
-const PLAINTEXT_EXTS = ['.txt', '.log', '.csv', '.env', '.gitignore'];
+const PLAINTEXT_EXTS = [
+  '.txt', '.log', '.csv', '.env', '.gitignore',
+  '.rs', '.c', '.h', '.cpp', '.java', '.rb', '.php', '.swift', '.kt',
+  '.toml', '.ini',
+];
 
 const PLAINTEXT_NAMES = ['Makefile', 'Dockerfile'];
 
@@ -121,28 +95,18 @@ export function getLanguageFromExt(ext) {
   const map = {
     '.go': 'go',
     '.js': 'javascript',
-    '.jsx': 'jsx',
+    '.jsx': 'javascript',
     '.py': 'python',
     '.sh': 'bash',
     '.yaml': 'yaml',
     '.yml': 'yaml',
     '.json': 'json',
-    '.toml': 'toml',
     '.css': 'css',
     '.html': 'html',
     '.htm': 'html',
     '.sql': 'sql',
-    '.rs': 'rust',
     '.ts': 'typescript',
-    '.tsx': 'tsx',
-    '.c': 'c',
-    '.h': 'c',
-    '.cpp': 'cpp',
-    '.java': 'java',
-    '.rb': 'ruby',
-    '.php': 'php',
-    '.swift': 'swift',
-    '.kt': 'kotlin',
+    '.tsx': 'typescript',
   };
   return map[(ext || '').toLowerCase()] || '';
 }
