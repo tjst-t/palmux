@@ -468,6 +468,8 @@ function showFileBrowser(sessionName) {
   const headerTabTerminal = document.getElementById('header-tab-terminal');
   const headerTabFiles = document.getElementById('header-tab-files');
 
+  if (!terminalViewEl || !filebrowserViewEl || !filebrowserContainerEl) return;
+
   // ターミナルを隠してファイラーを表示
   terminalViewEl.classList.add('hidden');
   filebrowserViewEl.classList.remove('hidden');
@@ -514,6 +516,8 @@ function showTerminalView() {
   const filebrowserViewEl = document.getElementById('filebrowser-view');
   const headerTabTerminal = document.getElementById('header-tab-terminal');
   const headerTabFiles = document.getElementById('header-tab-files');
+
+  if (!terminalViewEl || !filebrowserViewEl) return;
 
   // ファイラーを隠してターミナルを表示
   filebrowserViewEl.classList.add('hidden');

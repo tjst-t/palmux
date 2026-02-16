@@ -113,6 +113,9 @@ export class FileBrowser {
     /** @type {boolean} ロード中フラグ */
     this._loading = false;
 
+    /** @type {number} ロードID（レースコンディション防止用） */
+    this._loadId = 0;
+
     this._render();
   }
 
@@ -145,11 +148,13 @@ export class FileBrowser {
    */
   async _loadDirectory(path) {
     if (!this._session) return;
+    const loadId = ++this._loadId;
     this._loading = true;
     this._showLoading();
 
     try {
       const result = await listFiles(this._session, path);
+      if (loadId !== this._loadId) return; // Stale response
 
       this._currentPath = result.path || path;
       this._pathSegments = this._buildPathSegments(this._currentPath);
@@ -157,6 +162,7 @@ export class FileBrowser {
 
       this._renderDirectory(result.entries || []);
     } catch (err) {
+      if (loadId !== this._loadId) return; // Stale response
       this._loading = false;
       console.error('Failed to load directory:', err);
       this._showError(`Failed to load directory: ${err.message}`);
