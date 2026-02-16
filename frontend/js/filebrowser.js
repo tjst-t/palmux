@@ -1,7 +1,8 @@
 // filebrowser.js - ファイルブラウザ UI
 // セッションの CWD をルートとしてディレクトリを閲覧する
 
-import { getSessionCwd, listFiles } from './api.js';
+import { getSessionCwd, listFiles, getFileRawURL } from './api.js';
+import { FilePreview } from './file-preview.js';
 
 /**
  * ファイル拡張子からアイコンを決定する。
@@ -86,7 +87,7 @@ function formatDate(dateStr) {
  * - セッションの CWD を起点にディレクトリを閲覧
  * - パンくずリストでナビゲーション
  * - ディレクトリタップで中に入る
- * - ファイルタップはコールバック呼び出し（Task 4 で実装予定）
+ * - ファイルタップでプレビュー表示
  */
 export class FileBrowser {
   /**
@@ -115,6 +116,9 @@ export class FileBrowser {
 
     /** @type {number} ロードID（レースコンディション防止用） */
     this._loadId = 0;
+
+    /** @type {import('./file-preview.js').FilePreview|null} プレビューインスタンス */
+    this._preview = null;
 
     this._render();
   }
@@ -224,14 +228,15 @@ export class FileBrowser {
         : entry.name;
       this._loadDirectory(newPath);
     } else {
-      // ファイル: コールバック呼び出し（Task 4 で実装）
+      // ファイル: プレビュー表示
+      const filePath = this._pathSegments.length > 0
+        ? this._pathSegments.join('/') + '/' + entry.name
+        : entry.name;
+      this.showPreview(this._session, filePath, entry);
+
+      // コールバックも呼び出す（外部連携用）
       if (this._onFileSelect) {
-        const filePath = this._pathSegments.length > 0
-          ? this._pathSegments.join('/') + '/' + entry.name
-          : entry.name;
         this._onFileSelect(this._session, filePath, entry);
-      } else {
-        console.log('File selected:', entry.name);
       }
     }
   }
@@ -416,9 +421,50 @@ export class FileBrowser {
   }
 
   /**
+   * ファイルプレビューを表示する。
+   * ファイル一覧をプレビューパネルに置き換える。
+   * @param {string} session - セッション名
+   * @param {string} path - ファイルの相対パス
+   * @param {Object} entry - ファイルエントリ情報
+   */
+  showPreview(session, path, entry) {
+    // 既存プレビューを破棄
+    if (this._preview) {
+      this._preview.dispose();
+      this._preview = null;
+    }
+
+    // コンテナの中身をクリアしてプレビューに置き換え
+    this._container.innerHTML = '';
+
+    this._preview = new FilePreview(this._container, {
+      session: session,
+      path: path,
+      entry: entry,
+      onBack: () => {
+        // プレビューを閉じてファイル一覧に戻る
+        if (this._preview) {
+          this._preview.dispose();
+          this._preview = null;
+        }
+        this._container.innerHTML = '';
+        this._container.appendChild(this._wrapper);
+        // 現在のディレクトリを再読み込み
+        this._loadDirectory(this._currentPath);
+      },
+      getRawURL: (s, p) => getFileRawURL(s, p),
+      fetchFile: (s, p) => listFiles(s, p),
+    });
+  }
+
+  /**
    * リソースを解放する。
    */
   dispose() {
+    if (this._preview) {
+      this._preview.dispose();
+      this._preview = null;
+    }
     this._container.innerHTML = '';
     this._session = null;
     this._rootPath = null;

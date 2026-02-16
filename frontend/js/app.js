@@ -498,8 +498,7 @@ function showFileBrowser(sessionName) {
   if (!fileBrowser) {
     fileBrowser = new FileBrowser(filebrowserContainerEl, {
       onFileSelect: (session, path, entry) => {
-        // Task 4 でプレビューを実装予定
-        console.log('File selected:', session, path, entry);
+        // Preview is handled internally by FileBrowser.showPreview()
       },
     });
   }
