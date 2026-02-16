@@ -14,6 +14,7 @@ Go シングルバイナリにフロントエンドを埋め込んでデプロ�
 - **TLS サポート** — 証明書を指定して HTTPS で起動可能
 - **認証** — Bearer トークンによる API 保護（起動時に自動生成）
 - **ベースパス対応** — リバースプロキシ配下でのサブパス運用に対応
+- **ファイルブラウザ** — セッションのカレントディレクトリを起点にファイル閲覧。Markdown レンダリング、シンタックスハイライト、画像プレビュー対応
 
 ## 必要環境
 
@@ -124,6 +125,17 @@ set -g mouse on
 - 長押しで削除
 - ウィンドウ名タップでインラインリネーム
 
+## ファイルブラウザ
+
+Drawer のセッション名横にある📁ボタン、またはヘッダーの [📁] タブからファイルブラウザを起動できる。
+
+- **ディレクトリブラウズ** — パンくずリストで階層移動、ディレクトリ優先ソート
+- **Markdown プレビュー** — GFM 対応、テーブル・チェックボックス・コードブロックのハイライト
+- **シンタックスハイライト** — Go, JavaScript, Python, Bash, YAML, JSON, HTML, CSS, SQL, TypeScript に対応
+- **画像表示** — PNG, JPG, GIF, SVG, WebP をインライン表示
+- **読み取り専用** — ファイルの閲覧のみ（編集・削除は不可）
+- **セキュリティ** — パストラバーサル防止、シンボリックリンクのルート外アクセス拒否
+
 ## 開発
 
 ```bash
@@ -143,6 +155,7 @@ make clean
 |---|---|
 | Backend | Go (`net/http`, `nhooyr.io/websocket`, `github.com/creack/pty`) |
 | Frontend | Vanilla JS + xterm.js |
+| ファイルプレビュー | marked (Markdown), highlight.js (シンタックスハイライト), DOMPurify (XSS 対策) |
 | ビルド | esbuild |
 | pty 接続 | `tmux attach-session` を pty 内で実行し WebSocket で中継 |
 

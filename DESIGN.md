@@ -510,6 +510,8 @@ frontend:
 	  --bundle --minify --outdir=build
 	cp frontend/index.html frontend/build/
 	cp frontend/css/style.css frontend/build/
+	cp frontend/css/filebrowser.css frontend/build/
+	cp frontend/node_modules/highlight.js/styles/github-dark.css frontend/build/hljs-theme.css
 	cp frontend/node_modules/@xterm/xterm/css/xterm.css frontend/build/
 	cp frontend/manifest.json frontend/build/
 	cp frontend/sw.js frontend/build/
@@ -667,11 +669,11 @@ internal/tmux/testdata/
 
 ### Phase 4: Session File Browser
 
-- [ ] tmux カレントパス取得 API (`GetSessionCwd` + `GET /cwd`)
-- [ ] ファイル一覧・読み取り API (`internal/fileserver` パッケージ + パストラバーサル防止)
-- [ ] ファイラー UI — ディレクトリブラウズ (パンくずリスト、ターミナル↔ファイラー切り替え)
-- [ ] ファイルプレビュー — Markdown (marked)・コード (highlight.js)・画像
-- [ ] フロントエンドビルド統合 (marked, highlight.js バンドル)
+- [x] tmux カレントパス取得 API (`GetSessionCwd` + `GET /cwd`)
+- [x] ファイル一覧・読み取り API (`internal/fileserver` パッケージ + パストラバーサル防止)
+- [x] ファイラー UI — ディレクトリブラウズ (パンくずリスト、ターミナル↔ファイラー切り替え)
+- [x] ファイルプレビュー — Markdown (marked)・コード (highlight.js)・画像
+- [x] フロントエンドビルド統合 (marked, highlight.js バンドル)
 
 ---
 
