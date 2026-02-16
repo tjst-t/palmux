@@ -1,0 +1,356 @@
+/* filebrowser.css - ファイルブラウザ UI スタイル */
+
+/* File Browser View */
+#filebrowser-view {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#filebrowser-view.hidden {
+  display: none;
+}
+
+#filebrowser-container {
+  flex: 1;
+  overflow: hidden;
+}
+
+/* File Browser wrapper */
+.fb {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Header Tab Buttons */
+.header-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+.header-tab-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  min-height: 32px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #8888aa;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  white-space: nowrap;
+}
+
+.header-tab-btn:hover {
+  background: rgba(126, 200, 227, 0.1);
+  color: #b0b0cc;
+}
+
+.header-tab-btn:active {
+  background: rgba(126, 200, 227, 0.2);
+}
+
+.header-tab-btn--active {
+  color: #4fc3f7;
+  border-color: #4fc3f7;
+  background: rgba(79, 195, 247, 0.08);
+}
+
+.header-tab-btn--active:hover {
+  background: rgba(79, 195, 247, 0.15);
+  color: #4fc3f7;
+}
+
+.header-tabs.hidden {
+  display: none;
+}
+
+/* Breadcrumb Navigation */
+.fb-breadcrumb {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  background: #16213e;
+  border-bottom: 1px solid #2a2a4a;
+  flex-shrink: 0;
+  min-height: 40px;
+  overflow: hidden;
+}
+
+.fb-breadcrumb-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  min-height: 36px;
+  background: none;
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  color: #7ec8e3;
+  font-size: 16px;
+  cursor: pointer;
+  margin-right: 8px;
+  flex-shrink: 0;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.fb-breadcrumb-back:hover {
+  background: rgba(126, 200, 227, 0.15);
+}
+
+.fb-breadcrumb-back:active {
+  background: rgba(126, 200, 227, 0.25);
+}
+
+.fb-breadcrumb-items {
+  display: flex;
+  align-items: center;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  flex: 1;
+  gap: 2px;
+}
+
+.fb-breadcrumb-items::-webkit-scrollbar {
+  display: none;
+}
+
+.fb-breadcrumb-item {
+  background: none;
+  border: none;
+  color: #7ec8e3;
+  font-size: 13px;
+  padding: 4px 6px;
+  cursor: pointer;
+  border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.fb-breadcrumb-item:hover {
+  background: rgba(126, 200, 227, 0.15);
+}
+
+.fb-breadcrumb-item:active {
+  background: rgba(126, 200, 227, 0.25);
+}
+
+.fb-breadcrumb-item--current {
+  color: #e0e0e0;
+  font-weight: 600;
+  cursor: default;
+}
+
+.fb-breadcrumb-item--current:hover {
+  background: none;
+}
+
+.fb-breadcrumb-sep {
+  color: #555;
+  font-size: 13px;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+/* File List */
+.fb-list {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* File Entry */
+.fb-entry {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  min-height: 44px;
+  border-bottom: 1px solid rgba(42, 42, 74, 0.4);
+  cursor: pointer;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  gap: 10px;
+}
+
+.fb-entry:hover {
+  background: rgba(126, 200, 227, 0.06);
+}
+
+.fb-entry:active {
+  background: rgba(126, 200, 227, 0.12);
+}
+
+.fb-entry--dir {
+  /* Directories have slightly different feel */
+}
+
+.fb-entry-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+  width: 24px;
+  text-align: center;
+  line-height: 1;
+}
+
+.fb-entry-name {
+  flex: 1;
+  font-size: 14px;
+  color: #e0e0e0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
+}
+
+.fb-entry--dir .fb-entry-name {
+  color: #81d4fa;
+}
+
+.fb-entry-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  color: #8888aa;
+  font-size: 12px;
+}
+
+.fb-entry-size {
+  min-width: 40px;
+  text-align: right;
+  font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
+}
+
+.fb-entry-date {
+  min-width: 60px;
+  text-align: right;
+}
+
+/* Loading / Empty / Error states */
+.fb-loading {
+  padding: 40px 16px;
+  text-align: center;
+  color: #8888aa;
+  font-size: 14px;
+}
+
+.fb-empty {
+  padding: 40px 16px;
+  text-align: center;
+  color: #8888aa;
+  font-size: 14px;
+}
+
+.fb-error {
+  padding: 40px 16px;
+  text-align: center;
+  color: #e57373;
+  font-size: 14px;
+}
+
+/* Drawer file browser button */
+.drawer-session-filebrowser-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  min-height: 36px;
+  background: none;
+  border: none;
+  color: #8888aa;
+  font-size: 16px;
+  cursor: pointer;
+  border-radius: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.drawer-session-filebrowser-btn:hover {
+  background: rgba(126, 200, 227, 0.15);
+  color: #7ec8e3;
+}
+
+.drawer-session-filebrowser-btn:active {
+  background: rgba(126, 200, 227, 0.25);
+  color: #7ec8e3;
+}
+
+/* Mobile optimizations */
+@media (max-width: 600px) {
+  .fb-breadcrumb {
+    padding: 6px 8px;
+    min-height: 36px;
+  }
+
+  .fb-breadcrumb-back {
+    min-width: 32px;
+    min-height: 32px;
+    font-size: 14px;
+    margin-right: 6px;
+  }
+
+  .fb-breadcrumb-item {
+    font-size: 12px;
+    padding: 3px 5px;
+  }
+
+  .fb-entry {
+    padding: 8px 10px;
+    gap: 8px;
+  }
+
+  .fb-entry-icon {
+    font-size: 16px;
+    width: 22px;
+  }
+
+  .fb-entry-name {
+    font-size: 13px;
+  }
+
+  .fb-entry-meta {
+    gap: 8px;
+    font-size: 11px;
+  }
+
+  .fb-entry-size {
+    min-width: 36px;
+  }
+
+  .fb-entry-date {
+    min-width: 50px;
+  }
+
+  .header-tab-btn {
+    padding: 3px 8px;
+    font-size: 12px;
+    min-height: 28px;
+  }
+
+  .drawer-session-filebrowser-btn {
+    min-width: 32px;
+    min-height: 32px;
+    font-size: 14px;
+  }
+}

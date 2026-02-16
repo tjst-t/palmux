@@ -26,6 +26,7 @@ export class Drawer {
    * @param {function(string, number): void} [options.onCreateWindow] - ウィンドウ作成後のコールバック (session, windowIndex)
    * @param {function(): void} [options.onDeleteWindow] - ウィンドウ削除後のコールバック
    * @param {function(string, number, string): void} [options.onRenameWindow] - ウィンドウリネーム後のコールバック (session, windowIndex, newName)
+   * @param {function(string): void} [options.onOpenFileBrowser] - ファイルブラウザ表示コールバック (sessionName)
    */
   constructor(options) {
     this._onSelectWindow = options.onSelectWindow;
@@ -35,6 +36,7 @@ export class Drawer {
     this._onCreateWindow = options.onCreateWindow || null;
     this._onDeleteWindow = options.onDeleteWindow || null;
     this._onRenameWindow = options.onRenameWindow || null;
+    this._onOpenFileBrowser = options.onOpenFileBrowser || null;
     this._visible = false;
     this._currentSession = null;
     this._currentWindowIndex = null;
@@ -433,6 +435,20 @@ export class Drawer {
 
     header.appendChild(arrow);
     header.appendChild(name);
+
+    // ファイルブラウザボタン
+    if (this._onOpenFileBrowser) {
+      const fbBtn = document.createElement('button');
+      fbBtn.className = 'drawer-session-filebrowser-btn';
+      fbBtn.textContent = '\uD83D\uDCC1';
+      fbBtn.setAttribute('aria-label', 'Open file browser');
+      fbBtn.addEventListener('click', (e) => {
+        e.stopPropagation(); // セッションヘッダーのクリックイベントを抑制
+        this._onOpenFileBrowser(session.name);
+        this.close();
+      });
+      header.appendChild(fbBtn);
+    }
 
     // 長押しで削除オプション表示
     this._setupLongPress(header, session);

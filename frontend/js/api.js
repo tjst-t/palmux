@@ -152,6 +152,42 @@ export async function deleteWindow(session, index) {
 }
 
 /**
+ * セッションの現在の作業ディレクトリ（CWD）を取得する。
+ * @param {string} session - セッション名
+ * @returns {Promise<{path: string}>}
+ */
+export async function getSessionCwd(session) {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/cwd`);
+}
+
+/**
+ * ディレクトリ内のファイル一覧を取得する。
+ * @param {string} session - セッション名
+ * @param {string} [path='.'] - 相対パス
+ * @returns {Promise<{path: string, abs_path: string, entries: Array<{name: string, size: number, is_dir: boolean, mod_time: string, extension: string}>}>}
+ */
+export async function listFiles(session, path = '.') {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/files?path=${encodeURIComponent(path)}`);
+}
+
+/**
+ * ファイルの raw コンテンツ URL を生成する。
+ * 認証トークンをクエリパラメータに付与する（ブラウザの img/iframe 等で使用するため）。
+ * @param {string} session - セッション名
+ * @param {string} path - ファイルの相対パス
+ * @returns {string} raw ファイル URL
+ */
+export function getFileRawURL(session, path) {
+  const basePath = getBasePath();
+  const token = getToken();
+  let url = `${basePath}api/sessions/${encodeURIComponent(session)}/files?path=${encodeURIComponent(path)}&raw=true`;
+  if (token) {
+    url += `&token=${encodeURIComponent(token)}`;
+  }
+  return url;
+}
+
+/**
  * WebSocket 接続用の URL を生成する。
  * base-path とプロトコル（ws/wss）を考慮し、認証トークンをクエリパラメータに付与する。
  * @param {string} session - セッション名
