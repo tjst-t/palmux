@@ -453,12 +453,23 @@ export class Drawer {
         this._expandedSessions.clear();
         this._expandedSessions.add(session.name);
         // ウィンドウ一覧をロード
+        let windows = [];
         try {
-          await this._loadWindows(session.name);
+          windows = await this._loadWindows(session.name);
         } catch (err) {
           console.error('Failed to load windows:', err);
         }
         this._renderContent();
+
+        // 別セッションの場合: アクティブなウィンドウに自動遷移（Drawer は開いたまま）
+        if (session.name !== this._currentSession && windows && windows.length > 0) {
+          const activeWindow = windows.find((w) => w.active) || windows[0];
+          this._onSelectSession(session.name, activeWindow.index);
+          this._currentSession = session.name;
+          this._currentWindowIndex = activeWindow.index;
+          // ウィンドウ一覧の current 表示を更新するため再描画
+          this._renderContent();
+        }
       }
     });
 

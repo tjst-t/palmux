@@ -26,54 +26,59 @@
   overflow: hidden;
 }
 
-/* Header Tab Buttons */
+/* Header Tab Toggle Switch */
 .header-tabs {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 0;
   flex-shrink: 0;
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
   z-index: 1;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 20px;
+  padding: 3px;
 }
 
 .header-tab-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 4px 10px;
-  min-height: 32px;
+  padding: 4px 14px;
+  min-height: 28px;
   background: none;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  color: #8888aa;
+  border: none;
+  border-radius: 17px;
+  color: rgba(224, 224, 224, 0.45);
   font-size: 13px;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition: background 0.2s, color 0.2s;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
   white-space: nowrap;
 }
 
+.header-tab-icon {
+  display: block;
+}
+
 .header-tab-btn:hover {
-  background: rgba(126, 200, 227, 0.1);
-  color: #b0b0cc;
+  color: rgba(224, 224, 224, 0.75);
 }
 
 .header-tab-btn:active {
-  background: rgba(126, 200, 227, 0.2);
+  opacity: 0.8;
 }
 
 .header-tab-btn--active {
-  color: #4fc3f7;
-  border-color: #4fc3f7;
-  background: rgba(79, 195, 247, 0.08);
+  background: #7ec8e3;
+  color: #0f0f23;
 }
 
 .header-tab-btn--active:hover {
-  background: rgba(79, 195, 247, 0.15);
-  color: #4fc3f7;
+  background: #8dd4eb;
+  color: #0f0f23;
 }
 
 .header-tabs.hidden {
