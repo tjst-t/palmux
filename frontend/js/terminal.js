@@ -128,6 +128,9 @@ export class PalmuxTerminal {
         const msg = JSON.parse(event.data);
         if (msg.type === 'output' && msg.data) {
           this._term.write(msg.data);
+        } else if (msg.type === 'ping') {
+          // サーバーからの ping に pong で応答（Cloudflare アイドルタイムアウト対策）
+          this._ws.send(JSON.stringify({ type: 'pong' }));
         }
       } catch (e) {
         console.error('Failed to parse WebSocket message:', e);

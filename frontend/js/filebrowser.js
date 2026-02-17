@@ -120,7 +120,12 @@ export class FileBrowser {
     /** @type {import('./file-preview.js').FilePreview|null} プレビューインスタンス */
     this._preview = null;
 
+    /** @type {number} フォントサイズ（px） */
+    const savedSize = parseInt(localStorage.getItem('palmux-fb-font-size'), 10);
+    this._fontSize = (savedSize >= 8 && savedSize <= 24) ? savedSize : 14;
+
     this._render();
+    this._applyFontSize();
   }
 
   /**
@@ -455,6 +460,50 @@ export class FileBrowser {
       getRawURL: (s, p) => getFileRawURL(s, p),
       fetchFile: (s, p) => getFileContent(s, p),
     });
+  }
+
+  /**
+   * CSS 変数でフォントサイズをコンテナに適用する。
+   */
+  _applyFontSize() {
+    this._container.style.setProperty('--fb-font-size', this._fontSize + 'px');
+  }
+
+  /**
+   * フォントサイズを設定する。
+   * @param {number} size - フォントサイズ（px）
+   * @returns {number} 適用後のフォントサイズ
+   */
+  setFontSize(size) {
+    const clamped = Math.max(8, Math.min(24, size));
+    this._fontSize = clamped;
+    localStorage.setItem('palmux-fb-font-size', clamped);
+    this._applyFontSize();
+    return clamped;
+  }
+
+  /**
+   * フォントサイズを拡大する。
+   * @returns {number} 適用後のフォントサイズ
+   */
+  increaseFontSize() {
+    return this.setFontSize(this._fontSize + 2);
+  }
+
+  /**
+   * フォントサイズを縮小する。
+   * @returns {number} 適用後のフォントサイズ
+   */
+  decreaseFontSize() {
+    return this.setFontSize(this._fontSize - 2);
+  }
+
+  /**
+   * 現在のフォントサイズを取得する。
+   * @returns {number}
+   */
+  getFontSize() {
+    return this._fontSize;
   }
 
   /**

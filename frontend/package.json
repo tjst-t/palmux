@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "build": "esbuild js/app.js --bundle --minify --outdir=build && cp index.html build/ && cp css/style.css build/ && cp node_modules/@xterm/xterm/css/xterm.css build/",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest run"
   },
   "keywords": [],
   "author": "",
@@ -20,6 +20,7 @@
     "marked": "^17.0.2"
   },
   "devDependencies": {
-    "esbuild": "^0.27.3"
+    "esbuild": "^0.27.3",
+    "vitest": "^4.0.18"
   }
 }

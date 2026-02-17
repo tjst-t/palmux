@@ -1,7 +1,5 @@
-const CACHE_NAME = 'palmux-v1';
+const CACHE_NAME = 'palmux-v2';
 const STATIC_ASSETS = [
-  './',
-  './index.html',
   './app.js',
   './style.css',
   './xterm.css',
@@ -15,7 +13,7 @@ self.addEventListener('install', (event) => {
   );
 });
 
-// Fetch: cache-first for static assets, skip API and WebSocket
+// Fetch: network-first for navigation, cache-first for static assets, skip API and WebSocket
 self.addEventListener('fetch', (event) => {
   const url = event.request.url;
 
@@ -24,7 +22,23 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Cache-first strategy for static assets
+  // Navigation requests (HTML) use network-first strategy.
+  // index.html contains a dynamic auth token (<meta name="auth-token">),
+  // so we must always fetch the latest version from the server.
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // Cache-first strategy for static assets (CSS, JS, icons, etc.)
   event.respondWith(
     caches.match(event.request).then((cached) => {
       return cached || fetch(event.request);
