@@ -14,7 +14,11 @@ import (
 	"github.com/tjst-t/palmux/internal/tmux"
 )
 
+var version = "dev"
+
 func main() {
+	showVersion := flag.Bool("version", false, "Show version and exit")
+	v := flag.Bool("v", false, "Show version and exit (shorthand)")
 	port := flag.Int("port", 8080, "Listen port")
 	host := flag.String("host", "0.0.0.0", "Listen address")
 	tmuxBin := flag.String("tmux", "tmux", "tmux binary path")
@@ -25,6 +29,11 @@ func main() {
 	maxConnections := flag.Int("max-connections", 5, "Max simultaneous connections per session")
 
 	flag.Parse()
+
+	if *showVersion || *v {
+		fmt.Println("palmux " + version)
+		return
+	}
 
 	// tmux の存在チェック
 	tmuxPath, err := exec.LookPath(*tmuxBin)
