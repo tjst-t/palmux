@@ -20,6 +20,7 @@
 
 /** @type {ButtonDef[]} */
 const BUTTON_DEFS = [
+  { label: '\u3042',    type: 'keyboard-mode' },
   { label: 'Esc',  type: 'instant',  key: '\x1b' },
   { label: 'Tab',  type: 'instant',  key: '\t' },
   { label: 'Ctrl', type: 'modifier', modifier: 'ctrl' },
@@ -29,9 +30,9 @@ const BUTTON_DEFS = [
   { label: '\u2190',    type: 'instant',  key: '\x1b[D', repeat: true },
   { label: '\u2192',    type: 'instant',  key: '\x1b[C', repeat: true },
   { label: '\u232B',    type: 'instant',  key: '\x7f',   repeat: true },
+  { label: '\u21B5',    type: 'instant',  key: '\r' },
   { label: '/',   type: 'instant',  key: '/',  popup: { label: '|', key: '|' } },
   { label: '-',   type: 'instant',  key: '-',  popup: { label: '_', key: '_' } },
-  { label: '\u3042',    type: 'keyboard-mode' },
 ];
 
 /**
