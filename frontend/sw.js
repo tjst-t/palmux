@@ -1,4 +1,4 @@
-const CACHE_NAME = 'palmux-v2';
+const CACHE_NAME = 'palmux-v3';
 const STATIC_ASSETS = [
   './app.js',
   './style.css',
@@ -13,7 +13,7 @@ self.addEventListener('install', (event) => {
   );
 });
 
-// Fetch: network-first for navigation, cache-first for static assets, skip API and WebSocket
+// Fetch: network-first for navigation, stale-while-revalidate for static assets, skip API and WebSocket
 self.addEventListener('fetch', (event) => {
   const url = event.request.url;
 
@@ -38,10 +38,26 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Cache-first strategy for static assets (CSS, JS, icons, etc.)
+  // Stale-while-revalidate for static assets (CSS, JS, icons, etc.)
+  // キャッシュがあれば即座に返し、バックグラウンドで最新版を取得してキャッシュを更新する。
+  // これにより、コード更新後も次回アクセスから最新版が適用される。
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      return cached || fetch(event.request);
+    caches.open(CACHE_NAME).then(async (cache) => {
+      const cached = await cache.match(event.request);
+
+      // バックグラウンドでネットワークから取得してキャッシュを更新
+      const networkFetch = fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            cache.put(event.request, response.clone());
+          }
+          return response;
+        })
+        .catch(() => null);
+
+      // キャッシュがあれば即座に返す（バックグラウンド更新は続行）
+      // キャッシュがなければネットワークから取得して待つ
+      return cached || networkFetch;
     })
   );
 });
