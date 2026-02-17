@@ -1,4 +1,6 @@
 GO ?= $(shell which go 2>/dev/null || echo /usr/local/go/bin/go)
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -X main.version=$(VERSION)
 
 .PHONY: build frontend build-linux build-arm test clean
 
@@ -16,13 +18,13 @@ frontend:
 	cp -r frontend/icons/* frontend/build/icons/
 
 build: frontend
-	CGO_ENABLED=0 $(GO) build -o palmux .
+	CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o palmux .
 
 build-linux: frontend
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO) build -o palmux-linux-amd64 .
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o palmux-linux-amd64 .
 
 build-arm: frontend
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GO) build -o palmux-linux-arm64 .
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o palmux-linux-arm64 .
 
 test:
 	$(GO) test ./...
