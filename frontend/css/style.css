@@ -1108,6 +1108,55 @@ html, body {
   background: none;
 }
 
+/* Drawer Footer (app name + version) */
+.drawer-footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border-top: 1px solid rgba(42, 42, 74, 0.6);
+}
+
+.drawer-footer-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(126, 200, 227, 0.5);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.drawer-footer-version {
+  font-size: 11px;
+  color: rgba(136, 136, 170, 0.5);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom Scrollbars (WebKit) */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(126, 200, 227, 0.2);
+  border-radius: 2px;
+  transition: background 0.2s;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(126, 200, 227, 0.45);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* Utility */
 .hidden {
   display: none !important;

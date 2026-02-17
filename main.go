@@ -81,6 +81,7 @@ func main() {
 		BasePath:       normalizedBasePath,
 		Frontend:       frontFS,
 		MaxConnections: *maxConnections,
+		Version:        version,
 	})
 
 	addr := fmt.Sprintf("%s:%d", *host, *port)

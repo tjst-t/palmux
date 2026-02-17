@@ -40,6 +40,7 @@ type Options struct {
 	BasePath       string
 	Frontend       fs.FS // 静的ファイル配信用 FS（テスト時は nil 可）
 	MaxConnections int   // 同一セッションへの最大同時接続数（デフォルト: 5）
+	Version        string
 }
 
 // NewServer は Options を元に新しい Server を生成する。
@@ -77,6 +78,7 @@ func NewServer(opts Options) *Server {
 			fs:       opts.Frontend,
 			basePath: s.basePath,
 			token:    s.token,
+			version:  opts.Version,
 			fallback: fileServer,
 		})
 	}
@@ -107,12 +109,13 @@ func (s *Server) ListenAndServeTLS(addr, certFile, keyFile string) error {
 }
 
 // indexInjector は index.html のリクエストを横取りして、
-// base-path と auth-token の meta タグに実際の値を注入するハンドラ。
+// base-path と auth-token と app-version の meta タグに実際の値を注入するハンドラ。
 // それ以外のリクエストは fallback ハンドラに委譲する。
 type indexInjector struct {
 	fs       fs.FS
 	basePath string
 	token    string
+	version  string
 	fallback http.Handler
 }
 
@@ -135,6 +138,11 @@ func (h *indexInjector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		html = strings.Replace(html,
 			`<meta name="auth-token" content="">`,
 			`<meta name="auth-token" content="`+h.token+`">`,
+			1)
+		// app-version meta タグの content 属性を置換
+		html = strings.Replace(html,
+			`<meta name="app-version" content="">`,
+			`<meta name="app-version" content="`+h.version+`">`,
 			1)
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
