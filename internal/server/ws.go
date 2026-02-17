@@ -18,6 +18,10 @@ import (
 	"nhooyr.io/websocket"
 )
 
+// wsPingInterval は WebSocket の ping 送信間隔。
+// Cloudflare Tunnel の 100 秒アイドルタイムアウト対策。
+var wsPingInterval = 30 * time.Second
+
 // connectionInfo は個々の WebSocket 接続のメタデータ。
 type connectionInfo struct {
 	Session   string    `json:"session"`
@@ -159,15 +163,33 @@ func (s *Server) handleAttach() http.Handler {
 		cleanup := func() {
 			once.Do(func() {
 				cancel()
-				ptmx.Close()
 				s.connTracker.remove(connID)
+				// プロセスを先にシグナルで終了させてから PTY を閉じる。
+				// PTY を先に閉じるとプロセスが異常な状態で終了する可能性がある。
 				if cmd != nil && cmd.Process != nil {
 					cmd.Process.Signal(syscall.SIGTERM)
-					cmd.Wait()
+					// タイムアウト付きで終了を待つ（デッドロック防止）
+					done := make(chan struct{})
+					go func() {
+						cmd.Wait()
+						close(done)
+					}()
+					select {
+					case <-done:
+						// プロセスが正常終了
+					case <-time.After(3 * time.Second):
+						// タイムアウト: 強制終了
+						cmd.Process.Signal(syscall.SIGKILL)
+						<-done
+					}
 				}
+				ptmx.Close()
 			})
 		}
 		defer cleanup()
+
+		// WebSocket ping (Cloudflare Tunnel の 100 秒アイドルタイムアウト対策)
+		go s.wsPing(ctx, conn, cleanup)
 
 		// pty → WebSocket (出力)
 		go s.ptyToWS(ctx, conn, ptmx, cleanup)
@@ -184,6 +206,29 @@ func (s *Server) handleListConnections() http.Handler {
 		conns := s.connTracker.list()
 		writeJSON(w, http.StatusOK, conns)
 	})
+}
+
+// wsPing は定期的に ping メッセージを WebSocket に送信する。
+// Cloudflare Tunnel 等のアイドルタイムアウトによる切断を防止する。
+func (s *Server) wsPing(ctx context.Context, conn *websocket.Conn, cleanup func()) {
+	ticker := time.NewTicker(wsPingInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			msg := wsOutputMessage{Type: "ping"}
+			data, err := json.Marshal(msg)
+			if err != nil {
+				continue
+			}
+			if err := conn.Write(ctx, websocket.MessageText, data); err != nil {
+				cleanup()
+				return
+			}
+		}
+	}
 }
 
 // ptyToWS は pty からの出力を WebSocket に中継する。
@@ -248,6 +293,8 @@ func (s *Server) wsToPty(ctx context.Context, conn *websocket.Conn, ptmx *os.Fil
 					// resize エラーは致命的ではないので継続
 				}
 			}
+		case "pong":
+			// クライアントからの ping 応答 — 処理不要
 		default:
 			log.Printf("unknown message type: %q", msg.Type)
 		}

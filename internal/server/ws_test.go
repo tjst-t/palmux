@@ -773,6 +773,95 @@ func TestHandleListConnections_AuthRequired(t *testing.T) {
 	}
 }
 
+func TestHandleAttach_PongMessage(t *testing.T) {
+	pts, mock, cleanup := setupWSTest(t)
+	defer cleanup()
+
+	srv, token := newTestServerWithWS(mock)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	conn, ctx, cancel := dialWS(t, ts.URL, "/api/sessions/main/windows/0/attach", token)
+	defer cancel()
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	// pong メッセージを送信 — エラーにならないことを確認
+	pongMsg := wsTestMessage{Type: "pong"}
+	pongData, err := json.Marshal(pongMsg)
+	if err != nil {
+		t.Fatalf("failed to marshal pong message: %v", err)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, pongData); err != nil {
+		t.Fatalf("failed to write pong to websocket: %v", err)
+	}
+
+	// pong 後も input が正常に動くことを確認
+	inputMsg := wsTestMessage{Type: "input", Data: "echo pong-test\r"}
+	inputData, err := json.Marshal(inputMsg)
+	if err != nil {
+		t.Fatalf("failed to marshal input message: %v", err)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, inputData); err != nil {
+		t.Fatalf("failed to write input to websocket: %v", err)
+	}
+
+	buf := make([]byte, 256)
+	pts.SetReadDeadline(time.Now().Add(3 * time.Second))
+	n, err := pts.Read(buf)
+	if err != nil {
+		t.Fatalf("failed to read from pts: %v", err)
+	}
+
+	got := string(buf[:n])
+	if !strings.Contains(got, "echo pong-test") {
+		t.Errorf("pts received %q, want to contain %q", got, "echo pong-test")
+	}
+}
+
+func TestHandleAttach_PingSent(t *testing.T) {
+	pts, mock, cleanup := setupWSTest(t)
+	defer cleanup()
+	_ = pts
+
+	// ping 間隔を短く設定（テスト用）
+	origInterval := wsPingInterval
+	wsPingInterval = 100 * time.Millisecond
+	defer func() { wsPingInterval = origInterval }()
+
+	srv, token := newTestServerWithWS(mock)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	conn, ctx, cancel := dialWS(t, ts.URL, "/api/sessions/main/windows/0/attach", token)
+	defer cancel()
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	// ping メッセージを受信するまで待つ
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for ping message")
+		default:
+		}
+
+		readCtx, readCancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		_, msgData, err := conn.Read(readCtx)
+		readCancel()
+		if err != nil {
+			continue
+		}
+
+		var msg wsTestMessage
+		if err := json.Unmarshal(msgData, &msg); err != nil {
+			continue
+		}
+		if msg.Type == "ping" {
+			return // success: ping を受信
+		}
+	}
+}
+
 func TestHandleAttach_DefaultMaxConnections(t *testing.T) {
 	// MaxConnections が 0 の場合、デフォルトの 5 が使われることを確認
 	mock := &wsMock{

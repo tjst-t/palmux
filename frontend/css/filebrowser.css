@@ -15,6 +15,7 @@
 #filebrowser-container {
   flex: 1;
   overflow: hidden;
+  --fb-font-size: 14px;
 }
 
 /* File Browser wrapper */
@@ -30,8 +31,11 @@
   display: flex;
   align-items: center;
   gap: 2px;
-  margin-left: 8px;
   flex-shrink: 0;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
 }
 
 .header-tab-btn {
@@ -133,7 +137,7 @@
   background: none;
   border: none;
   color: #7ec8e3;
-  font-size: 13px;
+  font-size: calc(var(--fb-font-size, 14px) - 1px);
   padding: 4px 6px;
   cursor: pointer;
   border-radius: 4px;
@@ -212,7 +216,7 @@
 
 .fb-entry-name {
   flex: 1;
-  font-size: 14px;
+  font-size: var(--fb-font-size, 14px);
   color: #e0e0e0;
   white-space: nowrap;
   overflow: hidden;
@@ -230,7 +234,7 @@
   gap: 12px;
   flex-shrink: 0;
   color: #8888aa;
-  font-size: 12px;
+  font-size: calc(var(--fb-font-size, 14px) - 2px);
 }
 
 .fb-entry-size {
@@ -409,7 +413,7 @@
 .fp-markdown {
   padding: 16px;
   color: #e0e0e0;
-  font-size: 14px;
+  font-size: var(--fb-font-size, 14px);
   line-height: 1.6;
   word-wrap: break-word;
   overflow-wrap: break-word;
@@ -548,7 +552,7 @@
   border-collapse: collapse;
   width: 100%;
   font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
-  font-size: 13px;
+  font-size: calc(var(--fb-font-size, 14px) - 1px);
   line-height: 1.5;
 }
 
@@ -580,7 +584,7 @@
   margin: 0;
   color: #e0e0e0;
   font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
-  font-size: 13px;
+  font-size: calc(var(--fb-font-size, 14px) - 1px);
   line-height: 1.5;
   white-space: pre-wrap;
   word-wrap: break-word;
@@ -698,12 +702,12 @@
   }
 
   .fb-entry-name {
-    font-size: 13px;
+    font-size: var(--fb-font-size, 13px);
   }
 
   .fb-entry-meta {
     gap: 8px;
-    font-size: 11px;
+    font-size: calc(var(--fb-font-size, 13px) - 2px);
   }
 
   .fb-entry-size {
@@ -749,11 +753,11 @@
 
   .fp-markdown {
     padding: 12px;
-    font-size: 13px;
+    font-size: var(--fb-font-size, 13px);
   }
 
   .fp-code-table {
-    font-size: 12px;
+    font-size: calc(var(--fb-font-size, 13px) - 1px);
   }
 
   .fp-code-linenum {
@@ -766,7 +770,7 @@
 
   .fp-plaintext {
     padding: 12px;
-    font-size: 12px;
+    font-size: calc(var(--fb-font-size, 13px) - 1px);
   }
 
   .fp-image {

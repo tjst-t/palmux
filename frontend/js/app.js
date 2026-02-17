@@ -29,8 +29,11 @@ let touchHandler = null;
 /** @type {ConnectionManager|null} */
 let connectionManager = null;
 
-/** @type {FileBrowser|null} */
-let fileBrowser = null;
+/** @type {Map<string, {wrapper: HTMLElement, browser: FileBrowser}>} セッションごとのファイルブラウザ */
+const fileBrowsers = new Map();
+
+/** @type {Map<string, string>} セッションごとの表示モード ('terminal' | 'filebrowser') */
+const sessionViewModes = new Map();
 
 /** 現在接続中のセッション名 */
 let currentSession = null;
@@ -95,11 +98,12 @@ async function showSessionList() {
     reconnectOverlayEl.classList.add('hidden');
   }
 
-  // FileBrowser のクリーンアップ
-  if (fileBrowser) {
-    fileBrowser.dispose();
-    fileBrowser = null;
+  // FileBrowser のクリーンアップ（全セッション分）
+  for (const [, entry] of fileBrowsers) {
+    entry.browser.dispose();
   }
+  fileBrowsers.clear();
+  sessionViewModes.clear();
   currentViewMode = 'terminal';
 
   // UI 切り替え
@@ -380,7 +384,15 @@ function connectToWindow(sessionName, windowIndex) {
     terminal: terminal,
   });
   connectionManager.connect();
-  terminal.focus();
+
+  // セッションごとの表示モードを復元
+  const savedViewMode = sessionViewModes.get(sessionName) || 'terminal';
+  if (savedViewMode === 'filebrowser') {
+    showFileBrowser(sessionName);
+  } else {
+    currentViewMode = 'terminal';
+    terminal.focus();
+  }
 }
 
 /**
@@ -459,6 +471,7 @@ function switchSession(sessionName, windowIndex) {
 /**
  * ファイルブラウザ表示に切り替える。
  * ターミナルビューを隠し、ファイラーパネルを表示する。
+ * セッションごとに独立したファイルブラウザ状態を管理する。
  * @param {string} sessionName - セッション名
  */
 function showFileBrowser(sessionName) {
@@ -474,14 +487,16 @@ function showFileBrowser(sessionName) {
   terminalViewEl.classList.add('hidden');
   filebrowserViewEl.classList.remove('hidden');
 
-  // ツールバートグルとフォントサイズを非表示
+  // ツールバートグルを非表示（ターミナル専用）
   const toolbarToggleBtnEl = document.getElementById('toolbar-toggle-btn');
   if (toolbarToggleBtnEl) {
     toolbarToggleBtnEl.classList.add('hidden');
   }
+
+  // フォントサイズコントロールは表示したまま（ファイルブラウザでも使用）
   const fontSizeControlsEl = document.getElementById('font-size-controls');
   if (fontSizeControlsEl) {
-    fontSizeControlsEl.classList.add('hidden');
+    fontSizeControlsEl.classList.remove('hidden');
   }
 
   // タブの状態を更新
@@ -493,17 +508,29 @@ function showFileBrowser(sessionName) {
   }
 
   currentViewMode = 'filebrowser';
+  sessionViewModes.set(sessionName, 'filebrowser');
 
-  // FileBrowser インスタンスの作成 or 再利用
-  if (!fileBrowser) {
-    fileBrowser = new FileBrowser(filebrowserContainerEl, {
+  // コンテナから現在のファイラーを取り外す（DOM を破壊せず保持）
+  while (filebrowserContainerEl.firstChild) {
+    filebrowserContainerEl.removeChild(filebrowserContainerEl.firstChild);
+  }
+
+  // セッション用の FileBrowser を取得 or 新規作成
+  if (!fileBrowsers.has(sessionName)) {
+    const wrapper = document.createElement('div');
+    wrapper.style.height = '100%';
+    const browser = new FileBrowser(wrapper, {
       onFileSelect: (session, path, entry) => {
         // Preview is handled internally by FileBrowser.showPreview()
       },
     });
+    fileBrowsers.set(sessionName, { wrapper, browser });
+    browser.open(sessionName);
   }
 
-  fileBrowser.open(sessionName);
+  // セッション用のファイラー DOM をコンテナに追加（状態が保持される）
+  const entry = fileBrowsers.get(sessionName);
+  filebrowserContainerEl.appendChild(entry.wrapper);
 }
 
 /**
@@ -541,6 +568,9 @@ function showTerminalView() {
   }
 
   currentViewMode = 'terminal';
+  if (currentSession) {
+    sessionViewModes.set(currentSession, 'terminal');
+  }
 
   // ターミナルを再フィット
   if (terminal) {
@@ -618,9 +648,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
     },
-    onOpenFileBrowser: (sessionName) => {
-      showFileBrowser(sessionName);
-    },
   });
 
   // drawer ボタンのイベント
@@ -678,17 +705,25 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // フォントサイズボタンのイベント
+  // フォントサイズボタンのイベント（ターミナル / ファイルブラウザ 両対応）
   const fontDecreaseBtn = document.getElementById('font-decrease-btn');
   const fontIncreaseBtn = document.getElementById('font-increase-btn');
   if (fontDecreaseBtn) {
     fontDecreaseBtn.addEventListener('click', () => {
-      if (terminal) terminal.decreaseFontSize();
+      if (currentViewMode === 'filebrowser' && currentSession && fileBrowsers.has(currentSession)) {
+        fileBrowsers.get(currentSession).browser.decreaseFontSize();
+      } else if (terminal) {
+        terminal.decreaseFontSize();
+      }
     });
   }
   if (fontIncreaseBtn) {
     fontIncreaseBtn.addEventListener('click', () => {
-      if (terminal) terminal.increaseFontSize();
+      if (currentViewMode === 'filebrowser' && currentSession && fileBrowsers.has(currentSession)) {
+        fileBrowsers.get(currentSession).browser.increaseFontSize();
+      } else if (terminal) {
+        terminal.increaseFontSize();
+      }
     });
   }
 
