@@ -28,6 +28,8 @@ export class PalmuxTerminal {
     this._imeMode = false;
     /** @type {boolean} 修飾キー即時送信で処理済みフラグ（onData 二重送信防止） */
     this._modifierHandled = false;
+    /** @type {function|null} document レベルの keydown ハンドラー参照 */
+    this._boundGlobalKeyHandler = null;
   }
 
   /**
@@ -66,6 +68,14 @@ export class PalmuxTerminal {
     const unicode11Addon = new Unicode11Addon();
     this._term.loadAddon(unicode11Addon);
     this._term.unicode.activeVersion = '11';
+
+    // ブラウザショートカット（Ctrl+N, Ctrl+T 等）を抑止し、ターミナルに送信する。
+    // document レベルで捕捉することで、xterm にフォーカスがない場合でも動作する。
+    if (this._boundGlobalKeyHandler) {
+      document.removeEventListener('keydown', this._boundGlobalKeyHandler);
+    }
+    this._boundGlobalKeyHandler = this._globalKeyHandler.bind(this);
+    document.addEventListener('keydown', this._boundGlobalKeyHandler);
 
     // デフォルトは 'none' モード（ソフトキーボード非表示）
     // ツールバーのキーボードモード切替で 'direct'/'ime' に変更可能
@@ -170,6 +180,10 @@ export class PalmuxTerminal {
    * WebSocket 接続を切断し、リソースをクリーンアップする。
    */
   disconnect() {
+    if (this._boundGlobalKeyHandler) {
+      document.removeEventListener('keydown', this._boundGlobalKeyHandler);
+      this._boundGlobalKeyHandler = null;
+    }
     if (this._ws) {
       this._ws.close();
       this._ws = null;
@@ -356,11 +370,127 @@ export class PalmuxTerminal {
   }
 
   /**
+   * document レベルの keydown ハンドラー。
+   * ターミナル接続中にブラウザショートカットを抑止し、
+   * xterm にフォーカスがない場合は制御文字を直接送信する。
+   * @param {KeyboardEvent} e
+   */
+  _globalKeyHandler(e) {
+    if (!this._term || !this._ws) return;
+
+    // ブラウザ DevTools は許可
+    if (e.key === 'F12') return;
+    if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J')) return;
+
+    // Ctrl+<key>: ブラウザデフォルト動作を抑止（Ctrl+V はペーストのため除外）
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
+      const key = e.key.toLowerCase();
+      if (key !== 'v' && key.length === 1) {
+        e.preventDefault();
+        // xterm にフォーカスがなければ制御文字を直接送信
+        if (!this._isTerminalFocused()) {
+          const code = key.toUpperCase().charCodeAt(0);
+          if (code >= 64 && code <= 95) {
+            this._sendInput(String.fromCharCode(code - 64));
+          }
+          this._term.focus();
+        }
+      }
+    }
+
+    // Alt+<key>: メニューバー起動等を抑止
+    if (e.altKey && !e.ctrlKey && !e.metaKey && e.key.length === 1) {
+      e.preventDefault();
+      if (!this._isTerminalFocused()) {
+        this._sendInput('\x1b' + e.key);
+        this._term.focus();
+      }
+    }
+  }
+
+  /**
+   * xterm のテキストエリアにフォーカスがあるかを返す。
+   * @returns {boolean}
+   */
+  _isTerminalFocused() {
+    const active = document.activeElement;
+    const helperTextarea = this._container.querySelector('.xterm-helper-textarea');
+    return active === helperTextarea;
+  }
+
+  /**
    * ターミナルにフォーカスする。
    */
   focus() {
     if (this._term) {
       this._term.focus();
     }
+  }
+
+  /**
+   * 画面座標からターミナルのセル位置（col, row）を算出する。
+   * @param {number} x - clientX
+   * @param {number} y - clientY
+   * @returns {{ col: number, row: number }|null}
+   */
+  getCellFromPoint(x, y) {
+    const screen = this._container.querySelector('.xterm-screen');
+    if (!screen || !this._term) return null;
+    const rect = screen.getBoundingClientRect();
+    const col = Math.floor((x - rect.left) / (rect.width / this._term.cols));
+    const row = Math.floor((y - rect.top) / (rect.height / this._term.rows));
+    return {
+      col: Math.max(0, Math.min(col, this._term.cols - 1)),
+      row: Math.max(0, Math.min(row, this._term.rows - 1)),
+    };
+  }
+
+  /**
+   * ビューポート行のテキストを返す。
+   * @param {number} viewportRow - ビューポート内の行番号（0 始まり）
+   * @returns {string}
+   */
+  getLineText(viewportRow) {
+    if (!this._term) return '';
+    const bufferRow = this._term.buffer.active.viewportY + viewportRow;
+    const line = this._term.buffer.active.getLine(bufferRow);
+    return line ? line.translateToString() : '';
+  }
+
+  /**
+   * テキスト範囲を選択する。
+   * @param {number} col - 開始列
+   * @param {number} row - 開始行（ビューポート相対）
+   * @param {number} length - 選択する文字数（行をまたぐ場合は列数単位で折り返す）
+   */
+  select(col, row, length) {
+    if (this._term) {
+      this._term.select(col, row, length);
+    }
+  }
+
+  /**
+   * 現在の選択テキストを返す。
+   * @returns {string}
+   */
+  getSelection() {
+    return this._term ? this._term.getSelection() : '';
+  }
+
+  /**
+   * 選択を解除する。
+   */
+  clearSelection() {
+    if (this._term) {
+      this._term.clearSelection();
+    }
+  }
+
+  /**
+   * ターミナルの列数を返す。
+   * @returns {number}
+   */
+  getCols() {
+    return this._term ? this._term.cols : 80;
   }
 }
