@@ -198,6 +198,14 @@ export function getFileRawURL(session, path) {
 }
 
 /**
+ * ghq リポジトリ一覧を取得する。
+ * @returns {Promise<Array<{name: string, path: string, full_path: string}>>}
+ */
+export async function listGhqRepos() {
+  return fetchAPI('api/ghq/repos');
+}
+
+/**
  * WebSocket 接続用の URL を生成する。
  * base-path とプロトコル（ws/wss）を考慮し、認証トークンをクエリパラメータに付与する。
  * @param {string} session - セッション名

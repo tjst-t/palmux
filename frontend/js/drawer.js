@@ -2,7 +2,7 @@
 // ハンバーガーメニューからスライドインし、セッション/ウィンドウの切り替えを行う
 // セッション作成・削除機能を含む
 
-import { listSessions, listWindows, createSession, deleteSession, createWindow, deleteWindow, renameWindow } from './api.js';
+import { listSessions, listWindows, createSession, deleteSession, createWindow, deleteWindow, renameWindow, listGhqRepos } from './api.js';
 
 /**
  * Drawer はセッション/ウィンドウ切り替え用のスライドインパネル。
@@ -237,7 +237,7 @@ export class Drawer {
   }
 
   /**
-   * [New Session] ボタンとインライン入力フォームを作成する。
+   * [New Session] ボタンとプロジェクトピッカーを作成する。
    * @returns {HTMLElement}
    */
   _createNewSessionButton() {
@@ -248,7 +248,7 @@ export class Drawer {
     btn.className = 'drawer-new-session-btn';
     btn.textContent = '+ New Session';
     btn.addEventListener('click', () => {
-      this._showNewSessionInput(container, btn);
+      this._showProjectPicker(container, btn);
     });
 
     container.appendChild(btn);
@@ -256,17 +256,240 @@ export class Drawer {
   }
 
   /**
-   * セッション名入力フォームを表示する。
+   * プロジェクトピッカーを表示する。
+   * ghq リポジトリ一覧から未使用のプロジェクトを表示し、タップでセッション作成する。
+   * ghq が利用できない場合はカスタム名入力フォームにフォールバックする。
    * @param {HTMLElement} container - 親コンテナ
    * @param {HTMLElement} btn - トグルボタン（非表示にする）
    */
-  _showNewSessionInput(container, btn) {
-    // 既に入力フォームが表示中なら何もしない
-    if (container.querySelector('.drawer-new-session-form')) {
+  async _showProjectPicker(container, btn) {
+    // 既にピッカーが表示中なら何もしない
+    if (container.querySelector('.drawer-project-picker')) {
       return;
     }
 
     btn.style.display = 'none';
+
+    const picker = document.createElement('div');
+    picker.className = 'drawer-project-picker';
+
+    // ローディング表示
+    const loadingEl = document.createElement('div');
+    loadingEl.className = 'drawer-project-picker-loading';
+    loadingEl.textContent = 'Loading projects...';
+    picker.appendChild(loadingEl);
+    container.appendChild(picker);
+
+    let repos = [];
+    try {
+      repos = await listGhqRepos() || [];
+    } catch (err) {
+      console.error('Failed to load ghq repos:', err);
+    }
+
+    // ローディング除去
+    loadingEl.remove();
+
+    // 既存セッション名のセット
+    const existingNames = new Set(this._sessions.map((s) => s.name));
+
+    // 未使用のリポジトリだけ残す
+    const availableRepos = repos.filter((r) => !existingNames.has(r.name));
+
+    // ghq リポジトリがない場合はカスタム名入力に直接遷移
+    if (availableRepos.length === 0 && repos.length === 0) {
+      picker.remove();
+      this._showCustomNameInput(container, btn);
+      return;
+    }
+
+    this._renderProjectPickerContent(picker, availableRepos, container, btn);
+  }
+
+  /**
+   * プロジェクトピッカーの内容を描画する。
+   * @param {HTMLElement} picker - ピッカーコンテナ
+   * @param {Array} availableRepos - 利用可能なリポジトリ
+   * @param {HTMLElement} container - 親コンテナ
+   * @param {HTMLElement} btn - トグルボタン
+   */
+  _renderProjectPickerContent(picker, availableRepos, container, btn) {
+    picker.innerHTML = '';
+
+    // フィルター入力
+    const filterInput = document.createElement('input');
+    filterInput.type = 'text';
+    filterInput.className = 'drawer-project-picker-filter';
+    filterInput.placeholder = 'Filter projects...';
+    filterInput.autocomplete = 'off';
+    filterInput.autocapitalize = 'off';
+    filterInput.spellcheck = false;
+    picker.appendChild(filterInput);
+
+    // プロジェクトリスト
+    const listEl = document.createElement('div');
+    listEl.className = 'drawer-project-picker-list';
+    picker.appendChild(listEl);
+
+    const renderList = (filter) => {
+      listEl.innerHTML = '';
+
+      const filtered = filter
+        ? availableRepos.filter((r) =>
+            r.name.toLowerCase().includes(filter) ||
+            r.path.toLowerCase().includes(filter)
+          )
+        : availableRepos;
+
+      if (filtered.length === 0 && availableRepos.length > 0) {
+        const emptyEl = document.createElement('div');
+        emptyEl.className = 'drawer-project-picker-empty';
+        emptyEl.textContent = 'No matching projects';
+        listEl.appendChild(emptyEl);
+      } else if (filtered.length === 0) {
+        const emptyEl = document.createElement('div');
+        emptyEl.className = 'drawer-project-picker-empty';
+        emptyEl.textContent = 'All projects already have sessions';
+        listEl.appendChild(emptyEl);
+      } else {
+        for (const repo of filtered) {
+          const item = this._createProjectPickerItem(repo, container, btn, picker);
+          listEl.appendChild(item);
+        }
+      }
+    };
+
+    renderList('');
+
+    // フィルター入力イベント
+    filterInput.addEventListener('input', () => {
+      renderList(filterInput.value.trim().toLowerCase());
+    });
+
+    // Escape でピッカーを閉じる
+    filterInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        this._hideProjectPicker(container, btn, picker);
+      }
+    });
+
+    // Custom name ボタン
+    const customBtn = document.createElement('div');
+    customBtn.className = 'drawer-project-picker-custom';
+    customBtn.textContent = 'Custom name...';
+    customBtn.addEventListener('click', () => {
+      picker.remove();
+      this._showCustomNameInput(container, btn);
+    });
+    picker.appendChild(customBtn);
+
+    // Cancel ボタン
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'drawer-new-session-cancel drawer-project-picker-cancel';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => {
+      this._hideProjectPicker(container, btn, picker);
+    });
+    picker.appendChild(cancelBtn);
+  }
+
+  /**
+   * プロジェクトピッカーの項目を作成する。
+   * @param {Object} repo - リポジトリ情報 {name, path, full_path}
+   * @param {HTMLElement} container - 親コンテナ
+   * @param {HTMLElement} btn - トグルボタン
+   * @param {HTMLElement} picker - ピッカーコンテナ
+   * @returns {HTMLElement}
+   */
+  _createProjectPickerItem(repo, container, btn, picker) {
+    const item = document.createElement('div');
+    item.className = 'drawer-project-picker-item';
+
+    const nameEl = document.createElement('div');
+    nameEl.className = 'drawer-project-picker-item-name';
+    nameEl.textContent = repo.name;
+
+    const pathEl = document.createElement('div');
+    pathEl.className = 'drawer-project-picker-item-path';
+    pathEl.textContent = repo.path;
+
+    item.appendChild(nameEl);
+    item.appendChild(pathEl);
+
+    item.addEventListener('click', () => {
+      this._handleCreateSessionFromPicker(repo.name, item, container, btn, picker);
+    });
+
+    return item;
+  }
+
+  /**
+   * プロジェクトピッカーからセッションを作成する。
+   * @param {string} name - セッション名
+   * @param {HTMLElement} item - クリックされた項目
+   * @param {HTMLElement} container - 親コンテナ
+   * @param {HTMLElement} btn - トグルボタン
+   * @param {HTMLElement} picker - ピッカーコンテナ
+   */
+  async _handleCreateSessionFromPicker(name, item, container, btn, picker) {
+    if (this._creating) return;
+    this._creating = true;
+
+    item.classList.add('drawer-project-picker-item--creating');
+    item.textContent = 'Creating...';
+
+    try {
+      await createSession(name);
+      this._creating = false;
+
+      // ピッカーを閉じる
+      this._hideProjectPicker(container, btn, picker);
+
+      // セッション一覧を再取得
+      await this._loadSessions();
+      this._renderContent();
+
+      // コールバックで新セッションに自動接続
+      if (this._onCreateSession) {
+        this._onCreateSession(name);
+        this.close();
+      }
+    } catch (err) {
+      this._creating = false;
+      console.error('Failed to create session:', err);
+      this._showDeleteError(`Failed to create session: ${err.message}`);
+      // 項目を元に戻す
+      item.classList.remove('drawer-project-picker-item--creating');
+      item.textContent = '';
+      const nameEl = document.createElement('div');
+      nameEl.className = 'drawer-project-picker-item-name';
+      nameEl.textContent = name;
+      item.appendChild(nameEl);
+    }
+  }
+
+  /**
+   * プロジェクトピッカーを非表示にする。
+   * @param {HTMLElement} container
+   * @param {HTMLElement} btn
+   * @param {HTMLElement} picker
+   */
+  _hideProjectPicker(container, btn, picker) {
+    picker.remove();
+    btn.style.display = '';
+  }
+
+  /**
+   * カスタム名入力フォームを表示する。
+   * @param {HTMLElement} container - 親コンテナ
+   * @param {HTMLElement} btn - トグルボタン（非表示にする）
+   */
+  _showCustomNameInput(container, btn) {
+    // 既に入力フォームが表示中なら何もしない
+    if (container.querySelector('.drawer-new-session-form')) {
+      return;
+    }
 
     const form = document.createElement('div');
     form.className = 'drawer-new-session-form';
@@ -311,7 +534,7 @@ export class Drawer {
         this._handleCreateSession(input, errorEl, container, btn, form);
       } else if (e.key === 'Escape') {
         e.preventDefault();
-        this._hideNewSessionInput(container, btn, form);
+        this._hideCustomNameInput(container, btn, form);
       }
     });
 
@@ -322,17 +545,17 @@ export class Drawer {
 
     // Cancel ボタンのクリック
     cancelBtn.addEventListener('click', () => {
-      this._hideNewSessionInput(container, btn, form);
+      this._hideCustomNameInput(container, btn, form);
     });
   }
 
   /**
-   * セッション名入力フォームを非表示にする。
+   * カスタム名入力フォームを非表示にする。
    * @param {HTMLElement} container
    * @param {HTMLElement} btn
    * @param {HTMLElement} form
    */
-  _hideNewSessionInput(container, btn, form) {
+  _hideCustomNameInput(container, btn, form) {
     form.remove();
     btn.style.display = '';
   }
@@ -374,7 +597,7 @@ export class Drawer {
       this._creating = false;
 
       // フォームを閉じる
-      this._hideNewSessionInput(container, btn, form);
+      this._hideCustomNameInput(container, btn, form);
 
       // セッション一覧を再取得
       await this._loadSessions();
