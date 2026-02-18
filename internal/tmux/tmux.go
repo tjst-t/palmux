@@ -208,3 +208,12 @@ func (m *Manager) Attach(session string, windowIndex int) (*os.File, *exec.Cmd, 
 
 	return ptmx, cmd, nil
 }
+
+// ListGhqRepos は ghq リポジトリ一覧を返す。
+// GhqResolver が未設定の場合は空スライスを返す。
+func (m *Manager) ListGhqRepos() ([]GhqRepo, error) {
+	if m.Ghq == nil {
+		return []GhqRepo{}, nil
+	}
+	return m.Ghq.ListRepos()
+}

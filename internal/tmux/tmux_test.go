@@ -944,3 +944,80 @@ func TestManager_NewSession_WithGhq(t *testing.T) {
 		})
 	}
 }
+
+func TestManager_ListGhqRepos(t *testing.T) {
+	tests := []struct {
+		name    string
+		ghq     *GhqResolver
+		want    []GhqRepo
+		wantErr bool
+	}{
+		{
+			name: "Ghq が nil の場合: 空配列を返す",
+			ghq:  nil,
+			want: []GhqRepo{},
+		},
+		{
+			name: "Ghq が設定済みでリポジトリあり",
+			ghq: &GhqResolver{
+				Cmd: &mockCommandRunner{results: map[string]mockResult{
+					"ghq root": {output: []byte("/home/user/ghq\n")},
+					"ghq list": {output: []byte("github.com/tjst-t/palmux\ngithub.com/golang/go\n")},
+				}},
+				HomeDir: "/home/user",
+			},
+			want: []GhqRepo{
+				{Name: "palmux", Path: "github.com/tjst-t/palmux", FullPath: "/home/user/ghq/github.com/tjst-t/palmux"},
+				{Name: "go", Path: "github.com/golang/go", FullPath: "/home/user/ghq/github.com/golang/go"},
+			},
+		},
+		{
+			name: "Ghq が設定済みでリポジトリなし",
+			ghq: &GhqResolver{
+				Cmd: &mockCommandRunner{results: map[string]mockResult{
+					"ghq root": {output: []byte("/home/user/ghq\n")},
+					"ghq list": {output: []byte("")},
+				}},
+				HomeDir: "/home/user",
+			},
+			want: []GhqRepo{},
+		},
+		{
+			name: "ghq コマンドが利用不可",
+			ghq: &GhqResolver{
+				Cmd: &mockCommandRunner{results: map[string]mockResult{
+					"ghq root": {err: errors.New("command not found")},
+				}},
+				HomeDir: "/home/user",
+			},
+			want: []GhqRepo{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockExecutor{output: nil, err: nil}
+			m := &Manager{Exec: mock, Ghq: tt.ghq}
+
+			got, err := m.ListGhqRepos()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ListGhqRepos() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("ListGhqRepos() returned %d repos, want %d", len(got), len(tt.want))
+			}
+			for i := range got {
+				if got[i].Name != tt.want[i].Name {
+					t.Errorf("repo[%d].Name = %q, want %q", i, got[i].Name, tt.want[i].Name)
+				}
+				if got[i].Path != tt.want[i].Path {
+					t.Errorf("repo[%d].Path = %q, want %q", i, got[i].Path, tt.want[i].Path)
+				}
+				if got[i].FullPath != tt.want[i].FullPath {
+					t.Errorf("repo[%d].FullPath = %q, want %q", i, got[i].FullPath, tt.want[i].FullPath)
+				}
+			}
+		})
+	}
+}

@@ -47,6 +47,9 @@ type configurableMock struct {
 		name    string
 	}
 	calledGetCwd string
+	ghqRepos    []tmux.GhqRepo
+	ghqReposErr error
+	calledListGhqRepos bool
 }
 
 func (m *configurableMock) ListSessions() ([]tmux.Session, error) {
@@ -98,6 +101,11 @@ func (m *configurableMock) Attach(session string, windowIndex int) (*os.File, *e
 func (m *configurableMock) GetSessionCwd(session string) (string, error) {
 	m.calledGetCwd = session
 	return m.cwd, m.cwdErr
+}
+
+func (m *configurableMock) ListGhqRepos() ([]tmux.GhqRepo, error) {
+	m.calledListGhqRepos = true
+	return m.ghqRepos, m.ghqReposErr
 }
 
 // newTestServer はテスト用 Server を作成するヘルパー。
