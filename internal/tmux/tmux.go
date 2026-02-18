@@ -14,6 +14,7 @@ import (
 // Executor を通じて tmux コマンドを実行し、結果をパースして返す。
 type Manager struct {
 	Exec Executor
+	Ghq  *GhqResolver
 }
 
 // sessionFormat は list-sessions / new-session の出力フォーマット。
@@ -116,6 +117,10 @@ func (m *Manager) NewWindow(session, name string) (*Window, error) {
 	args := []string{"new-window", "-t", session}
 	if name != "" {
 		args = append(args, "-n", name)
+	}
+	if m.Ghq != nil {
+		dir := m.Ghq.Resolve(session)
+		args = append(args, "-c", dir)
 	}
 	args = append(args, "-P", "-F", windowFormat)
 
