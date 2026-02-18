@@ -45,13 +45,14 @@ let currentWindowIndex = null;
 let currentViewMode = 'terminal';
 
 /**
- * セッション一覧画面を表示する。
+ * セッション一覧画面に切り替えるUI処理（セッション読み込みは含まない）。
+ * タッチハンドラー・IME・ツールバー・接続をクリーンアップし、
+ * セッション一覧パネルを表示する。
  */
-async function showSessionList() {
+function _switchToSessionListView() {
   const sessionListEl = document.getElementById('session-list');
   const terminalViewEl = document.getElementById('terminal-view');
   const headerTitleEl = document.getElementById('header-title');
-  const sessionItemsEl = document.getElementById('session-items');
   const drawerBtnEl = document.getElementById('drawer-btn');
 
   // タッチハンドラーのクリーンアップ
@@ -137,6 +138,23 @@ async function showSessionList() {
   if (drawerBtnEl) {
     drawerBtnEl.classList.add('hidden');
   }
+}
+
+/**
+ * セッション一覧画面を表示する。
+ * @param {{ push?: boolean, replace?: boolean }} [opts]
+ */
+async function showSessionList({ push = true, replace = false } = {}) {
+  _switchToSessionListView();
+
+  // ブラウザ履歴を更新
+  if (replace) {
+    history.replaceState({ view: 'sessions' }, '', '#sessions');
+  } else if (push) {
+    history.pushState({ view: 'sessions' }, '', '#sessions');
+  }
+
+  const sessionItemsEl = document.getElementById('session-items');
 
   // ローディング表示
   sessionItemsEl.innerHTML = '<div class="loading">Loading sessions...</div>';
@@ -179,14 +197,24 @@ async function showSessionList() {
 /**
  * 指定セッションのウィンドウ一覧を表示する。
  * @param {string} sessionName - セッション名
+ * @param {{ push?: boolean }} [opts]
  */
-async function showWindowList(sessionName) {
+async function showWindowList(sessionName, { push = true } = {}) {
   const sessionItemsEl = document.getElementById('session-items');
   const headerTitleEl = document.getElementById('header-title');
 
   headerTitleEl.textContent = sessionName;
 
   sessionItemsEl.innerHTML = '<div class="loading">Loading windows...</div>';
+
+  // ブラウザ履歴を更新（非同期処理の前に行う）
+  if (push) {
+    history.pushState(
+      { view: 'windows', session: sessionName },
+      '',
+      `#windows/${encodeURIComponent(sessionName)}`
+    );
+  }
 
   try {
     const windows = await listWindows(sessionName);
@@ -227,8 +255,9 @@ async function showWindowList(sessionName) {
  * 指定セッションのウィンドウにターミナル接続する。
  * @param {string} sessionName - セッション名
  * @param {number} windowIndex - ウィンドウインデックス
+ * @param {{ push?: boolean, replace?: boolean }} [opts]
  */
-function connectToWindow(sessionName, windowIndex) {
+function connectToWindow(sessionName, windowIndex, { push = true, replace = false } = {}) {
   const sessionListEl = document.getElementById('session-list');
   const terminalViewEl = document.getElementById('terminal-view');
   const terminalContainerEl = document.getElementById('terminal-container');
@@ -302,6 +331,15 @@ function connectToWindow(sessionName, windowIndex) {
 
   currentSession = sessionName;
   currentWindowIndex = windowIndex;
+
+  // ブラウザ履歴を更新
+  const hash = `#terminal/${encodeURIComponent(sessionName)}/${windowIndex}`;
+  const state = { view: 'terminal', session: sessionName, window: windowIndex };
+  if (replace) {
+    history.replaceState(state, '', hash);
+  } else if (push) {
+    history.pushState(state, '', hash);
+  }
 
   // Drawer の現在位置を更新
   if (drawer) {
@@ -386,7 +424,9 @@ function connectToWindow(sessionName, windowIndex) {
   connectionManager.connect();
 
   // セッションごとの表示モードを復元
-  const savedViewMode = sessionViewModes.get(sessionName) || 'terminal';
+  // ただし push: false（履歴ナビゲーション）の場合はスキップ
+  // — popstate ハンドラが必要なら showFileBrowser を別途呼び出す
+  const savedViewMode = push || replace ? (sessionViewModes.get(sessionName) || 'terminal') : 'terminal';
   if (savedViewMode === 'filebrowser') {
     showFileBrowser(sessionName);
   } else {
@@ -473,8 +513,9 @@ function switchSession(sessionName, windowIndex) {
  * ターミナルビューを隠し、ファイラーパネルを表示する。
  * セッションごとに独立したファイルブラウザ状態を管理する。
  * @param {string} sessionName - セッション名
+ * @param {{ push?: boolean }} [opts]
  */
-function showFileBrowser(sessionName) {
+function showFileBrowser(sessionName, { push = true } = {}) {
   const terminalViewEl = document.getElementById('terminal-view');
   const filebrowserViewEl = document.getElementById('filebrowser-view');
   const filebrowserContainerEl = document.getElementById('filebrowser-container');
@@ -482,6 +523,12 @@ function showFileBrowser(sessionName) {
   const headerTabFiles = document.getElementById('header-tab-files');
 
   if (!terminalViewEl || !filebrowserViewEl || !filebrowserContainerEl) return;
+
+  // ブラウザ履歴を更新
+  if (push && currentSession !== null && currentWindowIndex !== null) {
+    const hash = `#files/${encodeURIComponent(sessionName)}/${currentWindowIndex}`;
+    history.pushState({ view: 'files', session: sessionName, window: currentWindowIndex }, '', hash);
+  }
 
   // ターミナルを隠してファイラーを表示
   terminalViewEl.classList.add('hidden');
@@ -536,14 +583,21 @@ function showFileBrowser(sessionName) {
 /**
  * ターミナル表示に戻す。
  * ファイラーパネルを隠し、ターミナルビューを表示する。
+ * @param {{ push?: boolean }} [opts]
  */
-function showTerminalView() {
+function showTerminalView({ push = true } = {}) {
   const terminalViewEl = document.getElementById('terminal-view');
   const filebrowserViewEl = document.getElementById('filebrowser-view');
   const headerTabTerminal = document.getElementById('header-tab-terminal');
   const headerTabFiles = document.getElementById('header-tab-files');
 
   if (!terminalViewEl || !filebrowserViewEl) return;
+
+  // ブラウザ履歴を更新
+  if (push && currentSession !== null && currentWindowIndex !== null) {
+    const hash = `#terminal/${encodeURIComponent(currentSession)}/${currentWindowIndex}`;
+    history.pushState({ view: 'terminal', session: currentSession, window: currentWindowIndex }, '', hash);
+  }
 
   // ファイラーを隠してターミナルを表示
   filebrowserViewEl.classList.add('hidden');
@@ -578,6 +632,58 @@ function showTerminalView() {
       terminal.fit();
       terminal.focus();
     });
+  }
+}
+
+/**
+ * URL ハッシュから初期画面を復元する。
+ * ページ読み込み時にハッシュが存在する場合に呼び出す。
+ * @param {string} hash - window.location.hash（例: "#terminal/main/0"）
+ */
+async function navigateFromHash(hash) {
+  const parts = hash.slice(1).split('/');
+  const view = parts[0];
+
+  try {
+    switch (view) {
+      case 'sessions':
+        await showSessionList({ replace: true });
+        break;
+
+      case 'windows': {
+        const session = decodeURIComponent(parts[1] || '');
+        if (!session) { await autoConnect(); break; }
+        _switchToSessionListView();
+        history.replaceState({ view: 'windows', session }, '', hash);
+        await showWindowList(session, { push: false });
+        break;
+      }
+
+      case 'terminal': {
+        const session = decodeURIComponent(parts[1] || '');
+        const win = parseInt(parts[2], 10);
+        if (!session || isNaN(win)) { await autoConnect(); break; }
+        history.replaceState({ view: 'terminal', session, window: win }, '', hash);
+        connectToWindow(session, win, { push: false });
+        break;
+      }
+
+      case 'files': {
+        const session = decodeURIComponent(parts[1] || '');
+        const win = parseInt(parts[2], 10);
+        if (!session || isNaN(win)) { await autoConnect(); break; }
+        history.replaceState({ view: 'files', session, window: win }, '', hash);
+        connectToWindow(session, win, { push: false });
+        showFileBrowser(session, { push: false });
+        break;
+      }
+
+      default:
+        await autoConnect();
+    }
+  } catch (err) {
+    console.error('Hash navigation failed:', err);
+    await autoConnect();
   }
 }
 
@@ -739,8 +845,49 @@ document.addEventListener('DOMContentLoaded', () => {
     window.visualViewport.addEventListener('scroll', updateViewport);
   }
 
-  // 初期表示: 最後のセッションに自動接続を試行
-  autoConnect();
+  // ブラウザの戻る/進むボタン（popstate）ハンドラ
+  window.addEventListener('popstate', async (event) => {
+    const s = event.state;
+    if (!s) {
+      // 履歴の最初のエントリまで戻った場合
+      await showSessionList({ push: false });
+      return;
+    }
+    switch (s.view) {
+      case 'sessions':
+        await showSessionList({ push: false });
+        break;
+      case 'windows':
+        _switchToSessionListView();
+        await showWindowList(s.session, { push: false });
+        break;
+      case 'terminal':
+        // すでに同じセッション/ウィンドウに接続中なら再接続せずビューだけ切り替える
+        if (currentSession === s.session && currentWindowIndex === s.window && terminal !== null) {
+          showTerminalView({ push: false });
+        } else {
+          connectToWindow(s.session, s.window, { push: false });
+        }
+        break;
+      case 'files':
+        // すでに同じセッション/ウィンドウに接続中なら再接続せずビューだけ切り替える
+        if (currentSession === s.session && currentWindowIndex === s.window && terminal !== null) {
+          showFileBrowser(s.session, { push: false });
+        } else {
+          connectToWindow(s.session, s.window, { push: false });
+          showFileBrowser(s.session, { push: false });
+        }
+        break;
+    }
+  });
+
+  // 初期表示: ハッシュがあればそこから復元、なければ自動接続
+  const initialHash = window.location.hash;
+  if (initialHash && initialHash !== '#') {
+    navigateFromHash(initialHash);
+  } else {
+    autoConnect();
+  }
 });
 
 /**
@@ -752,7 +899,7 @@ async function autoConnect() {
     const sessions = await listSessions();
 
     if (!sessions || sessions.length === 0) {
-      showSessionList();
+      showSessionList({ replace: true });
       return;
     }
 
@@ -768,15 +915,15 @@ async function autoConnect() {
     const windows = await listWindows(latest.name);
 
     if (!windows || windows.length === 0) {
-      showSessionList();
+      showSessionList({ replace: true });
       return;
     }
 
     // アクティブウィンドウを探す。なければ最初のウィンドウ
     const activeWindow = windows.find((w) => w.active) || windows[0];
-    connectToWindow(latest.name, activeWindow.index);
+    connectToWindow(latest.name, activeWindow.index, { replace: true });
   } catch (err) {
     console.error('Auto-connect failed, showing session list:', err);
-    showSessionList();
+    showSessionList({ replace: true });
   }
 }
