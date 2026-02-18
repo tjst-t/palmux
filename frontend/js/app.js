@@ -390,22 +390,9 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
     toolbar.toggleVisibility();
   }
 
-  // タッチハンドラー初期化（スワイプでウィンドウ切り替え）
+  // タッチハンドラー初期化（ピンチズーム、スクロール、長押し選択）
   touchHandler = new TouchHandler(terminalContainerEl, {
-    onSwipeLeft: () => {
-      // 左スワイプ: 次のウィンドウに切り替え
-      if (currentSession !== null && currentWindowIndex !== null) {
-        const nextIndex = currentWindowIndex + 1;
-        switchWindow(currentSession, nextIndex);
-      }
-    },
-    onSwipeRight: () => {
-      // 右スワイプ: 前のウィンドウに切り替え
-      if (currentSession !== null && currentWindowIndex !== null && currentWindowIndex > 0) {
-        const prevIndex = currentWindowIndex - 1;
-        switchWindow(currentSession, prevIndex);
-      }
-    },
+    terminal: terminal,
     onPinchZoom: (delta) => {
       if (delta > 0) {
         terminal.increaseFontSize();
