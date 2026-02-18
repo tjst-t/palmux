@@ -887,3 +887,60 @@ func TestManager_GetSessionCwd_ErrorMessage(t *testing.T) {
 		t.Errorf("error message should contain context, got: %q", err.Error())
 	}
 }
+
+func TestManager_NewSession_WithGhq(t *testing.T) {
+	tests := []struct {
+		name     string
+		sessName string
+		ghq      *GhqResolver
+		output   []byte
+		wantArgs []string
+	}{
+		{
+			name:     "Ghq が nil の場合 -c フラグなし",
+			sessName: "palmux",
+			ghq:      nil,
+			output:   []byte("palmux\t1\t0\t1704067200\t1704067200\n"),
+			wantArgs: []string{"new-session", "-d", "-s", "palmux", "-P", "-F", sessionFormat},
+		},
+		{
+			name:     "Ghq が設定済みでマッチあり → -c フラグにリポジトリパス",
+			sessName: "palmux",
+			ghq: &GhqResolver{
+				Cmd: &mockCommandRunner{results: map[string]mockResult{
+					"ghq root": {output: []byte("/home/user/ghq\n")},
+					"ghq list": {output: []byte("github.com/tjst-t/palmux\n")},
+				}},
+				HomeDir: "/home/user",
+			},
+			output:   []byte("palmux\t1\t0\t1704067200\t1704067200\n"),
+			wantArgs: []string{"new-session", "-d", "-s", "palmux", "-c", "/home/user/ghq/github.com/tjst-t/palmux", "-P", "-F", sessionFormat},
+		},
+		{
+			name:     "Ghq が設定済みでマッチなし → -c フラグにホームディレクトリ",
+			sessName: "unknown",
+			ghq: &GhqResolver{
+				Cmd: &mockCommandRunner{results: map[string]mockResult{
+					"ghq root": {output: []byte("/home/user/ghq\n")},
+					"ghq list": {output: []byte("github.com/tjst-t/palmux\n")},
+				}},
+				HomeDir: "/home/user",
+			},
+			output:   []byte("unknown\t1\t0\t1704067200\t1704067200\n"),
+			wantArgs: []string{"new-session", "-d", "-s", "unknown", "-c", "/home/user", "-P", "-F", sessionFormat},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockExecutor{output: tt.output, err: nil}
+			m := &Manager{Exec: mock, Ghq: tt.ghq}
+
+			_, err := m.NewSession(tt.sessName)
+			if err != nil {
+				t.Fatalf("NewSession() unexpected error: %v", err)
+			}
+			assertArgs(t, mock, tt.wantArgs)
+		})
+	}
+}
