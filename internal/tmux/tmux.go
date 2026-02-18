@@ -84,7 +84,14 @@ func (m *Manager) ListWindows(session string) ([]Window, error) {
 
 // NewSession は新しい tmux セッションを作成し、作成されたセッション情報を返す。
 func (m *Manager) NewSession(name string) (*Session, error) {
-	out, err := m.Exec.Run("new-session", "-d", "-s", name, "-P", "-F", sessionFormat)
+	args := []string{"new-session", "-d", "-s", name}
+	if m.Ghq != nil {
+		dir := m.Ghq.Resolve(name)
+		args = append(args, "-c", dir)
+	}
+	args = append(args, "-P", "-F", sessionFormat)
+
+	out, err := m.Exec.Run(args...)
 	if err != nil {
 		return nil, fmt.Errorf("new session: %w", err)
 	}
