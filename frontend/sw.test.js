@@ -132,7 +132,7 @@ describe('Service Worker', () => {
       handler(event);
       await waitUntilPromise;
 
-      const cache = cacheStore.get('palmux-v2');
+      const cache = cacheStore.get('palmux-v3');
       expect(cache).toBeDefined();
 
       // 静的アセットがキャッシュされている
@@ -206,7 +206,7 @@ describe('Service Worker', () => {
       // キャッシュ書き込みは非同期なので少し待つ
       await new Promise((r) => setTimeout(r, 10));
 
-      const cache = cacheStore.get('palmux-v2');
+      const cache = cacheStore.get('palmux-v3');
       expect(cache).toBeDefined();
       const cached = cache._store.get('https://example.com/');
       expect(cached).toBeDefined();
@@ -216,7 +216,7 @@ describe('Service Worker', () => {
     it('ネットワーク障害時はキャッシュにフォールバックする', async () => {
       // キャッシュにあらかじめ古い HTML を入れておく
       await loadSW();
-      const cache = await globalThis.caches.open('palmux-v2');
+      const cache = await globalThis.caches.open('palmux-v3');
       const cachedResponse = createMockResponse('<html>token-A</html>');
       await cache.put('https://example.com/', cachedResponse);
 
@@ -243,25 +243,24 @@ describe('Service Worker', () => {
     });
   });
 
-  describe('fetch イベント - 静的アセット (cache-first)', () => {
-    it('キャッシュにあればキャッシュを返す', async () => {
+  describe('fetch イベント - 静的アセット (stale-while-revalidate)', () => {
+    it('キャッシュにあればキャッシュを即座に返す（バックグラウンドで更新）', async () => {
       await loadSW();
-      const cache = await globalThis.caches.open('palmux-v2');
+      const cache = await globalThis.caches.open('palmux-v3');
       const cachedResponse = createMockResponse('cached CSS');
       await cache.put('https://example.com/style.css', cachedResponse);
+
+      // バックグラウンド fetch 用のレスポンス
+      const freshResponse = createMockResponse('fresh CSS');
+      fetchMock.mockResolvedValueOnce(freshResponse);
 
       const handler = eventHandlers['fetch'];
       const event = createFetchEvent('https://example.com/style.css');
       handler(event);
 
       const result = await event._result;
+      // stale-while-revalidate: キャッシュがあれば即座に返す
       expect(result).toBe(cachedResponse);
-      // ネットワークには行かない（install 時の addAll の呼び出しのみ）
-      const fetchCallsForCSS = fetchMock.mock.calls.filter(
-        (c) => c[0] === 'https://example.com/style.css' ||
-               (c[0]?.url === 'https://example.com/style.css')
-      );
-      expect(fetchCallsForCSS.length).toBe(0);
     });
 
     it('キャッシュになければネットワークから取得する', async () => {
@@ -324,7 +323,7 @@ describe('Service Worker', () => {
       handler(event);
       await waitUntilPromise;
 
-      // palmux-v2 は残る（install で作成される可能性がある）
+      // palmux-v3 は残る（install で作成される可能性がある）
       // palmux-v1 と old-cache は削除される
       expect(cacheStore.has('palmux-v1')).toBe(false);
       expect(cacheStore.has('old-cache')).toBe(false);
