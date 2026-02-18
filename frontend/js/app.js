@@ -513,9 +513,10 @@ function switchSession(sessionName, windowIndex) {
  * ターミナルビューを隠し、ファイラーパネルを表示する。
  * セッションごとに独立したファイルブラウザ状態を管理する。
  * @param {string} sessionName - セッション名
- * @param {{ push?: boolean }} [opts]
+ * @param {{ push?: boolean, path?: string|null }} [opts]
+ *   path: 移動先ディレクトリ（null の場合は現在のパスを維持）
  */
-function showFileBrowser(sessionName, { push = true } = {}) {
+function showFileBrowser(sessionName, { push = true, path = null } = {}) {
   const terminalViewEl = document.getElementById('terminal-view');
   const filebrowserViewEl = document.getElementById('filebrowser-view');
   const filebrowserContainerEl = document.getElementById('filebrowser-container');
@@ -523,12 +524,6 @@ function showFileBrowser(sessionName, { push = true } = {}) {
   const headerTabFiles = document.getElementById('header-tab-files');
 
   if (!terminalViewEl || !filebrowserViewEl || !filebrowserContainerEl) return;
-
-  // ブラウザ履歴を更新
-  if (push && currentSession !== null && currentWindowIndex !== null) {
-    const hash = `#files/${encodeURIComponent(sessionName)}/${currentWindowIndex}`;
-    history.pushState({ view: 'files', session: sessionName, window: currentWindowIndex }, '', hash);
-  }
 
   // ターミナルを隠してファイラーを表示
   terminalViewEl.classList.add('hidden');
@@ -562,17 +557,54 @@ function showFileBrowser(sessionName, { push = true } = {}) {
     filebrowserContainerEl.removeChild(filebrowserContainerEl.firstChild);
   }
 
+  /** ハッシュ文字列を生成する。path が '.' のときはパス部分を省略 */
+  const buildHash = (p) =>
+    `#files/${encodeURIComponent(sessionName)}/${currentWindowIndex}${p && p !== '.' ? '/' + p : ''}`;
+
   // セッション用の FileBrowser を取得 or 新規作成
   if (!fileBrowsers.has(sessionName)) {
     const wrapper = document.createElement('div');
     wrapper.style.height = '100%';
     const browser = new FileBrowser(wrapper, {
-      onFileSelect: (session, path, entry) => {
+      onFileSelect: () => {
         // Preview is handled internally by FileBrowser.showPreview()
+      },
+      onNavigate: (p) => {
+        // ユーザー起点のディレクトリ移動を履歴に記録する
+        history.pushState(
+          { view: 'files', session: sessionName, window: currentWindowIndex, path: p },
+          '',
+          buildHash(p),
+        );
       },
     });
     fileBrowsers.set(sessionName, { wrapper, browser });
-    browser.open(sessionName);
+    const initialPath = path !== null ? path : '.';
+    browser.open(sessionName, initialPath);
+
+    // 新規作成時: 指定パス（またはルート）を履歴に積む
+    if (push && currentSession !== null && currentWindowIndex !== null) {
+      history.pushState(
+        { view: 'files', session: sessionName, window: currentWindowIndex, path: initialPath },
+        '',
+        buildHash(initialPath),
+      );
+    }
+  } else {
+    const fb = fileBrowsers.get(sessionName);
+    if (path !== null) {
+      // 指定パスへ移動（silent — 呼び出し元が履歴を管理）
+      fb.browser.navigateTo(path);
+    }
+    // ブラウザ履歴を更新
+    if (push && currentSession !== null && currentWindowIndex !== null) {
+      const navPath = path !== null ? path : fb.browser.getCurrentPath();
+      history.pushState(
+        { view: 'files', session: sessionName, window: currentWindowIndex, path: navPath },
+        '',
+        buildHash(navPath),
+      );
+    }
   }
 
   // セッション用のファイラー DOM をコンテナに追加（状態が保持される）
@@ -671,10 +703,12 @@ async function navigateFromHash(hash) {
       case 'files': {
         const session = decodeURIComponent(parts[1] || '');
         const win = parseInt(parts[2], 10);
+        // parts[3..] がディレクトリパス（スラッシュを含む可能性あり）
+        const filePath = parts.slice(3).map(decodeURIComponent).join('/') || '.';
         if (!session || isNaN(win)) { await autoConnect(); break; }
-        history.replaceState({ view: 'files', session, window: win }, '', hash);
+        history.replaceState({ view: 'files', session, window: win, path: filePath }, '', hash);
         connectToWindow(session, win, { push: false });
-        showFileBrowser(session, { push: false });
+        showFileBrowser(session, { push: false, path: filePath });
         break;
       }
 
@@ -869,15 +903,17 @@ document.addEventListener('DOMContentLoaded', () => {
           connectToWindow(s.session, s.window, { push: false });
         }
         break;
-      case 'files':
+      case 'files': {
         // すでに同じセッション/ウィンドウに接続中なら再接続せずビューだけ切り替える
+        const filePath = s.path || '.';
         if (currentSession === s.session && currentWindowIndex === s.window && terminal !== null) {
-          showFileBrowser(s.session, { push: false });
+          showFileBrowser(s.session, { push: false, path: filePath });
         } else {
           connectToWindow(s.session, s.window, { push: false });
-          showFileBrowser(s.session, { push: false });
+          showFileBrowser(s.session, { push: false, path: filePath });
         }
         break;
+      }
     }
   });
 
