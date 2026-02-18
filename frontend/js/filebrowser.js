@@ -94,10 +94,12 @@ export class FileBrowser {
    * @param {HTMLElement} container - ファイラーのコンテナ要素
    * @param {Object} [options]
    * @param {function(string, string, Object): void} [options.onFileSelect] - ファイル選択時のコールバック (session, path, entry)
+   * @param {function(string): void} [options.onNavigate] - ディレクトリ移動時のコールバック (path)
    */
   constructor(container, options = {}) {
     this._container = container;
     this._onFileSelect = options.onFileSelect || null;
+    this._onNavigate = options.onNavigate || null;
 
     /** @type {string|null} 現在のセッション名 */
     this._session = null;
@@ -132,8 +134,9 @@ export class FileBrowser {
    * 指定セッションのファイルブラウザを開く。
    * CWD を取得してルートディレクトリを表示する。
    * @param {string} session - セッション名
+   * @param {string} [initialPath='.'] - 開始時に表示するディレクトリパス
    */
-  async open(session) {
+  async open(session, initialPath = '.') {
     this._session = session;
     this._currentPath = '.';
     this._pathSegments = [];
@@ -144,7 +147,7 @@ export class FileBrowser {
     try {
       const cwdResult = await getSessionCwd(session);
       this._rootPath = cwdResult.path;
-      await this._loadDirectory('.');
+      await this._loadDirectory(initialPath, { silent: true });
     } catch (err) {
       console.error('Failed to open file browser:', err);
       this._showError(`Failed to load: ${err.message}`);
@@ -152,10 +155,27 @@ export class FileBrowser {
   }
 
   /**
+   * 現在のディレクトリパスを返す。
+   * @returns {string}
+   */
+  getCurrentPath() {
+    return this._currentPath;
+  }
+
+  /**
+   * 指定パスに移動する（ブラウザ履歴へのプッシュなし）。
+   * @param {string} path - 移動先の相対パス
+   */
+  async navigateTo(path) {
+    await this._loadDirectory(path, { silent: true });
+  }
+
+  /**
    * 指定パスのディレクトリを読み込む。
    * @param {string} path - 相対パス
+   * @param {{ silent?: boolean }} [opts] - silent: true のとき onNavigate を呼ばない
    */
-  async _loadDirectory(path) {
+  async _loadDirectory(path, { silent = false } = {}) {
     if (!this._session) return;
     const loadId = ++this._loadId;
     this._loading = true;
@@ -170,6 +190,11 @@ export class FileBrowser {
       this._loading = false;
 
       this._renderDirectory(result.entries || []);
+
+      // ユーザー起点のナビゲーションのみ履歴に通知する
+      if (!silent && this._onNavigate) {
+        this._onNavigate(this._currentPath);
+      }
     } catch (err) {
       if (loadId !== this._loadId) return; // Stale response
       this._loading = false;
