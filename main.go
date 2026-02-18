@@ -67,9 +67,14 @@ func main() {
 	}
 
 	// tmux Manager を生成
+	homeDir, _ := os.UserHomeDir()
 	mgr := &tmux.Manager{
 		Exec: &tmux.RealExecutor{
 			TmuxBin: tmuxPath,
+		},
+		Ghq: &tmux.GhqResolver{
+			Cmd:     &tmux.RealCommandRunner{},
+			HomeDir: homeDir,
 		},
 	}
 

@@ -408,6 +408,72 @@ func TestManager_NewWindow(t *testing.T) {
 	}
 }
 
+func TestManager_NewWindow_WithGhq(t *testing.T) {
+	tests := []struct {
+		name     string
+		session  string
+		winName  string
+		ghq      *GhqResolver
+		output   []byte
+		wantArgs []string
+	}{
+		{
+			name:    "Ghq が nil の場合 -c フラグなし",
+			session: "palmux",
+			winName: "editor",
+			ghq:     nil,
+			output:  []byte("1\teditor\t1\n"),
+			wantArgs: []string{"new-window", "-t", "palmux", "-n", "editor", "-P", "-F",
+				"#{window_index}\t#{window_name}\t#{window_active}"},
+		},
+		{
+			name:    "Ghq が設定済みでマッチあり → -c フラグにリポジトリパス",
+			session: "palmux",
+			winName: "",
+			ghq: &GhqResolver{
+				Cmd: &mockCommandRunner{results: map[string]mockResult{
+					"ghq root": {output: []byte("/home/user/ghq\n")},
+					"ghq list": {output: []byte("github.com/tjst-t/palmux\n")},
+				}},
+				HomeDir: "/home/user",
+			},
+			output: []byte("1\tbash\t1\n"),
+			wantArgs: []string{"new-window", "-t", "palmux",
+				"-c", "/home/user/ghq/github.com/tjst-t/palmux",
+				"-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}"},
+		},
+		{
+			name:    "Ghq が設定済みでマッチなし → -c フラグにホームディレクトリ",
+			session: "unknown",
+			winName: "shell",
+			ghq: &GhqResolver{
+				Cmd: &mockCommandRunner{results: map[string]mockResult{
+					"ghq root": {output: []byte("/home/user/ghq\n")},
+					"ghq list": {output: []byte("github.com/tjst-t/palmux\n")},
+				}},
+				HomeDir: "/home/user",
+			},
+			output: []byte("1\tshell\t1\n"),
+			wantArgs: []string{"new-window", "-t", "unknown", "-n", "shell",
+				"-c", "/home/user",
+				"-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockExecutor{output: tt.output, err: nil}
+			m := &Manager{Exec: mock, Ghq: tt.ghq}
+
+			_, err := m.NewWindow(tt.session, tt.winName)
+			if err != nil {
+				t.Fatalf("NewWindow() unexpected error: %v", err)
+			}
+			assertArgs(t, mock, tt.wantArgs)
+		})
+	}
+}
+
 func TestManager_KillWindow(t *testing.T) {
 	tests := []struct {
 		name     string
