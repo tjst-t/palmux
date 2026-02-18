@@ -2,7 +2,9 @@ GO ?= $(shell which go 2>/dev/null || echo /usr/local/go/bin/go)
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: build frontend build-linux build-arm test clean
+.PHONY: all build frontend build-linux build-arm test clean
+
+all: build-linux
 
 frontend:
 	cd frontend && npx esbuild js/app.js \
