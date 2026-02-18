@@ -22,6 +22,7 @@ type TmuxManager interface {
 	RenameWindow(session string, index int, name string) error
 	Attach(session string, windowIndex int) (*os.File, *exec.Cmd, error)
 	GetSessionCwd(session string) (string, error)
+	ListGhqRepos() ([]tmux.GhqRepo, error)
 }
 
 // Server は Palmux の HTTP サーバーを表す。
@@ -70,6 +71,7 @@ func NewServer(opts Options) *Server {
 	mux.Handle("GET /api/sessions/{session}/cwd", auth(s.handleGetCwd()))
 	mux.Handle("GET /api/sessions/{session}/files", auth(s.handleGetFiles()))
 	mux.Handle("GET /api/connections", auth(s.handleListConnections()))
+	mux.Handle("GET /api/ghq/repos", auth(s.handleListGhqRepos()))
 
 	// 静的ファイル配信
 	if opts.Frontend != nil {
