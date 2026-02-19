@@ -945,6 +945,83 @@ func TestManager_NewSession_WithGhq(t *testing.T) {
 	}
 }
 
+func TestManager_GetSessionProjectDir(t *testing.T) {
+	tests := []struct {
+		name    string
+		ghq     *GhqResolver
+		session string
+		cwdOut  []byte
+		cwdErr  error
+		want    string
+		wantErr bool
+	}{
+		{
+			name: "Ghq マッチあり → ghq パスを返す（pane CWD は使わない）",
+			ghq: &GhqResolver{
+				Cmd: &mockCommandRunner{results: map[string]mockResult{
+					"ghq root": {output: []byte("/home/user/ghq\n")},
+					"ghq list": {output: []byte("github.com/tjst-t/palmux\n")},
+				}},
+				HomeDir: "/home/user",
+			},
+			session: "palmux",
+			want:    "/home/user/ghq/github.com/tjst-t/palmux",
+			wantErr: false,
+		},
+		{
+			name: "Ghq マッチなし → pane CWD にフォールバック",
+			ghq: &GhqResolver{
+				Cmd: &mockCommandRunner{results: map[string]mockResult{
+					"ghq root": {output: []byte("/home/user/ghq\n")},
+					"ghq list": {output: []byte("github.com/tjst-t/palmux\n")},
+				}},
+				HomeDir: "/home/user",
+			},
+			session: "unknown",
+			cwdOut:  []byte("/tmp/working\n"),
+			want:    "/tmp/working",
+			wantErr: false,
+		},
+		{
+			name:    "Ghq nil → pane CWD にフォールバック",
+			ghq:     nil,
+			session: "main",
+			cwdOut:  []byte("/home/user/projects\n"),
+			want:    "/home/user/projects",
+			wantErr: false,
+		},
+		{
+			name: "Ghq マッチなし + pane CWD エラー → エラーを返す",
+			ghq: &GhqResolver{
+				Cmd: &mockCommandRunner{results: map[string]mockResult{
+					"ghq root": {output: []byte("/home/user/ghq\n")},
+					"ghq list": {output: []byte("github.com/tjst-t/palmux\n")},
+				}},
+				HomeDir: "/home/user",
+			},
+			session: "unknown",
+			cwdErr:  errors.New("connection refused"),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockExecutor{output: tt.cwdOut, err: tt.cwdErr}
+			m := &Manager{Exec: mock, Ghq: tt.ghq}
+
+			got, err := m.GetSessionProjectDir(tt.session)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetSessionProjectDir() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("GetSessionProjectDir() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestManager_ListGhqRepos(t *testing.T) {
 	tests := []struct {
 		name    string

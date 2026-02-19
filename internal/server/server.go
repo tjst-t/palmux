@@ -23,6 +23,7 @@ type TmuxManager interface {
 	RenameWindow(session string, index int, name string) error
 	Attach(session string, windowIndex int) (*os.File, *exec.Cmd, error)
 	GetSessionCwd(session string) (string, error)
+	GetSessionProjectDir(session string) (string, error)
 	ListGhqRepos() ([]tmux.GhqRepo, error)
 }
 

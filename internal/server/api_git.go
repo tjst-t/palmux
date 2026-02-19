@@ -15,7 +15,7 @@ func (s *Server) handleGitStatus() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		session := r.PathValue("session")
 
-		cwd, err := s.tmux.GetSessionCwd(session)
+		cwd, err := s.tmux.GetSessionProjectDir(session)
 		if err != nil {
 			if errors.Is(err, tmux.ErrSessionNotFound) {
 				writeError(w, http.StatusNotFound, "session not found")
@@ -43,7 +43,7 @@ func (s *Server) handleGitLog() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		session := r.PathValue("session")
 
-		cwd, err := s.tmux.GetSessionCwd(session)
+		cwd, err := s.tmux.GetSessionProjectDir(session)
 		if err != nil {
 			if errors.Is(err, tmux.ErrSessionNotFound) {
 				writeError(w, http.StatusNotFound, "session not found")
@@ -79,7 +79,7 @@ func (s *Server) handleGitDiff() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		session := r.PathValue("session")
 
-		cwd, err := s.tmux.GetSessionCwd(session)
+		cwd, err := s.tmux.GetSessionProjectDir(session)
 		if err != nil {
 			if errors.Is(err, tmux.ErrSessionNotFound) {
 				writeError(w, http.StatusNotFound, "session not found")
@@ -110,7 +110,7 @@ func (s *Server) handleGitShow() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		session := r.PathValue("session")
 
-		cwd, err := s.tmux.GetSessionCwd(session)
+		cwd, err := s.tmux.GetSessionProjectDir(session)
 		if err != nil {
 			if errors.Is(err, tmux.ErrSessionNotFound) {
 				writeError(w, http.StatusNotFound, "session not found")
@@ -143,7 +143,7 @@ func (s *Server) handleGitBranches() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		session := r.PathValue("session")
 
-		cwd, err := s.tmux.GetSessionCwd(session)
+		cwd, err := s.tmux.GetSessionProjectDir(session)
 		if err != nil {
 			if errors.Is(err, tmux.ErrSessionNotFound) {
 				writeError(w, http.StatusNotFound, "session not found")

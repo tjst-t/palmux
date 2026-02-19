@@ -184,6 +184,19 @@ func (m *Manager) GetSessionCwd(session string) (string, error) {
 	return strings.TrimRight(string(out), "\n"), nil
 }
 
+// GetSessionProjectDir はセッションの ghq プロジェクトディレクトリを返す。
+// Ghq が設定されていてセッション名に対応するリポジトリが存在する場合はそのパスを返す。
+// それ以外の場合はアクティブ pane のカレントパスにフォールバックする。
+func (m *Manager) GetSessionProjectDir(session string) (string, error) {
+	if m.Ghq != nil {
+		dir := m.Ghq.Resolve(session)
+		if dir != m.Ghq.HomeDir {
+			return dir, nil
+		}
+	}
+	return m.GetSessionCwd(session)
+}
+
 // Attach は tmux attach-session を pty 内で実行し、pty のマスター側ファイルと exec.Cmd を返す。
 // windowIndex が 0 以上の場合、接続後に指定ウィンドウを選択する。
 // 呼び出し元は返されたファイルを通じて pty と双方向に通信できる。

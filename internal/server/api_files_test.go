@@ -80,8 +80,8 @@ func TestHandleGetCwd(t *testing.T) {
 					t.Errorf("path = %q, want %q", result["path"], tt.wantPath)
 				}
 
-				if mock.calledGetCwd != tt.session {
-					t.Errorf("GetSessionCwd called with %q, want %q", mock.calledGetCwd, tt.session)
+				if mock.calledGetProjectDir != tt.session {
+					t.Errorf("GetSessionProjectDir called with %q, want %q", mock.calledGetProjectDir, tt.session)
 				}
 			}
 
@@ -134,8 +134,8 @@ func TestHandleGetCwd_WithBasePath(t *testing.T) {
 		t.Errorf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 
-	if mock.calledGetCwd != "main" {
-		t.Errorf("GetSessionCwd called with %q, want %q", mock.calledGetCwd, "main")
+	if mock.calledGetProjectDir != "main" {
+		t.Errorf("GetSessionProjectDir called with %q, want %q", mock.calledGetProjectDir, "main")
 	}
 }
 
@@ -224,8 +224,8 @@ func TestHandleGetFiles_DirectoryListing(t *testing.T) {
 		}
 	}
 
-	if mock.calledGetCwd != "main" {
-		t.Errorf("GetSessionCwd called with %q, want %q", mock.calledGetCwd, "main")
+	if mock.calledGetProjectDir != "main" {
+		t.Errorf("GetSessionProjectDir called with %q, want %q", mock.calledGetProjectDir, "main")
 	}
 }
 
@@ -438,8 +438,8 @@ func TestHandleGetFiles_WithBasePath(t *testing.T) {
 		t.Errorf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 
-	if mock.calledGetCwd != "main" {
-		t.Errorf("GetSessionCwd called with %q, want %q", mock.calledGetCwd, "main")
+	if mock.calledGetProjectDir != "main" {
+		t.Errorf("GetSessionProjectDir called with %q, want %q", mock.calledGetProjectDir, "main")
 	}
 }
 
