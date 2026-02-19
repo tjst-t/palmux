@@ -1,0 +1,5 @@
+* main
+  feature/login
+  fix/typo
+  remotes/origin/main
+  remotes/origin/feature/login

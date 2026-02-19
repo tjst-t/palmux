@@ -10,6 +10,7 @@ import { Drawer } from './drawer.js';
 import { TouchHandler } from './touch.js';
 import { ConnectionManager } from './connection.js';
 import { FileBrowser } from './filebrowser.js';
+import { GitBrowser } from './gitbrowser.js';
 
 /** @type {PalmuxTerminal|null} */
 let terminal = null;
@@ -32,7 +33,10 @@ let connectionManager = null;
 /** @type {Map<string, {wrapper: HTMLElement, browser: FileBrowser}>} セッションごとのファイルブラウザ */
 const fileBrowsers = new Map();
 
-/** @type {Map<string, string>} セッションごとの表示モード ('terminal' | 'filebrowser') */
+/** @type {Map<string, {wrapper: HTMLElement, browser: GitBrowser}>} セッションごとの Git ブラウザ */
+const gitBrowsers = new Map();
+
+/** @type {Map<string, string>} セッションごとの表示モード ('terminal' | 'filebrowser' | 'gitbrowser') */
 const sessionViewModes = new Map();
 
 /** 現在接続中のセッション名 */
@@ -41,7 +45,7 @@ let currentSession = null;
 /** 現在接続中のウィンドウインデックス */
 let currentWindowIndex = null;
 
-/** 現在の表示モード: 'terminal' | 'filebrowser' */
+/** 現在の表示モード: 'terminal' | 'filebrowser' | 'gitbrowser' */
 let currentViewMode = 'terminal';
 
 /**
@@ -104,6 +108,13 @@ function _switchToSessionListView() {
     entry.browser.dispose();
   }
   fileBrowsers.clear();
+
+  // GitBrowser のクリーンアップ（全セッション分）
+  for (const [, entry] of gitBrowsers) {
+    entry.browser.dispose();
+  }
+  gitBrowsers.clear();
+
   sessionViewModes.clear();
   currentViewMode = 'terminal';
 
@@ -113,6 +124,10 @@ function _switchToSessionListView() {
   const filebrowserViewEl = document.getElementById('filebrowser-view');
   if (filebrowserViewEl) {
     filebrowserViewEl.classList.add('hidden');
+  }
+  const gitbrowserViewEl = document.getElementById('gitbrowser-view');
+  if (gitbrowserViewEl) {
+    gitbrowserViewEl.classList.add('hidden');
   }
   headerTitleEl.textContent = 'Palmux';
 
@@ -296,6 +311,10 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
   if (filebrowserViewEl) {
     filebrowserViewEl.classList.add('hidden');
   }
+  const gitbrowserViewEl = document.getElementById('gitbrowser-view');
+  if (gitbrowserViewEl) {
+    gitbrowserViewEl.classList.add('hidden');
+  }
   headerTitleEl.textContent = `${sessionName}:${windowIndex}`;
   currentViewMode = 'terminal';
 
@@ -306,11 +325,15 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
   }
   const headerTabTerminal = document.getElementById('header-tab-terminal');
   const headerTabFiles = document.getElementById('header-tab-files');
+  const headerTabGit = document.getElementById('header-tab-git');
   if (headerTabTerminal) {
     headerTabTerminal.classList.add('header-tab-btn--active');
   }
   if (headerTabFiles) {
     headerTabFiles.classList.remove('header-tab-btn--active');
+  }
+  if (headerTabGit) {
+    headerTabGit.classList.remove('header-tab-btn--active');
   }
 
   // ツールバートグルボタンを表示
@@ -412,10 +435,12 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
 
   // セッションごとの表示モードを復元
   // ただし push: false（履歴ナビゲーション）の場合はスキップ
-  // — popstate ハンドラが必要なら showFileBrowser を別途呼び出す
+  // — popstate ハンドラが必要なら showFileBrowser/showGitBrowser を別途呼び出す
   const savedViewMode = push || replace ? (sessionViewModes.get(sessionName) || 'terminal') : 'terminal';
   if (savedViewMode === 'filebrowser') {
     showFileBrowser(sessionName);
+  } else if (savedViewMode === 'gitbrowser') {
+    showGitBrowser(sessionName);
   } else {
     currentViewMode = 'terminal';
     terminal.focus();
@@ -507,14 +532,19 @@ function showFileBrowser(sessionName, { push = true, path = null } = {}) {
   const terminalViewEl = document.getElementById('terminal-view');
   const filebrowserViewEl = document.getElementById('filebrowser-view');
   const filebrowserContainerEl = document.getElementById('filebrowser-container');
+  const gitbrowserViewEl = document.getElementById('gitbrowser-view');
   const headerTabTerminal = document.getElementById('header-tab-terminal');
   const headerTabFiles = document.getElementById('header-tab-files');
+  const headerTabGit = document.getElementById('header-tab-git');
 
   if (!terminalViewEl || !filebrowserViewEl || !filebrowserContainerEl) return;
 
-  // ターミナルを隠してファイラーを表示
+  // ターミナルと Git ブラウザを隠してファイラーを表示
   terminalViewEl.classList.add('hidden');
   filebrowserViewEl.classList.remove('hidden');
+  if (gitbrowserViewEl) {
+    gitbrowserViewEl.classList.add('hidden');
+  }
 
   // ツールバートグルを非表示（ターミナル専用）
   const toolbarToggleBtnEl = document.getElementById('toolbar-toggle-btn');
@@ -534,6 +564,9 @@ function showFileBrowser(sessionName, { push = true, path = null } = {}) {
   }
   if (headerTabFiles) {
     headerTabFiles.classList.add('header-tab-btn--active');
+  }
+  if (headerTabGit) {
+    headerTabGit.classList.remove('header-tab-btn--active');
   }
 
   currentViewMode = 'filebrowser';
@@ -607,8 +640,10 @@ function showFileBrowser(sessionName, { push = true, path = null } = {}) {
 function showTerminalView({ push = true } = {}) {
   const terminalViewEl = document.getElementById('terminal-view');
   const filebrowserViewEl = document.getElementById('filebrowser-view');
+  const gitbrowserViewEl = document.getElementById('gitbrowser-view');
   const headerTabTerminal = document.getElementById('header-tab-terminal');
   const headerTabFiles = document.getElementById('header-tab-files');
+  const headerTabGit = document.getElementById('header-tab-git');
 
   if (!terminalViewEl || !filebrowserViewEl) return;
 
@@ -618,8 +653,11 @@ function showTerminalView({ push = true } = {}) {
     history.pushState({ view: 'terminal', session: currentSession, window: currentWindowIndex }, '', hash);
   }
 
-  // ファイラーを隠してターミナルを表示
+  // ファイラーと Git ブラウザを隠してターミナルを表示
   filebrowserViewEl.classList.add('hidden');
+  if (gitbrowserViewEl) {
+    gitbrowserViewEl.classList.add('hidden');
+  }
   terminalViewEl.classList.remove('hidden');
 
   // ツールバートグルとフォントサイズを再表示
@@ -639,6 +677,9 @@ function showTerminalView({ push = true } = {}) {
   if (headerTabFiles) {
     headerTabFiles.classList.remove('header-tab-btn--active');
   }
+  if (headerTabGit) {
+    headerTabGit.classList.remove('header-tab-btn--active');
+  }
 
   currentViewMode = 'terminal';
   if (currentSession) {
@@ -652,6 +693,96 @@ function showTerminalView({ push = true } = {}) {
       terminal.focus();
     });
   }
+}
+
+/**
+ * Git ブラウザ表示に切り替える。
+ * ターミナルビューとファイラーを隠し、Git ブラウザパネルを表示する。
+ * @param {string} sessionName - セッション名
+ * @param {{ push?: boolean }} [opts]
+ */
+function showGitBrowser(sessionName, { push = true } = {}) {
+  const terminalViewEl = document.getElementById('terminal-view');
+  const filebrowserViewEl = document.getElementById('filebrowser-view');
+  const gitbrowserViewEl = document.getElementById('gitbrowser-view');
+  const gitbrowserContainerEl = document.getElementById('gitbrowser-container');
+  const headerTabTerminal = document.getElementById('header-tab-terminal');
+  const headerTabFiles = document.getElementById('header-tab-files');
+  const headerTabGit = document.getElementById('header-tab-git');
+
+  if (!terminalViewEl || !gitbrowserViewEl || !gitbrowserContainerEl) return;
+
+  // ターミナルとファイラーを隠して Git ブラウザを表示
+  terminalViewEl.classList.add('hidden');
+  if (filebrowserViewEl) {
+    filebrowserViewEl.classList.add('hidden');
+  }
+  gitbrowserViewEl.classList.remove('hidden');
+
+  // ツールバートグルを非表示（ターミナル専用）
+  const toolbarToggleBtnEl = document.getElementById('toolbar-toggle-btn');
+  if (toolbarToggleBtnEl) {
+    toolbarToggleBtnEl.classList.add('hidden');
+  }
+
+  // フォントサイズコントロールは表示したまま
+  const fontSizeControlsEl = document.getElementById('font-size-controls');
+  if (fontSizeControlsEl) {
+    fontSizeControlsEl.classList.remove('hidden');
+  }
+
+  // タブの状態を更新
+  if (headerTabTerminal) {
+    headerTabTerminal.classList.remove('header-tab-btn--active');
+  }
+  if (headerTabFiles) {
+    headerTabFiles.classList.remove('header-tab-btn--active');
+  }
+  if (headerTabGit) {
+    headerTabGit.classList.add('header-tab-btn--active');
+  }
+
+  currentViewMode = 'gitbrowser';
+  sessionViewModes.set(sessionName, 'gitbrowser');
+
+  // コンテナから現在の Git ブラウザを取り外す
+  while (gitbrowserContainerEl.firstChild) {
+    gitbrowserContainerEl.removeChild(gitbrowserContainerEl.firstChild);
+  }
+
+  // ブラウザ履歴を更新
+  if (push && currentSession !== null && currentWindowIndex !== null) {
+    const hash = `#git/${encodeURIComponent(sessionName)}/${currentWindowIndex}`;
+    history.pushState(
+      { view: 'git', session: sessionName, window: currentWindowIndex },
+      '',
+      hash,
+    );
+  }
+
+  // セッション用の GitBrowser を取得 or 新規作成
+  if (!gitBrowsers.has(sessionName)) {
+    const wrapper = document.createElement('div');
+    wrapper.style.height = '100%';
+    wrapper.style.position = 'relative';
+    const browser = new GitBrowser(wrapper, {
+      onNavigate: (gitState) => {
+        // 内部遷移（コミット選択、diff 表示、ブランチ切替）を履歴に記録
+        const hash = `#git/${encodeURIComponent(sessionName)}/${currentWindowIndex}`;
+        history.pushState(
+          { view: 'git', session: sessionName, window: currentWindowIndex, gitState },
+          '',
+          hash,
+        );
+      },
+    });
+    gitBrowsers.set(sessionName, { wrapper, browser });
+    browser.open(sessionName);
+  }
+
+  // セッション用の Git ブラウザ DOM をコンテナに追加
+  const entry = gitBrowsers.get(sessionName);
+  gitbrowserContainerEl.appendChild(entry.wrapper);
 }
 
 /**
@@ -696,6 +827,16 @@ async function navigateFromHash(hash) {
         history.replaceState({ view: 'files', session, window: win, path: filePath }, '', hash);
         connectToWindow(session, win, { push: false });
         showFileBrowser(session, { push: false, path: filePath });
+        break;
+      }
+
+      case 'git': {
+        const session = decodeURIComponent(parts[1] || '');
+        const win = parseInt(parts[2], 10);
+        if (!session || isNaN(win)) { await autoConnect(); break; }
+        history.replaceState({ view: 'git', session, window: win }, '', hash);
+        connectToWindow(session, win, { push: false });
+        showGitBrowser(session, { push: false });
         break;
       }
 
@@ -815,6 +956,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // ヘッダータブのイベント
   const headerTabTerminal = document.getElementById('header-tab-terminal');
   const headerTabFiles = document.getElementById('header-tab-files');
+  const headerTabGit = document.getElementById('header-tab-git');
 
   if (headerTabTerminal) {
     headerTabTerminal.addEventListener('click', () => {
@@ -832,13 +974,23 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // フォントサイズボタンのイベント（ターミナル / ファイルブラウザ 両対応）
+  if (headerTabGit) {
+    headerTabGit.addEventListener('click', () => {
+      if (currentViewMode !== 'gitbrowser' && currentSession !== null) {
+        showGitBrowser(currentSession);
+      }
+    });
+  }
+
+  // フォントサイズボタンのイベント（ターミナル / ファイルブラウザ / Git ブラウザ 対応）
   const fontDecreaseBtn = document.getElementById('font-decrease-btn');
   const fontIncreaseBtn = document.getElementById('font-increase-btn');
   if (fontDecreaseBtn) {
     fontDecreaseBtn.addEventListener('click', () => {
       if (currentViewMode === 'filebrowser' && currentSession && fileBrowsers.has(currentSession)) {
         fileBrowsers.get(currentSession).browser.decreaseFontSize();
+      } else if (currentViewMode === 'gitbrowser' && currentSession && gitBrowsers.has(currentSession)) {
+        gitBrowsers.get(currentSession).browser.decreaseFontSize();
       } else if (terminal) {
         terminal.decreaseFontSize();
       }
@@ -848,6 +1000,8 @@ document.addEventListener('DOMContentLoaded', () => {
     fontIncreaseBtn.addEventListener('click', () => {
       if (currentViewMode === 'filebrowser' && currentSession && fileBrowsers.has(currentSession)) {
         fileBrowsers.get(currentSession).browser.increaseFontSize();
+      } else if (currentViewMode === 'gitbrowser' && currentSession && gitBrowsers.has(currentSession)) {
+        gitBrowsers.get(currentSession).browser.increaseFontSize();
       } else if (terminal) {
         terminal.increaseFontSize();
       }
@@ -898,6 +1052,19 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
           connectToWindow(s.session, s.window, { push: false });
           showFileBrowser(s.session, { push: false, path: filePath });
+        }
+        break;
+      }
+      case 'git': {
+        if (currentSession === s.session && currentWindowIndex === s.window && terminal !== null) {
+          showGitBrowser(s.session, { push: false });
+        } else {
+          connectToWindow(s.session, s.window, { push: false });
+          showGitBrowser(s.session, { push: false });
+        }
+        // git 内部状態（コミット選択、diff 表示など）を復元
+        if (s.gitState && gitBrowsers.has(s.session)) {
+          gitBrowsers.get(s.session).browser.restoreState(s.gitState);
         }
         break;
       }
