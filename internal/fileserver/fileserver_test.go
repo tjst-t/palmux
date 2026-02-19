@@ -621,6 +621,173 @@ func TestIsTextContent(t *testing.T) {
 	}
 }
 
+// --- Write テスト ---
+
+func TestWrite(t *testing.T) {
+	root := setupTestDir(t)
+	fs := &FileServer{RootDir: root}
+
+	tests := []struct {
+		name        string
+		relPath     string
+		content     []byte
+		wantErr     bool
+		wantErrIs   error
+		wantContent string // 書き込み後の期待内容
+	}{
+		{
+			name:        "正常: テキストファイル書き込み",
+			relPath:     "file.txt",
+			content:     []byte("updated content"),
+			wantErr:     false,
+			wantContent: "updated content",
+		},
+		{
+			name:        "正常: ネストファイル書き込み",
+			relPath:     "subdir/nested.txt",
+			content:     []byte("new nested content"),
+			wantErr:     false,
+			wantContent: "new nested content",
+		},
+		{
+			name:        "正常: 空コンテンツ",
+			relPath:     "file.txt",
+			content:     []byte(""),
+			wantErr:     false,
+			wantContent: "",
+		},
+		{
+			name:        "正常: UTF-8コンテンツ",
+			relPath:     "file.txt",
+			content:     []byte("こんにちは世界🌍"),
+			wantErr:     false,
+			wantContent: "こんにちは世界🌍",
+		},
+		{
+			name:      "拒否: ディレクトリ",
+			relPath:   "subdir",
+			content:   []byte("data"),
+			wantErr:   true,
+			wantErrIs: ErrIsDirectory,
+		},
+		{
+			name:      "拒否: 存在しないファイル",
+			relPath:   "nonexistent.txt",
+			content:   []byte("data"),
+			wantErr:   true,
+			wantErrIs: os.ErrNotExist,
+		},
+		{
+			name:    "拒否: パストラバーサル",
+			relPath: "../../etc/passwd",
+			content: []byte("data"),
+			wantErr: true,
+		},
+		{
+			name:      "拒否: 絶対パス",
+			relPath:   "/etc/passwd",
+			content:   []byte("data"),
+			wantErr:   true,
+			wantErrIs: ErrAbsolutePath,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := fs.Write(tt.relPath, tt.content)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Write(%q) = nil, want error", tt.relPath)
+				}
+				if tt.wantErrIs != nil && !errors.Is(err, tt.wantErrIs) {
+					t.Errorf("Write(%q) error = %v, want %v", tt.relPath, err, tt.wantErrIs)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Write(%q) = %v, want nil", tt.relPath, err)
+			}
+
+			// 書き込み内容を検証
+			absPath, _ := fs.ValidatePath(tt.relPath)
+			data, err := os.ReadFile(absPath)
+			if err != nil {
+				t.Fatalf("ReadFile(%q) = %v", absPath, err)
+			}
+			if string(data) != tt.wantContent {
+				t.Errorf("content = %q, want %q", string(data), tt.wantContent)
+			}
+		})
+	}
+}
+
+func TestWrite_FileTooLarge(t *testing.T) {
+	root := t.TempDir()
+	fs := &FileServer{RootDir: root}
+
+	// 書き込み先ファイルを作成
+	if err := os.WriteFile(filepath.Join(root, "target.txt"), []byte("original"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1MB + 1 バイトのコンテンツ
+	bigContent := make([]byte, 1024*1024+1)
+	for i := range bigContent {
+		bigContent[i] = 'A'
+	}
+
+	err := fs.Write("target.txt", bigContent)
+	if err == nil {
+		t.Fatal("Write should return error for content > 1MB")
+	}
+	if !errors.Is(err, ErrFileTooLarge) {
+		t.Errorf("error = %v, want ErrFileTooLarge", err)
+	}
+
+	// 元のファイルが変更されていないことを確認
+	data, err := os.ReadFile(filepath.Join(root, "target.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "original" {
+		t.Errorf("original file was modified: %q", string(data))
+	}
+}
+
+func TestWrite_PreservesPermissions(t *testing.T) {
+	root := t.TempDir()
+	fs := &FileServer{RootDir: root}
+
+	// 0600 のパーミッションでファイルを作成
+	filePath := filepath.Join(root, "restricted.txt")
+	if err := os.WriteFile(filePath, []byte("original"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := fs.Write("restricted.txt", []byte("updated"))
+	if err != nil {
+		t.Fatalf("Write = %v", err)
+	}
+
+	// パーミッションが保持されていることを確認
+	info, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Errorf("permissions = %o, want %o", info.Mode().Perm(), 0600)
+	}
+
+	// 内容が更新されていることを確認
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "updated" {
+		t.Errorf("content = %q, want %q", string(data), "updated")
+	}
+}
+
 // --- ソースコードファイルのテキスト判定テスト ---
 
 func TestRead_SourceCodeFiles(t *testing.T) {

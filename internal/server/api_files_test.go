@@ -443,6 +443,211 @@ func TestHandleGetFiles_WithBasePath(t *testing.T) {
 	}
 }
 
+// --- PUT /api/sessions/{session}/files テスト ---
+
+func TestHandlePutFile(t *testing.T) {
+	root := setupFilesTestDir(t)
+	mock := &configurableMock{cwd: root}
+	srv, token := newTestServer(mock)
+
+	tests := []struct {
+		name       string
+		path       string
+		body       string
+		wantStatus int
+	}{
+		{
+			name:       "正常: テキストファイル書き込み",
+			path:       "file.txt",
+			body:       `{"content":"updated content"}`,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "正常: ネストファイル書き込み",
+			path:       "subdir/nested.txt",
+			body:       `{"content":"new nested"}`,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "正常: 空コンテンツ",
+			path:       "file.txt",
+			body:       `{"content":""}`,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "エラー: pathパラメータなし",
+			path:       "",
+			body:       `{"content":"data"}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "エラー: ディレクトリ",
+			path:       "subdir",
+			body:       `{"content":"data"}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "エラー: 存在しないファイル",
+			path:       "nonexistent.txt",
+			body:       `{"content":"data"}`,
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "エラー: 絶対パス",
+			path:       "/etc/passwd",
+			body:       `{"content":"data"}`,
+			wantStatus: http.StatusForbidden,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			url := "/api/sessions/main/files"
+			if tt.path != "" {
+				url += "?path=" + tt.path
+			}
+			rec := doRequest(t, srv.Handler(), http.MethodPut, url, token, tt.body)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d, body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+
+			if tt.wantStatus == http.StatusOK {
+				ct := rec.Header().Get("Content-Type")
+				if !strings.Contains(ct, "application/json") {
+					t.Errorf("Content-Type = %q, want application/json", ct)
+				}
+
+				var resp struct {
+					Path string `json:"path"`
+					Size int    `json:"size"`
+				}
+				if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+					t.Fatalf("failed to decode response: %v", err)
+				}
+				if resp.Path != tt.path {
+					t.Errorf("path = %q, want %q", resp.Path, tt.path)
+				}
+			}
+		})
+	}
+}
+
+func TestHandlePutFile_VerifyContent(t *testing.T) {
+	root := setupFilesTestDir(t)
+	mock := &configurableMock{cwd: root}
+	srv, token := newTestServer(mock)
+
+	// 書き込み
+	rec := doRequest(t, srv.Handler(), http.MethodPut,
+		"/api/sessions/main/files?path=file.txt", token,
+		`{"content":"hello updated"}`)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	// 読み取りで検証
+	data, err := os.ReadFile(filepath.Join(root, "file.txt"))
+	if err != nil {
+		t.Fatalf("ReadFile = %v", err)
+	}
+	if string(data) != "hello updated" {
+		t.Errorf("content = %q, want %q", string(data), "hello updated")
+	}
+}
+
+func TestHandlePutFile_InvalidBody(t *testing.T) {
+	root := setupFilesTestDir(t)
+	mock := &configurableMock{cwd: root}
+	srv, token := newTestServer(mock)
+
+	rec := doRequest(t, srv.Handler(), http.MethodPut,
+		"/api/sessions/main/files?path=file.txt", token,
+		"not json")
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandlePutFile_SessionNotFound(t *testing.T) {
+	mock := &configurableMock{
+		cwdErr: fmt.Errorf("get session cwd: %w", tmux.ErrSessionNotFound),
+	}
+	srv, token := newTestServer(mock)
+
+	rec := doRequest(t, srv.Handler(), http.MethodPut,
+		"/api/sessions/nonexistent/files?path=file.txt", token,
+		`{"content":"data"}`)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d, body = %s", rec.Code, http.StatusNotFound, rec.Body.String())
+	}
+}
+
+func TestHandlePutFile_PathTraversal(t *testing.T) {
+	root := setupFilesTestDir(t)
+	mock := &configurableMock{cwd: root}
+	srv, token := newTestServer(mock)
+
+	attacks := []string{
+		"../../etc/passwd",
+		"../../../etc/shadow",
+		"/etc/passwd",
+	}
+
+	for _, path := range attacks {
+		t.Run(path, func(t *testing.T) {
+			rec := doRequest(t, srv.Handler(), http.MethodPut,
+				"/api/sessions/main/files?path="+path, token,
+				`{"content":"malicious"}`)
+
+			if rec.Code == http.StatusOK {
+				t.Errorf("path traversal should not return 200 for path %q, got %d", path, rec.Code)
+			}
+		})
+	}
+}
+
+func TestHandlePutFile_Authentication(t *testing.T) {
+	root := setupFilesTestDir(t)
+	mock := &configurableMock{cwd: root}
+	srv, _ := newTestServer(mock)
+
+	// トークンなし → 401
+	rec := doRequest(t, srv.Handler(), http.MethodPut,
+		"/api/sessions/main/files?path=file.txt", "",
+		`{"content":"data"}`)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestHandlePutFile_WithBasePath(t *testing.T) {
+	root := setupFilesTestDir(t)
+	mock := &configurableMock{cwd: root}
+
+	const token = "test-token"
+	srv := NewServer(Options{
+		Tmux:     mock,
+		Token:    token,
+		BasePath: "/palmux/",
+	})
+
+	rec := doRequest(t, srv.Handler(), http.MethodPut,
+		"/palmux/api/sessions/main/files?path=file.txt", token,
+		`{"content":"updated via basepath"}`)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	if mock.calledGetProjectDir != "main" {
+		t.Errorf("GetSessionProjectDir called with %q, want %q", mock.calledGetProjectDir, "main")
+	}
+}
+
 func TestHandleGetFiles_Authentication(t *testing.T) {
 	root := setupFilesTestDir(t)
 	mock := &configurableMock{cwd: root}

@@ -181,6 +181,20 @@ export async function getFileContent(session, path) {
 }
 
 /**
+ * ファイルの内容を保存する（上書き）。
+ * @param {string} session - セッション名
+ * @param {string} path - ファイルの相対パス
+ * @param {string} content - 新しいファイル内容
+ * @returns {Promise<{path: string, size: number}>}
+ */
+export async function saveFile(session, path, content) {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/files?path=${encodeURIComponent(path)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ content }),
+  });
+}
+
+/**
  * ファイルの raw コンテンツ URL を生成する。
  * 認証トークンをクエリパラメータに付与する（ブラウザの img/iframe 等で使用するため）。
  * @param {string} session - セッション名

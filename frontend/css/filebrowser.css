@@ -677,6 +677,243 @@
   background: rgba(79, 195, 247, 0.1);
 }
 
+/* ===========================
+   Edit Mode Components
+   =========================== */
+
+/* Edit toggle switch (iOS style) */
+.fp-edit-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+.fp-edit-toggle-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.fp-edit-toggle-slider {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  background: #3a3a5a;
+  border-radius: 11px;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.fp-edit-toggle-slider::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  background: #ccc;
+  border-radius: 50%;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.fp-edit-toggle-input:checked + .fp-edit-toggle-slider {
+  background: #4fc3f7;
+}
+
+.fp-edit-toggle-input:checked + .fp-edit-toggle-slider::after {
+  transform: translateX(18px);
+  background: #fff;
+}
+
+.fp-edit-toggle-label {
+  font-size: 12px;
+  color: #8888aa;
+  white-space: nowrap;
+}
+
+.fp-edit-toggle-input:checked ~ .fp-edit-toggle-label {
+  color: #4fc3f7;
+}
+
+/* Content area in edit mode: flex column to fill height */
+.fp-content--edit {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Edit textarea */
+.fp-edit-textarea {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  padding: 12px;
+  margin: 0;
+  border: none;
+  outline: none;
+  resize: none;
+  background: #0d1117;
+  color: #e0e0e0;
+  font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
+  font-size: calc(var(--fb-font-size, 14px) - 1px);
+  line-height: 1.5;
+  tab-size: 4;
+  white-space: pre;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  box-sizing: border-box;
+}
+
+.fp-edit-textarea:focus {
+  outline: none;
+}
+
+/* Save bar */
+.fp-edit-save-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #16213e;
+  border-top: 1px solid #2a2a4a;
+  flex-shrink: 0;
+}
+
+.fp-edit-save-status {
+  font-size: 12px;
+  color: #8888aa;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fp-edit-save-status--success {
+  color: #66bb6a;
+}
+
+.fp-edit-save-status--error {
+  color: #e57373;
+}
+
+.fp-edit-save-btn {
+  padding: 6px 20px;
+  background: #4fc3f7;
+  color: #0f0f23;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, opacity 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.fp-edit-save-btn:hover:not(:disabled) {
+  background: #81d4fa;
+}
+
+.fp-edit-save-btn:active:not(:disabled) {
+  background: #29b6f6;
+}
+
+.fp-edit-save-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Unsaved changes dialog */
+.fp-dialog-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 16px;
+}
+
+.fp-dialog {
+  background: #1a1a3a;
+  border: 1px solid #2a2a4a;
+  border-radius: 12px;
+  padding: 20px;
+  max-width: 340px;
+  width: 100%;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.fp-dialog-msg {
+  color: #e0e0e0;
+  font-size: 14px;
+  line-height: 1.5;
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.fp-dialog-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.fp-dialog-btn {
+  flex: 1;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.fp-dialog-btn--discard {
+  background: rgba(229, 115, 115, 0.15);
+  color: #e57373;
+}
+
+.fp-dialog-btn--discard:hover {
+  background: rgba(229, 115, 115, 0.25);
+}
+
+.fp-dialog-btn--cancel {
+  background: rgba(136, 136, 170, 0.15);
+  color: #8888aa;
+}
+
+.fp-dialog-btn--cancel:hover {
+  background: rgba(136, 136, 170, 0.25);
+}
+
+.fp-dialog-btn--save {
+  background: #4fc3f7;
+  color: #0f0f23;
+}
+
+.fp-dialog-btn--save:hover {
+  background: #81d4fa;
+}
+
+.fp-dialog-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* Mobile optimizations */
 @media (max-width: 600px) {
   .fb-breadcrumb {
@@ -780,5 +1017,27 @@
 
   .fp-image {
     padding: 8px;
+  }
+
+  /* Edit mode mobile adjustments */
+  .fp-edit-toggle-label {
+    display: none;
+  }
+
+  .fp-edit-textarea {
+    padding: 8px;
+    font-size: calc(var(--fb-font-size, 13px) - 1px);
+  }
+
+  .fp-edit-save-bar {
+    padding: 6px 8px;
+  }
+
+  .fp-dialog-buttons {
+    flex-direction: column;
+  }
+
+  .fp-dialog {
+    padding: 16px;
   }
 }
