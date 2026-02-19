@@ -585,6 +585,35 @@ export class Toolbar {
   }
 
   /**
+   * 保存された状態を復元する。
+   * @param {Object} state
+   * @param {boolean|null} state.toolbarVisible
+   * @param {'none'|'direct'|'ime'} state.keyboardMode
+   * @param {ModifierState} state.ctrlState
+   * @param {ModifierState} state.altState
+   */
+  restoreState(state) {
+    // キーボードモード復元
+    if (state.keyboardMode && state.keyboardMode !== 'none') {
+      this._keyboardMode = state.keyboardMode;
+      this._updateKeyboardModeButton();
+    }
+    // 修飾キー状態復元
+    if (state.ctrlState) {
+      this._ctrlState = state.ctrlState;
+    }
+    if (state.altState) {
+      this._altState = state.altState;
+    }
+    this._updateButtonStates();
+    // ツールバー表示/非表示復元
+    if (state.toolbarVisible === false) {
+      this._visible = false;
+      this._container.classList.add('toolbar--hidden');
+    }
+  }
+
+  /**
    * リソースを解放する。
    */
   dispose() {
