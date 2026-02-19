@@ -1175,7 +1175,7 @@ export class Drawer {
     deleteBtn.textContent = 'Delete';
     deleteBtn.addEventListener('click', () => {
       closeMenu();
-      this._showWindowDeleteConfirmation(sessionName, win, windowCount);
+      this._doDeleteWindow(sessionName, win, windowCount);
     });
     menu.appendChild(deleteBtn);
 
@@ -1201,116 +1201,56 @@ export class Drawer {
   }
 
   /**
-   * ウィンドウ削除確認モーダルを表示する。
+   * ウィンドウを確認なしで即削除する。
    * @param {string} sessionName - セッション名
    * @param {Object} win - 削除対象ウィンドウ
    * @param {number} windowCount - セッション内のウィンドウ総数
    */
-  _showWindowDeleteConfirmation(sessionName, win, windowCount) {
-    // 既にモーダルが表示中なら除去
-    const existing = document.querySelector('.drawer-delete-modal-overlay');
-    if (existing) {
-      existing.remove();
-    }
-
+  async _doDeleteWindow(sessionName, win, windowCount) {
     // セッション内の最後のウィンドウは削除不可（tmux の制約）
     if (windowCount <= 1) {
       this._showDeleteError('Cannot delete the last window in a session');
       return;
     }
 
-    const overlay = document.createElement('div');
-    overlay.className = 'drawer-delete-modal-overlay';
+    try {
+      await deleteWindow(sessionName, win.index);
 
-    const modal = document.createElement('div');
-    modal.className = 'drawer-delete-modal';
+      // ウィンドウ一覧を再取得
+      delete this._windowsCache[sessionName];
+      const updatedWindows = await this._loadWindows(sessionName);
 
-    const message = document.createElement('div');
-    message.className = 'drawer-delete-modal-message';
-    message.textContent = `Delete window "${win.index}: ${win.name}"?`;
+      // 削除したウィンドウが現在表示中だった場合、前のウィンドウに切り替え
+      if (sessionName === this._currentSession && win.index === this._currentWindowIndex) {
+        if (updatedWindows.length > 0) {
+          // 削除されたインデックスより前のウィンドウに切り替え、なければ最初のウィンドウ
+          const prevWindow = updatedWindows.reduce((prev, w) => {
+            if (w.index < win.index && (prev === null || w.index > prev.index)) {
+              return w;
+            }
+            return prev;
+          }, null) || updatedWindows[0];
 
-    const actions = document.createElement('div');
-    actions.className = 'drawer-delete-modal-actions';
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'drawer-delete-modal-cancel';
-    cancelBtn.textContent = 'Cancel';
-
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'drawer-delete-modal-delete';
-    deleteBtn.textContent = 'Delete';
-
-    actions.appendChild(cancelBtn);
-    actions.appendChild(deleteBtn);
-    modal.appendChild(message);
-    modal.appendChild(actions);
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-
-    // モーダル表示アニメーション
-    requestAnimationFrame(() => {
-      overlay.classList.add('drawer-delete-modal-overlay--visible');
-    });
-
-    const closeModal = () => {
-      overlay.classList.remove('drawer-delete-modal-overlay--visible');
-      // トランジション後に除去
-      setTimeout(() => {
-        overlay.remove();
-      }, 200);
-    };
-
-    cancelBtn.addEventListener('click', closeModal);
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) {
-        closeModal();
-      }
-    });
-
-    deleteBtn.addEventListener('click', async () => {
-      deleteBtn.disabled = true;
-      deleteBtn.textContent = 'Deleting...';
-
-      try {
-        await deleteWindow(sessionName, win.index);
-        closeModal();
-
-        // ウィンドウ一覧を再取得
-        delete this._windowsCache[sessionName];
-        const updatedWindows = await this._loadWindows(sessionName);
-
-        // 削除したウィンドウが現在表示中だった場合、前のウィンドウに切り替え
-        if (sessionName === this._currentSession && win.index === this._currentWindowIndex) {
-          if (updatedWindows.length > 0) {
-            // 削除されたインデックスより前のウィンドウに切り替え、なければ最初のウィンドウ
-            const prevWindow = updatedWindows.reduce((prev, w) => {
-              if (w.index < win.index && (prev === null || w.index > prev.index)) {
-                return w;
-              }
-              return prev;
-            }, null) || updatedWindows[0];
-
-            this._currentWindowIndex = prevWindow.index;
-            this._onSelectWindow(sessionName, prevWindow.index);
-          }
+          this._currentWindowIndex = prevWindow.index;
+          this._onSelectWindow(sessionName, prevWindow.index);
         }
-
-        this._renderContent();
-
-        // コールバック呼び出し
-        if (this._onDeleteWindow) {
-          this._onDeleteWindow();
-        }
-      } catch (err) {
-        console.error('Failed to delete window:', err);
-        closeModal();
-        this._showDeleteError(`Failed to delete window: ${err.message}`);
       }
-    });
+
+      this._renderContent();
+
+      // コールバック呼び出し
+      if (this._onDeleteWindow) {
+        this._onDeleteWindow();
+      }
+    } catch (err) {
+      console.error('Failed to delete window:', err);
+      this._showDeleteError(`Failed to delete window: ${err.message}`);
+    }
   }
 
   /**
    * [+] 新規ウィンドウ作成ボタンを作成する。
+   * クリックするとウィンドウ種別選択ダイアログを表示する。
    * @param {string} sessionName - セッション名
    * @returns {HTMLElement}
    */
@@ -1319,51 +1259,114 @@ export class Drawer {
     btn.className = 'drawer-new-window-btn';
     btn.textContent = '+ New Window';
 
-    btn.addEventListener('click', async () => {
-      if (this._creatingWindow) return;
-      this._creatingWindow = true;
-      btn.classList.add('drawer-new-window-btn--disabled');
-      btn.textContent = 'Creating...';
-
-      try {
-        const result = await createWindow(sessionName);
-
-        // ウィンドウ一覧を再取得
-        delete this._windowsCache[sessionName];
-        await this._loadWindows(sessionName);
-        this._renderContent();
-
-        this._creatingWindow = false;
-
-        // 新しいウィンドウに自動切り替え
-        const newWindowIndex = result.index;
-        if (sessionName === this._currentSession) {
-          // 同じセッション内: ウィンドウ切り替え
-          this._onSelectWindow(sessionName, newWindowIndex);
-          this._currentWindowIndex = newWindowIndex;
-        } else {
-          // 別セッション: セッション切り替え + ウィンドウ選択
-          this._onSelectSession(sessionName, newWindowIndex);
-          this._currentSession = sessionName;
-          this._currentWindowIndex = newWindowIndex;
-        }
-
-        // コールバック呼び出し
-        if (this._onCreateWindow) {
-          this._onCreateWindow(sessionName, newWindowIndex);
-        }
-
-        this.close();
-      } catch (err) {
-        this._creatingWindow = false;
-        console.error('Failed to create window:', err);
-        this._showDeleteError(`Failed to create window: ${err.message}`);
-        btn.classList.remove('drawer-new-window-btn--disabled');
-        btn.textContent = '+ New Window';
-      }
+    btn.addEventListener('click', () => {
+      this._showNewWindowDialog(sessionName);
     });
 
     return btn;
+  }
+
+  /**
+   * 新規ウィンドウ種別選択ダイアログを表示する。
+   * @param {string} sessionName - セッション名
+   */
+  _showNewWindowDialog(sessionName) {
+    // 既にダイアログが表示中なら除去
+    const existing = document.querySelector('.drawer-context-menu-overlay');
+    if (existing) {
+      existing.remove();
+    }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'drawer-context-menu-overlay';
+
+    const menu = document.createElement('div');
+    menu.className = 'drawer-context-menu';
+
+    const title = document.createElement('div');
+    title.className = 'drawer-context-menu-title';
+    title.textContent = 'New Window';
+    menu.appendChild(title);
+
+    const options = [
+      { label: 'claude · new session', command: 'claude' },
+      { label: 'claude · resume', command: 'claude --continue' },
+      { label: 'shell', command: '' },
+    ];
+
+    for (const opt of options) {
+      const btn = document.createElement('button');
+      btn.className = 'drawer-context-menu-item';
+      btn.textContent = opt.label;
+      btn.addEventListener('click', () => {
+        closeDialog();
+        this._handleCreateWindow(sessionName, opt.command);
+      });
+      menu.appendChild(btn);
+    }
+
+    overlay.appendChild(menu);
+    document.body.appendChild(overlay);
+
+    requestAnimationFrame(() => {
+      overlay.classList.add('drawer-context-menu-overlay--visible');
+    });
+
+    const closeDialog = () => {
+      overlay.classList.remove('drawer-context-menu-overlay--visible');
+      setTimeout(() => {
+        overlay.remove();
+      }, 200);
+    };
+
+    // オーバーレイ外タップでキャンセル
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        closeDialog();
+      }
+    });
+  }
+
+  /**
+   * ウィンドウを作成して切り替える。
+   * @param {string} sessionName - セッション名
+   * @param {string} command - 起動コマンド（空の場合はデフォルトシェル）
+   */
+  async _handleCreateWindow(sessionName, command) {
+    if (this._creatingWindow) return;
+    this._creatingWindow = true;
+
+    try {
+      const result = await createWindow(sessionName, '', command);
+
+      // ウィンドウ一覧を再取得
+      delete this._windowsCache[sessionName];
+      await this._loadWindows(sessionName);
+      this._renderContent();
+
+      this._creatingWindow = false;
+
+      // 新しいウィンドウに自動切り替え
+      const newWindowIndex = result.index;
+      if (sessionName === this._currentSession) {
+        this._onSelectWindow(sessionName, newWindowIndex);
+        this._currentWindowIndex = newWindowIndex;
+      } else {
+        this._onSelectSession(sessionName, newWindowIndex);
+        this._currentSession = sessionName;
+        this._currentWindowIndex = newWindowIndex;
+      }
+
+      if (this._onCreateWindow) {
+        this._onCreateWindow(sessionName, newWindowIndex);
+      }
+
+      this.close();
+    } catch (err) {
+      this._creatingWindow = false;
+      console.error('Failed to create window:', err);
+      this._showDeleteError(`Failed to create window: ${err.message}`);
+    }
   }
 
   /**

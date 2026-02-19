@@ -120,7 +120,8 @@ func (m *Manager) KillSession(name string) error {
 
 // NewWindow は指定セッションに新しいウィンドウを作成し、作成されたウィンドウ情報を返す。
 // name が空の場合は -n フラグを省略し、tmux のデフォルト名を使用する。
-func (m *Manager) NewWindow(session, name string) (*Window, error) {
+// command が空でない場合はウィンドウ内で指定コマンドを実行する。
+func (m *Manager) NewWindow(session, name, command string) (*Window, error) {
 	args := []string{"new-window", "-t", session}
 	if name != "" {
 		args = append(args, "-n", name)
@@ -130,6 +131,9 @@ func (m *Manager) NewWindow(session, name string) (*Window, error) {
 		args = append(args, "-c", dir)
 	}
 	args = append(args, "-P", "-F", windowFormat)
+	if command != "" {
+		args = append(args, command)
+	}
 
 	out, err := m.Exec.Run(args...)
 	if err != nil {

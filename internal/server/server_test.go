@@ -22,7 +22,7 @@ func (m *mockTmuxManager) NewSession(name string) (*tmux.Session, error) {
 }
 func (m *mockTmuxManager) KillSession(name string) error                     { return nil }
 func (m *mockTmuxManager) ListWindows(session string) ([]tmux.Window, error) { return nil, nil }
-func (m *mockTmuxManager) NewWindow(session, name string) (*tmux.Window, error) {
+func (m *mockTmuxManager) NewWindow(session, name, command string) (*tmux.Window, error) {
 	return &tmux.Window{}, nil
 }
 func (m *mockTmuxManager) KillWindow(session string, index int) error { return nil }

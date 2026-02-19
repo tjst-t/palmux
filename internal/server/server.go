@@ -18,7 +18,7 @@ type TmuxManager interface {
 	NewSession(name string) (*tmux.Session, error)
 	KillSession(name string) error
 	ListWindows(session string) ([]tmux.Window, error)
-	NewWindow(session, name string) (*tmux.Window, error)
+	NewWindow(session, name, command string) (*tmux.Window, error)
 	KillWindow(session string, index int) error
 	RenameWindow(session string, index int, name string) error
 	Attach(session string, windowIndex int) (*os.File, *exec.Cmd, error)

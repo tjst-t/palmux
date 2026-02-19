@@ -322,6 +322,7 @@ func TestManager_NewWindow(t *testing.T) {
 		name     string
 		session  string
 		winName  string
+		winCmd   string
 		output   []byte
 		err      error
 		want     *Window
@@ -332,6 +333,7 @@ func TestManager_NewWindow(t *testing.T) {
 			name:    "正常系: 名前付きウィンドウを作成",
 			session: "main",
 			winName: "editor",
+			winCmd:  "",
 			output:  []byte("1\teditor\t1\n"),
 			err:     nil,
 			want: &Window{
@@ -346,6 +348,7 @@ func TestManager_NewWindow(t *testing.T) {
 			name:    "正常系: 名前なしウィンドウを作成（-n フラグを含まない）",
 			session: "main",
 			winName: "",
+			winCmd:  "",
 			output:  []byte("2\tbash\t1\n"),
 			err:     nil,
 			want: &Window{
@@ -357,9 +360,25 @@ func TestManager_NewWindow(t *testing.T) {
 			wantArgs: []string{"new-window", "-t", "main", "-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}"},
 		},
 		{
+			name:    "正常系: コマンド付きウィンドウを作成",
+			session: "main",
+			winName: "",
+			winCmd:  "claude",
+			output:  []byte("3\tclaude\t1\n"),
+			err:     nil,
+			want: &Window{
+				Index:  3,
+				Name:   "claude",
+				Active: true,
+			},
+			wantErr:  false,
+			wantArgs: []string{"new-window", "-t", "main", "-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}", "claude"},
+		},
+		{
 			name:     "異常系: Executorがエラーを返す",
 			session:  "nonexistent",
 			winName:  "test",
+			winCmd:   "",
 			output:   nil,
 			err:      errors.New("session not found"),
 			want:     nil,
@@ -370,6 +389,7 @@ func TestManager_NewWindow(t *testing.T) {
 			name:     "異常系: パースエラー",
 			session:  "main",
 			winName:  "bad",
+			winCmd:   "",
 			output:   []byte("not\tvalid"),
 			err:      nil,
 			want:     nil,
@@ -383,7 +403,7 @@ func TestManager_NewWindow(t *testing.T) {
 			mock := &mockExecutor{output: tt.output, err: tt.err}
 			m := &Manager{Exec: mock}
 
-			got, err := m.NewWindow(tt.session, tt.winName)
+			got, err := m.NewWindow(tt.session, tt.winName, tt.winCmd)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewWindow() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -465,7 +485,7 @@ func TestManager_NewWindow_WithGhq(t *testing.T) {
 			mock := &mockExecutor{output: tt.output, err: nil}
 			m := &Manager{Exec: mock, Ghq: tt.ghq}
 
-			_, err := m.NewWindow(tt.session, tt.winName)
+			_, err := m.NewWindow(tt.session, tt.winName, "")
 			if err != nil {
 				t.Fatalf("NewWindow() unexpected error: %v", err)
 			}
@@ -540,7 +560,7 @@ func TestManager_NewWindow_EmptyOutput(t *testing.T) {
 	mock := &mockExecutor{output: []byte(""), err: nil}
 	m := &Manager{Exec: mock}
 
-	got, err := m.NewWindow("main", "test")
+	got, err := m.NewWindow("main", "test", "")
 	if err == nil {
 		t.Errorf("NewWindow() with empty output should return error, got window: %v", got)
 	}
@@ -606,7 +626,7 @@ func TestManager_ErrorMessages(t *testing.T) {
 		mock := &mockExecutor{output: nil, err: errors.New("connection refused")}
 		m := &Manager{Exec: mock}
 
-		_, err := m.NewWindow("main", "test")
+		_, err := m.NewWindow("main", "test", "")
 		if err == nil {
 			t.Fatal("expected error")
 		}
