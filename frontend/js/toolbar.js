@@ -19,8 +19,12 @@
  */
 
 /** @type {ButtonDef[]} */
-const LEFT_BUTTON_DEFS = [
+const IME_BUTTON_DEFS = [
   { label: '\u3042',    type: 'keyboard-mode' },
+];
+
+/** @type {ButtonDef[]} */
+const LEFT_BUTTON_DEFS = [
   { label: 'Esc',  type: 'instant',  key: '\x1b' },
   { label: 'Tab',  type: 'instant',  key: '\t' },
   { label: 'Ctrl', type: 'modifier', modifier: 'ctrl' },
@@ -106,13 +110,16 @@ export class Toolbar {
     const row = document.createElement('div');
     row.className = 'toolbar-row';
 
+    const imeGroup = document.createElement('div');
+    imeGroup.className = 'toolbar-group toolbar-group--ime';
+
     const leftGroup = document.createElement('div');
-    leftGroup.className = 'toolbar-group';
+    leftGroup.className = 'toolbar-group toolbar-group--left';
 
     const rightGroup = document.createElement('div');
     rightGroup.className = 'toolbar-group toolbar-group--right';
 
-    for (const [defs, group] of [[LEFT_BUTTON_DEFS, leftGroup], [RIGHT_BUTTON_DEFS, rightGroup]]) {
+    for (const [defs, group] of [[IME_BUTTON_DEFS, imeGroup], [LEFT_BUTTON_DEFS, leftGroup], [RIGHT_BUTTON_DEFS, rightGroup]]) {
       for (const def of defs) {
         const btn = document.createElement('button');
         btn.className = 'toolbar-btn';
@@ -149,6 +156,7 @@ export class Toolbar {
       }
     }
 
+    row.appendChild(imeGroup);
     row.appendChild(leftGroup);
     row.appendChild(rightGroup);
     this._container.appendChild(row);

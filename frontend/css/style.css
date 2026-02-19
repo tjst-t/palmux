@@ -442,7 +442,7 @@ html, body {
   gap: 4px;
 }
 
-/* Right group: margin-left: auto pushes it to the right on any row it lands on */
+/* Right group: always right-aligned on whichever row it lands on */
 .toolbar-group--right {
   margin-left: auto;
 }
@@ -1329,6 +1329,11 @@ html, body {
 
   .toolbar-row {
     gap: 3px;
+  }
+
+  /* スマホ: あ は左固定、残りのキーは右詰め */
+  .toolbar-group--left {
+    margin-left: auto;
   }
 
   .toolbar-btn {
