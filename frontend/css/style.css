@@ -435,6 +435,18 @@ html, body {
   background: #2a2a4a;
 }
 
+/* Toolbar button groups */
+.toolbar-group {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+}
+
+/* Right group: margin-left: auto pushes it to the right on any row it lands on */
+.toolbar-group--right {
+  margin-left: auto;
+}
+
 /* Popup key element (up swipe alternate key) */
 .toolbar-btn-popup {
   display: none;

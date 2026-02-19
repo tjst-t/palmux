@@ -19,20 +19,24 @@
  */
 
 /** @type {ButtonDef[]} */
-const BUTTON_DEFS = [
+const LEFT_BUTTON_DEFS = [
   { label: '\u3042',    type: 'keyboard-mode' },
   { label: 'Esc',  type: 'instant',  key: '\x1b' },
   { label: 'Tab',  type: 'instant',  key: '\t' },
   { label: 'Ctrl', type: 'modifier', modifier: 'ctrl' },
   { label: 'Alt',  type: 'modifier', modifier: 'alt' },
+  { label: '/',   type: 'instant',  key: '/',  popup: { label: '|', key: '|' } },
+  { label: '-',   type: 'instant',  key: '-',  popup: { label: '_', key: '_' } },
+];
+
+/** @type {ButtonDef[]} */
+const RIGHT_BUTTON_DEFS = [
   { label: '\u2191',    type: 'instant',  key: '\x1b[A', repeat: true },
   { label: '\u2193',    type: 'instant',  key: '\x1b[B', repeat: true },
   { label: '\u2190',    type: 'instant',  key: '\x1b[D', repeat: true },
   { label: '\u2192',    type: 'instant',  key: '\x1b[C', repeat: true },
   { label: '\u232B',    type: 'instant',  key: '\x7f',   repeat: true },
   { label: '\u21B5',    type: 'instant',  key: '\r' },
-  { label: '/',   type: 'instant',  key: '/',  popup: { label: '|', key: '|' } },
-  { label: '-',   type: 'instant',  key: '-',  popup: { label: '_', key: '_' } },
 ];
 
 /**
@@ -102,41 +106,51 @@ export class Toolbar {
     const row = document.createElement('div');
     row.className = 'toolbar-row';
 
-    for (const def of BUTTON_DEFS) {
-      const btn = document.createElement('button');
-      btn.className = 'toolbar-btn';
-      btn.textContent = def.label;
-      btn.setAttribute('data-type', def.type);
+    const leftGroup = document.createElement('div');
+    leftGroup.className = 'toolbar-group';
 
-      if (def.type === 'instant' && def.repeat) {
-        // キーリピート対応ボタン（矢印キー、Backspace）
-        this._addRepeatableButtonHandler(btn, def.key);
-      } else if (def.type === 'instant' && def.popup) {
-        // ポップアップ対応ボタン（/, -）
-        this._addPopupButtonHandler(btn, def.key, def.popup);
-      } else if (def.type === 'instant') {
-        // 通常の即時送信ボタン（Esc, Tab）
-        this._addButtonHandler(btn, (e) => {
-          e.preventDefault();
-          this._handleInstantKey(def.key);
-        });
-      } else if (def.type === 'modifier') {
-        // 修飾キーボタン（Ctrl, Alt）- 長押しロック対応
-        btn.setAttribute('data-modifier', def.modifier);
-        this._addModifierButtonHandler(btn, def.modifier);
-        this._buttons[def.modifier] = btn;
-      } else if (def.type === 'keyboard-mode') {
-        // キーボードモード切替ボタン（none → direct → ime → none）
-        this._keyboardModeBtn = btn;
-        this._addButtonHandler(btn, (e) => {
-          e.preventDefault();
-          this._handleKeyboardModeToggle();
-        });
+    const rightGroup = document.createElement('div');
+    rightGroup.className = 'toolbar-group toolbar-group--right';
+
+    for (const [defs, group] of [[LEFT_BUTTON_DEFS, leftGroup], [RIGHT_BUTTON_DEFS, rightGroup]]) {
+      for (const def of defs) {
+        const btn = document.createElement('button');
+        btn.className = 'toolbar-btn';
+        btn.textContent = def.label;
+        btn.setAttribute('data-type', def.type);
+
+        if (def.type === 'instant' && def.repeat) {
+          // キーリピート対応ボタン（矢印キー、Backspace）
+          this._addRepeatableButtonHandler(btn, def.key);
+        } else if (def.type === 'instant' && def.popup) {
+          // ポップアップ対応ボタン（/, -）
+          this._addPopupButtonHandler(btn, def.key, def.popup);
+        } else if (def.type === 'instant') {
+          // 通常の即時送信ボタン（Esc, Tab）
+          this._addButtonHandler(btn, (e) => {
+            e.preventDefault();
+            this._handleInstantKey(def.key);
+          });
+        } else if (def.type === 'modifier') {
+          // 修飾キーボタン（Ctrl, Alt）- 長押しロック対応
+          btn.setAttribute('data-modifier', def.modifier);
+          this._addModifierButtonHandler(btn, def.modifier);
+          this._buttons[def.modifier] = btn;
+        } else if (def.type === 'keyboard-mode') {
+          // キーボードモード切替ボタン（none → direct → ime → none）
+          this._keyboardModeBtn = btn;
+          this._addButtonHandler(btn, (e) => {
+            e.preventDefault();
+            this._handleKeyboardModeToggle();
+          });
+        }
+
+        group.appendChild(btn);
       }
-
-      row.appendChild(btn);
     }
 
+    row.appendChild(leftGroup);
+    row.appendChild(rightGroup);
     this._container.appendChild(row);
     this._updateButtonStates();
   }
