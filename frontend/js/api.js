@@ -111,10 +111,13 @@ export async function listWindows(session) {
  * 新しいウィンドウを作成する。
  * @param {string} session - セッション名
  * @param {string} [name] - ウィンドウ名（省略可）
+ * @param {string} [command] - 起動コマンド（省略可）
  * @returns {Promise<{index: number, name: string}>}
  */
-export async function createWindow(session, name) {
-  const body = name ? { name } : {};
+export async function createWindow(session, name, command) {
+  const body = {};
+  if (name) body.name = name;
+  if (command) body.command = command;
   return fetchAPI(`api/sessions/${encodeURIComponent(session)}/windows`, {
     method: 'POST',
     body: JSON.stringify(body),

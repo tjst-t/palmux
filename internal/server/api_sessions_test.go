@@ -38,7 +38,7 @@ type configurableMock struct {
 	calledNewSession   string
 	calledKillSession  string
 	calledListWindows  string
-	calledNewWindow    struct{ session, name string }
+	calledNewWindow    struct{ session, name, command string }
 	calledKillWindow   struct {
 		session string
 		index   int
@@ -75,8 +75,8 @@ func (m *configurableMock) ListWindows(session string) ([]tmux.Window, error) {
 	return m.windows, m.windowsErr
 }
 
-func (m *configurableMock) NewWindow(session, name string) (*tmux.Window, error) {
-	m.calledNewWindow = struct{ session, name string }{session, name}
+func (m *configurableMock) NewWindow(session, name, command string) (*tmux.Window, error) {
+	m.calledNewWindow = struct{ session, name, command string }{session, name, command}
 	return m.newWindow, m.newWinErr
 }
 

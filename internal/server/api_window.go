@@ -30,10 +30,11 @@ func (s *Server) handleListWindows() http.Handler {
 }
 
 // handleCreateWindow は POST /api/sessions/{session}/windows のハンドラ。
-// リクエストボディの JSON から name を読み取り（省略可）、新しいウィンドウを作成する。
+// リクエストボディの JSON から name と command を読み取り（省略可）、新しいウィンドウを作成する。
 func (s *Server) handleCreateWindow() http.Handler {
 	type createWindowRequest struct {
-		Name string `json:"name"`
+		Name    string `json:"name"`
+		Command string `json:"command"`
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -41,7 +42,7 @@ func (s *Server) handleCreateWindow() http.Handler {
 
 		var req createWindowRequest
 
-		// ボディがある場合のみデコードする（name は省略可）
+		// ボディがある場合のみデコードする（name, command は省略可）
 		if r.Body != nil && r.ContentLength != 0 {
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -49,7 +50,7 @@ func (s *Server) handleCreateWindow() http.Handler {
 			}
 		}
 
-		window, err := s.tmux.NewWindow(session, req.Name)
+		window, err := s.tmux.NewWindow(session, req.Name, req.Command)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
