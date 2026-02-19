@@ -17,6 +17,7 @@
   <link rel="stylesheet" href="xterm.css">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="filebrowser.css">
+  <link rel="stylesheet" href="gitbrowser.css">
   <link rel="stylesheet" href="hljs-theme.css">
 </head>
 <body>
@@ -60,6 +61,15 @@
             <path d="M1.5 3.5h4l1.5 1.5h5.5v6.5h-11z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
           </svg>
         </button>
+        <button id="header-tab-git" class="header-tab-btn" aria-label="Git">
+          <svg class="header-tab-icon" width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <circle cx="4" cy="4" r="1.5" stroke="currentColor" stroke-width="1.3"/>
+            <circle cx="10" cy="4" r="1.5" stroke="currentColor" stroke-width="1.3"/>
+            <circle cx="7" cy="11" r="1.5" stroke="currentColor" stroke-width="1.3"/>
+            <line x1="4" y1="5.5" x2="7" y2="9.5" stroke="currentColor" stroke-width="1.3"/>
+            <line x1="10" y1="5.5" x2="7" y2="9.5" stroke="currentColor" stroke-width="1.3"/>
+          </svg>
+        </button>
       </div>
       <div id="connection-status" class="connection-status hidden">
         <span class="connection-dot"></span>
@@ -94,6 +104,11 @@
       <!-- File Browser View -->
       <div id="filebrowser-view" class="hidden">
         <div id="filebrowser-container"></div>
+      </div>
+
+      <!-- Git Browser View -->
+      <div id="gitbrowser-view" class="hidden">
+        <div id="gitbrowser-container"></div>
       </div>
     </div>
   </div>

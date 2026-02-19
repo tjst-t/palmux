@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/tjst-t/palmux/internal/git"
 	"github.com/tjst-t/palmux/internal/tmux"
 )
 
@@ -28,6 +29,7 @@ type TmuxManager interface {
 // Server は Palmux の HTTP サーバーを表す。
 type Server struct {
 	tmux        TmuxManager
+	gitCmd      git.CommandRunner
 	token       string
 	basePath    string
 	handler     http.Handler
@@ -37,6 +39,7 @@ type Server struct {
 // Options は Server の生成オプション。
 type Options struct {
 	Tmux           TmuxManager
+	GitCmd         git.CommandRunner // git コマンドランナー（nil の場合 RealCommandRunner を使用）
 	Token          string
 	BasePath       string
 	Frontend       fs.FS // 静的ファイル配信用 FS（テスト時は nil 可）
@@ -47,8 +50,14 @@ type Options struct {
 // NewServer は Options を元に新しい Server を生成する。
 // ベースパスの正規化、ルーティング登録、認証ミドルウェアの適用を行う。
 func NewServer(opts Options) *Server {
+	gitCmd := opts.GitCmd
+	if gitCmd == nil {
+		gitCmd = &git.RealCommandRunner{}
+	}
+
 	s := &Server{
 		tmux:        opts.Tmux,
+		gitCmd:      gitCmd,
 		token:       opts.Token,
 		basePath:    NormalizeBasePath(opts.BasePath),
 		connTracker: newConnectionTracker(opts.MaxConnections),
@@ -72,6 +81,11 @@ func NewServer(opts Options) *Server {
 	mux.Handle("GET /api/sessions/{session}/files", auth(s.handleGetFiles()))
 	mux.Handle("GET /api/connections", auth(s.handleListConnections()))
 	mux.Handle("GET /api/ghq/repos", auth(s.handleListGhqRepos()))
+	mux.Handle("GET /api/sessions/{session}/git/status", auth(s.handleGitStatus()))
+	mux.Handle("GET /api/sessions/{session}/git/log", auth(s.handleGitLog()))
+	mux.Handle("GET /api/sessions/{session}/git/diff", auth(s.handleGitDiff()))
+	mux.Handle("GET /api/sessions/{session}/git/show", auth(s.handleGitShow()))
+	mux.Handle("GET /api/sessions/{session}/git/branches", auth(s.handleGitBranches()))
 
 	// 静的ファイル配信
 	if opts.Frontend != nil {

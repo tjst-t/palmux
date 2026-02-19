@@ -205,6 +205,67 @@ export async function listGhqRepos() {
   return fetchAPI('api/ghq/repos');
 }
 
+// --- Git API ---
+
+/**
+ * セッションの git status を取得する。
+ * @param {string} session - セッション名
+ * @returns {Promise<{branch: string, files: Array<{path: string, status: string, status_text: string}>}>}
+ */
+export async function getGitStatus(session) {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/git/status`);
+}
+
+/**
+ * セッションの git log を取得する。
+ * @param {string} session - セッション名
+ * @param {Object} [opts]
+ * @param {string} [opts.branch] - ブランチ名
+ * @param {number} [opts.limit] - 取得件数
+ * @returns {Promise<Array<{hash: string, author_name: string, date: string, subject: string}>>}
+ */
+export async function getGitLog(session, { branch, limit } = {}) {
+  const params = new URLSearchParams();
+  if (branch) params.set('branch', branch);
+  if (limit) params.set('limit', String(limit));
+  const qs = params.toString();
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/git/log${qs ? '?' + qs : ''}`);
+}
+
+/**
+ * セッションの git diff を取得する。
+ * @param {string} session - セッション名
+ * @param {string} [path] - ファイルパス
+ * @param {string} [commit] - コミットハッシュ
+ * @returns {Promise<{diff: string}>}
+ */
+export async function getGitDiff(session, path, commit) {
+  const params = new URLSearchParams();
+  if (path) params.set('path', path);
+  if (commit) params.set('commit', commit);
+  const qs = params.toString();
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/git/diff${qs ? '?' + qs : ''}`);
+}
+
+/**
+ * コミットで変更されたファイル一覧を取得する。
+ * @param {string} session - セッション名
+ * @param {string} commit - コミットハッシュ
+ * @returns {Promise<Array<{path: string, status: string, status_text: string}>>}
+ */
+export async function getGitCommitFiles(session, commit) {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/git/show?commit=${encodeURIComponent(commit)}`);
+}
+
+/**
+ * セッションの git ブランチ一覧を取得する。
+ * @param {string} session - セッション名
+ * @returns {Promise<Array<{name: string, current: boolean, remote: boolean}>>}
+ */
+export async function getGitBranches(session) {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/git/branches`);
+}
+
 /**
  * WebSocket 接続用の URL を生成する。
  * base-path とプロトコル（ws/wss）を考慮し、認証トークンをクエリパラメータに付与する。

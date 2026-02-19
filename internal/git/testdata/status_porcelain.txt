@@ -1,0 +1,7 @@
+## main...origin/main
+ M internal/server/server.go
+A  internal/git/git.go
+D  old_file.go
+?? untracked.txt
+R  old_name.go -> new_name.go
+MM both_modified.go
