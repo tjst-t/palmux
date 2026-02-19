@@ -48,6 +48,14 @@ let currentWindowIndex = null;
 /** 現在の表示モード: 'terminal' | 'filebrowser' | 'gitbrowser' */
 let currentViewMode = 'terminal';
 
+/** ツールバー/IME のグローバル状態（セッション切替で保持） */
+const globalUIState = {
+  toolbarVisible: null,  // null = 未初期化（デバイスデフォルトを使用）
+  keyboardMode: 'none',
+  ctrlState: 'off',
+  altState: 'off',
+};
+
 /**
  * セッション一覧画面に切り替えるUI処理（セッション読み込みは含まない）。
  * タッチハンドラー・IME・ツールバー・接続をクリーンアップし、
@@ -63,6 +71,14 @@ function _switchToSessionListView() {
   if (touchHandler) {
     touchHandler.destroy();
     touchHandler = null;
+  }
+
+  // ツールバー/IME の状態を保存してからクリーンアップ
+  if (toolbar) {
+    globalUIState.toolbarVisible = toolbar.visible;
+    globalUIState.keyboardMode = toolbar.keyboardMode;
+    globalUIState.ctrlState = toolbar.ctrlState;
+    globalUIState.altState = toolbar.altState;
   }
 
   // IME 入力のクリーンアップ
@@ -282,6 +298,14 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
   const toolbarToggleBtnEl = document.getElementById('toolbar-toggle-btn');
   const drawerBtnEl = document.getElementById('drawer-btn');
 
+  // ツールバー/IME の状態を保存してからクリーンアップ
+  if (toolbar) {
+    globalUIState.toolbarVisible = toolbar.visible;
+    globalUIState.keyboardMode = toolbar.keyboardMode;
+    globalUIState.ctrlState = toolbar.ctrlState;
+    globalUIState.altState = toolbar.altState;
+  }
+
   // 既存ターミナルをクリーンアップ
   if (touchHandler) {
     touchHandler.destroy();
@@ -408,9 +432,25 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
   terminal.setToolbar(toolbar);
   imeInput.setToolbar(toolbar);
 
-  // デスクトップではツールバーをデフォルト非表示
-  if (!isMobileDevice()) {
-    toolbar.toggleVisibility();
+  // 保存された状態を復元
+  toolbar.restoreState(globalUIState);
+
+  // ツールバー表示/非表示（初回はデバイスデフォルト）
+  if (globalUIState.toolbarVisible === null) {
+    if (!isMobileDevice()) {
+      toolbar.toggleVisibility();
+      globalUIState.toolbarVisible = false;
+    } else {
+      globalUIState.toolbarVisible = true;
+    }
+  }
+
+  // キーボードモードに応じてターミナルと IME バーを復元
+  if (globalUIState.keyboardMode !== 'none') {
+    terminal.setKeyboardMode(globalUIState.keyboardMode);
+    if (globalUIState.keyboardMode === 'ime' && imeInput) {
+      imeInput.show();
+    }
   }
 
   // タッチハンドラー初期化（ピンチズーム、スクロール、長押し選択）
@@ -932,6 +972,7 @@ document.addEventListener('DOMContentLoaded', () => {
     toolbarToggleBtnEl.addEventListener('click', () => {
       if (toolbar) {
         toolbar.toggleVisibility();
+        globalUIState.toolbarVisible = toolbar.visible;
         // ツールバー表示/非表示でターミナルを再フィット
         if (terminal) {
           // 少し待ってからフィット（DOM 更新後）
