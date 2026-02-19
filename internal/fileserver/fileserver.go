@@ -19,6 +19,8 @@ var (
 	ErrPathOutsideRoot = errors.New("path outside root")
 	ErrAbsolutePath    = errors.New("absolute path not allowed")
 	ErrNotDirectory    = errors.New("not a directory")
+	ErrIsDirectory     = errors.New("is a directory")
+	ErrFileTooLarge    = errors.New("file too large")
 )
 
 // DirEntry はディレクトリ内のエントリ（ファイルまたはサブディレクトリ）を表す。
@@ -272,6 +274,69 @@ func (fs *FileServer) RawFile(relPath string) (io.ReadCloser, string, error) {
 	}
 
 	return f, detectedType, nil
+}
+
+// Write はファイルに内容を書き込む。
+// Atomic write（一時ファイル + rename）でデータ破損を防止する。
+// 元ファイルのパーミッションを保持する。
+func (fs *FileServer) Write(relPath string, content []byte) error {
+	absPath, err := fs.ValidatePath(relPath)
+	if err != nil {
+		return err
+	}
+
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return err
+	}
+
+	if info.IsDir() {
+		return fmt.Errorf("write: %w", ErrIsDirectory)
+	}
+
+	if len(content) > maxReadSize {
+		return fmt.Errorf("write: %w", ErrFileTooLarge)
+	}
+
+	// 元ファイルのパーミッションを取得
+	perm := info.Mode().Perm()
+
+	// Atomic write: 同じディレクトリに一時ファイルを作成して rename
+	dir := filepath.Dir(absPath)
+	tmp, err := os.CreateTemp(dir, ".palmux-write-*")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	// エラー時に一時ファイルを削除
+	defer func() {
+		if tmpPath != "" {
+			os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := tmp.Write(content); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp file: %w", err)
+	}
+
+	// パーミッションを設定
+	if err := os.Chmod(tmpPath, perm); err != nil {
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+
+	// Atomic rename
+	if err := os.Rename(tmpPath, absPath); err != nil {
+		return fmt.Errorf("rename temp file: %w", err)
+	}
+
+	// rename 成功後は一時ファイル削除不要
+	tmpPath = ""
+	return nil
 }
 
 // classifyContentType は http.DetectContentType の結果を "text", "image", "binary" に分類する。

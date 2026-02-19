@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -97,6 +98,59 @@ func (s *Server) handleGetFiles() http.Handler {
 	})
 }
 
+// handlePutFile は PUT /api/sessions/{session}/files のハンドラ。
+// クエリパラメータ path で指定されたファイルの内容を上書きする。
+// リクエストボディ: {"content": "..."}
+// レスポンス: {"path": "...", "size": N}
+func (s *Server) handlePutFile() http.Handler {
+	type putFileRequest struct {
+		Content string `json:"content"`
+	}
+	type putFileResponse struct {
+		Path string `json:"path"`
+		Size int    `json:"size"`
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		session := r.PathValue("session")
+
+		cwd, err := s.tmux.GetSessionProjectDir(session)
+		if err != nil {
+			if errors.Is(err, tmux.ErrSessionNotFound) {
+				writeError(w, http.StatusNotFound, "session not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		fs := &fileserver.FileServer{RootDir: cwd}
+
+		path := r.URL.Query().Get("path")
+		if path == "" {
+			writeError(w, http.StatusBadRequest, "path parameter is required")
+			return
+		}
+
+		var req putFileRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		content := []byte(req.Content)
+		if err := fs.Write(path, content); err != nil {
+			writeFilesError(w, err, path)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, putFileResponse{
+			Path: path,
+			Size: len(content),
+		})
+	})
+}
+
 // writeFilesError はファイル操作のエラーを適切な HTTP ステータスコードで返す。
 func writeFilesError(w http.ResponseWriter, err error, path string) {
 	// パストラバーサル系エラー
@@ -108,6 +162,18 @@ func writeFilesError(w http.ResponseWriter, err error, path string) {
 	// ファイル/ディレクトリが見つからない
 	if errors.Is(err, os.ErrNotExist) {
 		writeError(w, http.StatusNotFound, "not found: "+path)
+		return
+	}
+
+	// ディレクトリへの書き込み
+	if errors.Is(err, fileserver.ErrIsDirectory) {
+		writeError(w, http.StatusBadRequest, "is a directory: "+path)
+		return
+	}
+
+	// ファイルサイズ超過
+	if errors.Is(err, fileserver.ErrFileTooLarge) {
+		writeError(w, http.StatusRequestEntityTooLarge, "file too large: "+path)
 		return
 	}
 

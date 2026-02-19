@@ -87,6 +87,15 @@ export function getPreviewType(ext, name) {
 }
 
 /**
+ * Check if a preview type supports editing.
+ * @param {string} previewType
+ * @returns {boolean}
+ */
+function isEditableType(previewType) {
+  return previewType === 'markdown' || previewType === 'code' || previewType === 'plaintext';
+}
+
+/**
  * Get the highlight.js language name for a given file extension.
  * @param {string} ext - File extension (e.g., '.go')
  * @returns {string} Language name for highlight.js
@@ -146,6 +155,7 @@ function escapeHTML(str) {
  * - Images displayed inline via raw API URL
  * - PDFs via iframe or download link
  * - Unknown files with "preview not available" message
+ * - Edit mode for text files (markdown, code, plaintext)
  */
 export class FilePreview {
   /**
@@ -157,6 +167,7 @@ export class FilePreview {
    * @param {function(): void} [options.onBack] - Callback when back button is pressed
    * @param {function(string, string): string} [options.getRawURL] - Function to get raw file URL (session, path) => url
    * @param {function(string, string): Promise<Object>} [options.fetchFile] - Function to fetch file content (session, path) => Promise
+   * @param {function(string, string, string): Promise<Object>} [options.saveFile] - Function to save file content (session, path, content) => Promise
    */
   constructor(container, options) {
     this._container = container;
@@ -166,7 +177,23 @@ export class FilePreview {
     this._onBack = options.onBack || null;
     this._getRawURL = options.getRawURL || null;
     this._fetchFile = options.fetchFile || null;
+    this._saveFile = options.saveFile || null;
     this._disposed = false;
+
+    // Edit mode state
+    this._editMode = false;
+    this._dirty = false;
+    this._originalContent = '';
+    this._isEditable = false;
+    this._isTruncated = false;
+    this._previewType = null;
+
+    // DOM references for edit mode
+    this._toggleEl = null;
+    this._textareaEl = null;
+    this._saveBarEl = null;
+    this._saveBtnEl = null;
+    this._saveStatusEl = null;
 
     this._render();
     this._loadContent();
@@ -190,9 +217,7 @@ export class FilePreview {
     backBtn.className = 'fp-back-btn';
     backBtn.textContent = '\u2190';
     backBtn.setAttribute('aria-label', 'Back to file list');
-    backBtn.addEventListener('click', () => {
-      if (this._onBack) this._onBack();
-    });
+    backBtn.addEventListener('click', () => this._handleBack());
     header.appendChild(backBtn);
 
     const fileInfo = document.createElement('div');
@@ -209,6 +234,10 @@ export class FilePreview {
     fileInfo.appendChild(fileSize);
 
     header.appendChild(fileInfo);
+
+    // Toggle switch placeholder (will be shown after content loads if editable)
+    this._headerEl = header;
+
     wrapper.appendChild(header);
 
     // Content area
@@ -227,12 +256,250 @@ export class FilePreview {
   }
 
   /**
+   * Handle back button press. Shows confirmation dialog if dirty.
+   */
+  _handleBack() {
+    if (this._dirty) {
+      this._showUnsavedDialog();
+      return;
+    }
+    if (this._onBack) this._onBack();
+  }
+
+  /**
+   * Create and append the edit toggle switch to the header.
+   */
+  _addEditToggle() {
+    const toggle = document.createElement('label');
+    toggle.className = 'fp-edit-toggle';
+    toggle.setAttribute('aria-label', 'Toggle edit mode');
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'fp-edit-toggle-input';
+    checkbox.checked = false;
+    checkbox.addEventListener('change', () => {
+      this._setEditMode(checkbox.checked);
+    });
+
+    const slider = document.createElement('span');
+    slider.className = 'fp-edit-toggle-slider';
+
+    const label = document.createElement('span');
+    label.className = 'fp-edit-toggle-label';
+    label.textContent = 'Edit';
+
+    toggle.appendChild(checkbox);
+    toggle.appendChild(slider);
+    toggle.appendChild(label);
+
+    this._toggleEl = toggle;
+    this._headerEl.appendChild(toggle);
+  }
+
+  /**
+   * Switch between preview and edit mode.
+   * @param {boolean} editMode
+   */
+  _setEditMode(editMode) {
+    if (editMode === this._editMode) return;
+    this._editMode = editMode;
+
+    if (editMode) {
+      this._renderEditMode();
+    } else {
+      // Switch back to preview - re-render the content
+      this._renderPreviewContent();
+    }
+  }
+
+  /**
+   * Render the edit mode textarea and save bar.
+   */
+  _renderEditMode() {
+    this._contentEl.innerHTML = '';
+    this._contentEl.classList.add('fp-content--edit');
+
+    const textarea = document.createElement('textarea');
+    textarea.className = 'fp-edit-textarea';
+    textarea.value = this._dirty ? (this._textareaEl ? this._textareaEl.value : this._originalContent) : this._originalContent;
+    textarea.spellcheck = false;
+    textarea.addEventListener('input', () => {
+      const isDirty = textarea.value !== this._originalContent;
+      this._dirty = isDirty;
+      this._updateSaveBar();
+    });
+    this._textareaEl = textarea;
+    this._contentEl.appendChild(textarea);
+
+    // Save bar
+    const saveBar = document.createElement('div');
+    saveBar.className = 'fp-edit-save-bar';
+
+    const saveStatus = document.createElement('span');
+    saveStatus.className = 'fp-edit-save-status';
+    this._saveStatusEl = saveStatus;
+    saveBar.appendChild(saveStatus);
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'fp-edit-save-btn';
+    saveBtn.textContent = 'Save';
+    saveBtn.disabled = !this._dirty;
+    saveBtn.addEventListener('click', () => this._handleSave());
+    this._saveBtnEl = saveBtn;
+    saveBar.appendChild(saveBtn);
+
+    this._saveBarEl = saveBar;
+    this._contentEl.appendChild(saveBar);
+    this._updateSaveBar();
+  }
+
+  /**
+   * Re-render the preview content from original (or saved) content.
+   */
+  _renderPreviewContent() {
+    this._contentEl.classList.remove('fp-content--edit');
+    const ext = (this._entry.extension || '').toLowerCase();
+
+    if (this._previewType === 'markdown') {
+      this._renderMarkdown(this._originalContent, this._isTruncated);
+    } else if (this._previewType === 'code') {
+      this._renderCode(this._originalContent, ext, this._isTruncated);
+    } else {
+      this._renderPlaintext(this._originalContent, this._isTruncated);
+    }
+  }
+
+  /**
+   * Update the save bar state.
+   */
+  _updateSaveBar() {
+    if (!this._saveBtnEl) return;
+    this._saveBtnEl.disabled = !this._dirty;
+    if (this._saveStatusEl) {
+      this._saveStatusEl.textContent = this._dirty ? 'Unsaved changes' : '';
+    }
+  }
+
+  /**
+   * Handle the save button click.
+   */
+  async _handleSave() {
+    if (!this._saveFile || !this._textareaEl) return;
+
+    const content = this._textareaEl.value;
+    this._saveBtnEl.disabled = true;
+    this._saveBtnEl.textContent = 'Saving...';
+    if (this._saveStatusEl) {
+      this._saveStatusEl.textContent = '';
+    }
+
+    try {
+      await this._saveFile(this._session, this._path, content);
+      this._originalContent = content;
+      this._dirty = false;
+      this._saveBtnEl.textContent = 'Save';
+      this._updateSaveBar();
+      if (this._saveStatusEl) {
+        this._saveStatusEl.textContent = 'Saved';
+        this._saveStatusEl.classList.add('fp-edit-save-status--success');
+        setTimeout(() => {
+          if (this._saveStatusEl) {
+            this._saveStatusEl.textContent = '';
+            this._saveStatusEl.classList.remove('fp-edit-save-status--success');
+          }
+        }, 2000);
+      }
+    } catch (err) {
+      console.error('Failed to save file:', err);
+      this._saveBtnEl.textContent = 'Save';
+      this._saveBtnEl.disabled = false;
+      if (this._saveStatusEl) {
+        this._saveStatusEl.textContent = `Save failed: ${err.message}`;
+        this._saveStatusEl.classList.add('fp-edit-save-status--error');
+        setTimeout(() => {
+          if (this._saveStatusEl) {
+            this._saveStatusEl.classList.remove('fp-edit-save-status--error');
+          }
+        }, 3000);
+      }
+    }
+  }
+
+  /**
+   * Show the unsaved changes confirmation dialog.
+   */
+  _showUnsavedDialog() {
+    const overlay = document.createElement('div');
+    overlay.className = 'fp-dialog-overlay';
+
+    const dialog = document.createElement('div');
+    dialog.className = 'fp-dialog';
+
+    const msg = document.createElement('div');
+    msg.className = 'fp-dialog-msg';
+    msg.textContent = 'You have unsaved changes. What would you like to do?';
+    dialog.appendChild(msg);
+
+    const buttons = document.createElement('div');
+    buttons.className = 'fp-dialog-buttons';
+
+    const discardBtn = document.createElement('button');
+    discardBtn.className = 'fp-dialog-btn fp-dialog-btn--discard';
+    discardBtn.textContent = 'Discard';
+    discardBtn.addEventListener('click', () => {
+      overlay.remove();
+      this._dirty = false;
+      if (this._onBack) this._onBack();
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'fp-dialog-btn fp-dialog-btn--cancel';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => {
+      overlay.remove();
+    });
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'fp-dialog-btn fp-dialog-btn--save';
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', async () => {
+      if (!this._saveFile || !this._textareaEl) {
+        overlay.remove();
+        return;
+      }
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+      try {
+        await this._saveFile(this._session, this._path, this._textareaEl.value);
+        this._dirty = false;
+        overlay.remove();
+        if (this._onBack) this._onBack();
+      } catch (err) {
+        console.error('Failed to save before navigating:', err);
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save';
+        msg.textContent = `Save failed: ${err.message}. Discard changes or try again.`;
+      }
+    });
+
+    buttons.appendChild(discardBtn);
+    buttons.appendChild(cancelBtn);
+    buttons.appendChild(saveBtn);
+    dialog.appendChild(buttons);
+    overlay.appendChild(dialog);
+
+    this._wrapper.appendChild(overlay);
+  }
+
+  /**
    * Load and display the file content.
    */
   async _loadContent() {
     const ext = (this._entry.extension || '').toLowerCase();
     const name = this._entry.name || '';
     const previewType = getPreviewType(ext, name);
+    this._previewType = previewType;
 
     try {
       switch (previewType) {
@@ -251,12 +518,23 @@ export class FilePreview {
             this._renderError('Failed to load file content');
             return;
           }
+
+          // Store content for edit mode
+          this._originalContent = data.content || '';
+          this._isTruncated = !!data.truncated;
+          this._isEditable = isEditableType(previewType) && !data.truncated && !!this._saveFile;
+
           if (previewType === 'markdown') {
             this._renderMarkdown(data.content || '', data.truncated);
           } else if (previewType === 'code') {
             this._renderCode(data.content || '', ext, data.truncated);
           } else {
             this._renderPlaintext(data.content || '', data.truncated);
+          }
+
+          // Add edit toggle if editable
+          if (this._isEditable) {
+            this._addEditToggle();
           }
           break;
         }
@@ -578,5 +856,11 @@ export class FilePreview {
     this._container.innerHTML = '';
     this._wrapper = null;
     this._contentEl = null;
+    this._headerEl = null;
+    this._toggleEl = null;
+    this._textareaEl = null;
+    this._saveBarEl = null;
+    this._saveBtnEl = null;
+    this._saveStatusEl = null;
   }
 }

@@ -416,10 +416,6 @@ export class GitBrowser {
     if (this._selectedCommit) {
       // コミットが選択されている場合
       const entry = this._log.find(e => e.hash === this._selectedCommit);
-      header.textContent = entry
-        ? `${entry.hash} - ${entry.subject}`
-        : this._selectedCommit;
-      header.classList.add('gb-file-header--commit');
 
       // 戻るボタン
       const backBtn = document.createElement('button');
@@ -433,11 +429,33 @@ export class GitBrowser {
         this._renderMain();
         this._pushHistory(true);
       });
-      header.prepend(backBtn);
+      header.appendChild(backBtn);
+
+      // タイトル
+      const title = document.createElement('span');
+      title.className = 'gb-file-header-title gb-file-header-title--commit';
+      title.textContent = entry
+        ? `${entry.hash} - ${entry.subject}`
+        : this._selectedCommit;
+      header.appendChild(title);
     } else {
       const fileCount = this._status ? this._status.files.length : 0;
-      header.textContent = `Uncommitted Changes (${fileCount})`;
+      const title = document.createElement('span');
+      title.className = 'gb-file-header-title';
+      title.textContent = `Uncommitted Changes (${fileCount})`;
+      header.appendChild(title);
     }
+
+    // リロードボタン（右端）
+    const reloadBtn = document.createElement('button');
+    reloadBtn.className = 'gb-reload-btn';
+    reloadBtn.setAttribute('aria-label', 'Reload');
+    reloadBtn.textContent = '\u21BB'; // ↻
+    reloadBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.refresh();
+    });
+    header.appendChild(reloadBtn);
 
     container.appendChild(header);
 
@@ -495,6 +513,9 @@ export class GitBrowser {
   _renderLogSection(container) {
     container.innerHTML = '';
 
+    // 未コミット変更エントリ（常に先頭に表示）
+    container.appendChild(this._createUncommittedLogEntry());
+
     if (this._log.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'gb-empty';
@@ -506,6 +527,48 @@ export class GitBrowser {
     for (const entry of this._log) {
       container.appendChild(this._createLogEntry(entry));
     }
+  }
+
+  /**
+   * ログ一覧の先頭に表示する未コミット変更エントリを作成する。
+   * @returns {HTMLElement}
+   */
+  _createUncommittedLogEntry() {
+    const el = document.createElement('div');
+    el.className = 'gb-log-entry gb-log-entry--uncommitted';
+    if (this._selectedCommit === null) {
+      el.classList.add('gb-log-entry--selected');
+    }
+
+    const icon = document.createElement('span');
+    icon.className = 'gb-log-uncommitted-icon';
+    icon.textContent = '\u25CF'; // ●
+
+    const subject = document.createElement('span');
+    subject.className = 'gb-log-subject';
+    subject.textContent = 'Uncommitted Changes';
+
+    el.appendChild(icon);
+    el.appendChild(subject);
+
+    const fileCount = this._status ? this._status.files.length : 0;
+    if (fileCount > 0) {
+      const badge = document.createElement('span');
+      badge.className = 'gb-log-uncommitted-badge';
+      badge.textContent = fileCount;
+      el.appendChild(badge);
+    }
+
+    el.addEventListener('click', () => {
+      if (this._selectedCommit !== null) {
+        this._selectedCommit = null;
+        this._commitFiles = null;
+        this._renderMain();
+        this._pushHistory(true);
+      }
+    });
+
+    return el;
   }
 
   /**

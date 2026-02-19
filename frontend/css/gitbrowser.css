@@ -86,14 +86,48 @@
   flex-shrink: 0;
   gap: 8px;
   overflow: hidden;
+}
+
+.gb-file-header-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-.gb-file-header--commit {
+.gb-file-header-title--commit {
   color: #7ec8e3;
   font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
   font-size: calc(var(--gb-font-size, 14px) - 1px);
+}
+
+/* Reload button */
+.gb-reload-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  background: none;
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  color: #7ec8e3;
+  font-size: 18px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, transform 0.3s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.gb-reload-btn:hover {
+  background: rgba(126, 200, 227, 0.15);
+}
+
+.gb-reload-btn:active {
+  background: rgba(126, 200, 227, 0.25);
+  transform: rotate(180deg);
 }
 
 .gb-file-header-back {
@@ -290,6 +324,34 @@
   flex-shrink: 0;
   min-width: 32px;
   text-align: right;
+}
+
+/* Uncommitted changes log entry */
+.gb-log-entry--uncommitted {
+  border-bottom: 2px solid rgba(255, 183, 77, 0.2);
+}
+
+.gb-log-uncommitted-icon {
+  font-size: 12px;
+  color: #ffb74d;
+  flex-shrink: 0;
+  min-width: 16px;
+  text-align: center;
+}
+
+.gb-log-uncommitted-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #1a1a3a;
+  background: #ffb74d;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  flex-shrink: 0;
 }
 
 /* Branch Bar */
