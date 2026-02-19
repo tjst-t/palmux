@@ -11,12 +11,12 @@ import (
 )
 
 // handleGetCwd は GET /api/sessions/{session}/cwd のハンドラ。
-// セッションのアクティブ pane のカレントパスを返す。
+// セッションの ghq プロジェクトディレクトリ（フォールバック: アクティブ pane のカレントパス）を返す。
 func (s *Server) handleGetCwd() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		session := r.PathValue("session")
 
-		cwd, err := s.tmux.GetSessionCwd(session)
+		cwd, err := s.tmux.GetSessionProjectDir(session)
 		if err != nil {
 			if errors.Is(err, tmux.ErrSessionNotFound) {
 				writeError(w, http.StatusNotFound, "session not found")
@@ -39,7 +39,7 @@ func (s *Server) handleGetFiles() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		session := r.PathValue("session")
 
-		cwd, err := s.tmux.GetSessionCwd(session)
+		cwd, err := s.tmux.GetSessionProjectDir(session)
 		if err != nil {
 			if errors.Is(err, tmux.ErrSessionNotFound) {
 				writeError(w, http.StatusNotFound, "session not found")

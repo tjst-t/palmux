@@ -30,6 +30,8 @@ type configurableMock struct {
 	renameWinErr error
 	cwd          string
 	cwdErr       error
+	projectDir    string
+	projectDirErr error
 
 	// 呼び出し記録
 	calledListSessions bool
@@ -46,7 +48,8 @@ type configurableMock struct {
 		index   int
 		name    string
 	}
-	calledGetCwd string
+	calledGetCwd        string
+	calledGetProjectDir string
 	ghqRepos    []tmux.GhqRepo
 	ghqReposErr error
 	calledListGhqRepos bool
@@ -100,6 +103,16 @@ func (m *configurableMock) Attach(session string, windowIndex int) (*os.File, *e
 
 func (m *configurableMock) GetSessionCwd(session string) (string, error) {
 	m.calledGetCwd = session
+	return m.cwd, m.cwdErr
+}
+
+func (m *configurableMock) GetSessionProjectDir(session string) (string, error) {
+	m.calledGetProjectDir = session
+	// projectDir が設定されている場合はそちらを返す。
+	// 未設定の場合は cwd にフォールバック（既存テストとの互換性）。
+	if m.projectDir != "" || m.projectDirErr != nil {
+		return m.projectDir, m.projectDirErr
+	}
 	return m.cwd, m.cwdErr
 }
 

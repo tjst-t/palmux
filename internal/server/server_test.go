@@ -33,6 +33,9 @@ func (m *mockTmuxManager) Attach(session string, windowIndex int) (*os.File, *ex
 	return nil, nil, nil
 }
 func (m *mockTmuxManager) GetSessionCwd(session string) (string, error) { return "", nil }
+func (m *mockTmuxManager) GetSessionProjectDir(session string) (string, error) {
+	return "", nil
+}
 func (m *mockTmuxManager) ListGhqRepos() ([]tmux.GhqRepo, error) { return nil, nil }
 
 func TestNormalizeBasePath(t *testing.T) {

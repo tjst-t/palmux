@@ -445,8 +445,8 @@ func TestHandleGitStatus_WithBasePath(t *testing.T) {
 		t.Errorf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 
-	if tmuxMock.calledGetCwd != "main" {
-		t.Errorf("GetSessionCwd called with %q, want %q", tmuxMock.calledGetCwd, "main")
+	if tmuxMock.calledGetProjectDir != "main" {
+		t.Errorf("GetSessionProjectDir called with %q, want %q", tmuxMock.calledGetProjectDir, "main")
 	}
 }
 
