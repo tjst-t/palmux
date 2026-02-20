@@ -121,6 +121,7 @@ func (m *Manager) KillSession(name string) error {
 // NewWindow は指定セッションに新しいウィンドウを作成し、作成されたウィンドウ情報を返す。
 // name が空の場合は -n フラグを省略し、tmux のデフォルト名を使用する。
 // command が空でない場合はウィンドウ内で指定コマンドを実行する。
+// コマンドはログインシェル経由で実行し、PATH 等の環境変数を確実に設定する。
 func (m *Manager) NewWindow(session, name, command string) (*Window, error) {
 	args := []string{"new-window", "-t", session}
 	if name != "" {
@@ -132,7 +133,12 @@ func (m *Manager) NewWindow(session, name, command string) (*Window, error) {
 	}
 	args = append(args, "-P", "-F", windowFormat)
 	if command != "" {
-		args = append(args, command)
+		// tmux new-window は $SHELL -c "command" で実行するが、非ログインシェルのため
+		// ~/.bash_profile 等で設定される PATH が効かない。
+		// ログインシェルでラップすることで claude 等のコマンドが確実に見つかるようにする。
+		escaped := strings.ReplaceAll(command, "'", `'"'"'`)
+		wrapped := fmt.Sprintf(`exec "$SHELL" -lc '%s'`, escaped)
+		args = append(args, wrapped)
 	}
 
 	out, err := m.Exec.Run(args...)
