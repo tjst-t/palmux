@@ -26,6 +26,7 @@ export class Drawer {
    * @param {function(string, number): void} [options.onCreateWindow] - ウィンドウ作成後のコールバック (session, windowIndex)
    * @param {function(): void} [options.onDeleteWindow] - ウィンドウ削除後のコールバック
    * @param {function(string, number, string): void} [options.onRenameWindow] - ウィンドウリネーム後のコールバック (session, windowIndex, newName)
+   * @param {function(): void} [options.onClose] - Drawer が閉じた後のコールバック
    */
   constructor(options) {
     this._onSelectWindow = options.onSelectWindow;
@@ -35,6 +36,7 @@ export class Drawer {
     this._onCreateWindow = options.onCreateWindow || null;
     this._onDeleteWindow = options.onDeleteWindow || null;
     this._onRenameWindow = options.onRenameWindow || null;
+    this._onClose = options.onClose || null;
     this._visible = false;
     this._currentSession = null;
     this._currentWindowIndex = null;
@@ -141,6 +143,9 @@ export class Drawer {
     this._el.classList.remove('drawer--open');
     this._overlay.classList.remove('drawer-overlay--visible');
     this._clearLongPressTimer();
+    if (this._onClose) {
+      this._onClose();
+    }
   }
 
   /**
