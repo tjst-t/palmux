@@ -956,6 +956,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
     },
+    onClose: () => {
+      // Drawer が閉じた後、ターミナルにフォーカスを戻す
+      if (terminal && currentViewMode === 'terminal') {
+        terminal.focus();
+      }
+    },
   });
 
   // drawer ボタンのイベント
