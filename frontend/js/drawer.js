@@ -1294,8 +1294,8 @@ export class Drawer {
     menu.appendChild(title);
 
     const options = [
-      { label: 'claude · new session', command: 'claude' },
-      { label: 'claude · resume', command: 'claude --continue' },
+      { label: 'claude · new session', command: 'claude', isClaude: true },
+      { label: 'claude · resume', command: 'claude --continue', isClaude: true },
       { label: 'shell', command: '' },
     ];
 
@@ -1305,7 +1305,11 @@ export class Drawer {
       btn.textContent = opt.label;
       btn.addEventListener('click', () => {
         closeDialog();
-        this._handleCreateWindow(sessionName, opt.command);
+        if (opt.isClaude) {
+          this._showModelSelectDialog(sessionName, opt.command);
+        } else {
+          this._handleCreateWindow(sessionName, opt.command);
+        }
       });
       menu.appendChild(btn);
     }
@@ -1325,6 +1329,67 @@ export class Drawer {
     };
 
     // オーバーレイ外タップでキャンセル
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        closeDialog();
+      }
+    });
+  }
+
+  /**
+   * Claude モデル選択ダイアログを表示する。
+   * @param {string} sessionName - セッション名
+   * @param {string} baseCommand - ベースコマンド（'claude' or 'claude --continue'）
+   */
+  _showModelSelectDialog(sessionName, baseCommand) {
+    const existing = document.querySelector('.drawer-context-menu-overlay');
+    if (existing) {
+      existing.remove();
+    }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'drawer-context-menu-overlay';
+
+    const menu = document.createElement('div');
+    menu.className = 'drawer-context-menu';
+
+    const title = document.createElement('div');
+    title.className = 'drawer-context-menu-title';
+    title.textContent = 'Select Model';
+    menu.appendChild(title);
+
+    const models = [
+      { label: 'opus', flag: 'opus' },
+      { label: 'sonnet', flag: 'sonnet' },
+      { label: 'haiku', flag: 'haiku' },
+    ];
+
+    for (const model of models) {
+      const btn = document.createElement('button');
+      btn.className = 'drawer-context-menu-item';
+      btn.textContent = model.label;
+      btn.addEventListener('click', () => {
+        closeDialog();
+        const command = `${baseCommand} --model ${model.flag}`;
+        this._handleCreateWindow(sessionName, command);
+      });
+      menu.appendChild(btn);
+    }
+
+    overlay.appendChild(menu);
+    document.body.appendChild(overlay);
+
+    requestAnimationFrame(() => {
+      overlay.classList.add('drawer-context-menu-overlay--visible');
+    });
+
+    const closeDialog = () => {
+      overlay.classList.remove('drawer-context-menu-overlay--visible');
+      setTimeout(() => {
+        overlay.remove();
+      }, 200);
+    };
+
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) {
         closeDialog();
