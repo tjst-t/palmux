@@ -177,6 +177,64 @@ export class PalmuxTerminal {
   }
 
   /**
+   * WebSocket のみ再接続する（ターミナルは保持）。
+   * 自動再接続時のちらつきを防止する。
+   * ターミナルが未初期化の場合はフルコネクトにフォールバック。
+   * @param {string} wsUrl - WebSocket URL（トークン付き）
+   * @param {function} [onDisconnect] - 切断時のコールバック
+   */
+  reconnect(wsUrl, onDisconnect) {
+    if (!this._term) {
+      this.connect(wsUrl, onDisconnect);
+      return;
+    }
+
+    // 古い WebSocket をクリーンアップ（onclose 発火を防止）
+    if (this._ws) {
+      this._ws.onopen = null;
+      this._ws.onmessage = null;
+      this._ws.onclose = null;
+      this._ws.onerror = null;
+      this._ws.close();
+      this._ws = null;
+    }
+
+    this._onDisconnect = onDisconnect || null;
+
+    this._ws = new WebSocket(wsUrl);
+
+    this._ws.onopen = () => {
+      this._sendResize();
+      if (this._onConnect) {
+        this._onConnect();
+      }
+    };
+
+    this._ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'output' && msg.data) {
+          this._term.write(msg.data);
+        } else if (msg.type === 'ping') {
+          this._ws.send(JSON.stringify({ type: 'pong' }));
+        }
+      } catch (e) {
+        console.error('Failed to parse WebSocket message:', e);
+      }
+    };
+
+    this._ws.onclose = () => {
+      if (this._onDisconnect) {
+        this._onDisconnect();
+      }
+    };
+
+    this._ws.onerror = (event) => {
+      console.error('WebSocket error:', event);
+    };
+  }
+
+  /**
    * WebSocket 接続を切断し、リソースをクリーンアップする。
    */
   disconnect() {
