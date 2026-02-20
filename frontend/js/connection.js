@@ -25,9 +25,14 @@ export class ConnectionManager {
     this._getWSUrl = options.getWSUrl;
     this._onStateChange = options.onStateChange;
     this._destroyed = false;
+    /** @type {boolean} 初回接続済みかどうか（再接続時はターミナルを保持） */
+    this._hasConnected = false;
 
     this._onOnlineBound = () => this._onOnline();
     window.addEventListener('online', this._onOnlineBound);
+
+    this._onVisibilityChangeBound = () => this._onVisibilityChange();
+    document.addEventListener('visibilitychange', this._onVisibilityChangeBound);
   }
 
   /**
@@ -48,7 +53,14 @@ export class ConnectionManager {
     this._setState('connecting');
     const wsUrl = this._getWSUrl();
 
-    this._terminal.connect(wsUrl, () => this._onDisconnect());
+    if (this._hasConnected) {
+      // 再接続: ターミナルは保持して WebSocket のみ張り直す
+      this._terminal.reconnect(wsUrl, () => this._onDisconnect());
+    } else {
+      // 初回接続: ターミナルもフル初期化
+      this._terminal.connect(wsUrl, () => this._onDisconnect());
+      this._hasConnected = true;
+    }
 
     // terminal の onConnect コールバックを設定
     this._terminal.setOnConnect(() => {
@@ -77,8 +89,10 @@ export class ConnectionManager {
     this._setState('disconnected');
     this._clearRetryTimer();
     this._retryCount = 0;
+    this._hasConnected = false;
     this._terminal.disconnect();
     window.removeEventListener('online', this._onOnlineBound);
+    document.removeEventListener('visibilitychange', this._onVisibilityChangeBound);
   }
 
   /**
@@ -129,6 +143,22 @@ export class ConnectionManager {
    */
   _onOnline() {
     if (this._destroyed) return;
+
+    if (this._state === 'connecting') {
+      this._clearRetryTimer();
+      this._retryCount = 0;
+      this.connect();
+    }
+  }
+
+  /**
+   * ページが再表示された時の処理（スマホのスリープ復帰など）。
+   * connecting 状態の場合、バックオフをリセットして即座に再接続を試行する。
+   * @private
+   */
+  _onVisibilityChange() {
+    if (this._destroyed) return;
+    if (document.visibilityState !== 'visible') return;
 
     if (this._state === 'connecting') {
       this._clearRetryTimer();
