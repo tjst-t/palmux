@@ -75,7 +75,7 @@ export class IMEInput {
     });
 
     this._sendBtn.addEventListener('click', () => {
-      this._send(true);
+      this._send(false);
     });
 
     // 修飾キー有効時の即時送信
