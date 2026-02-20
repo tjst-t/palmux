@@ -115,6 +115,7 @@ func TestHandleCreateWindow(t *testing.T) {
 		newWinErr  error
 		wantStatus int
 		wantName   string // NewWindow に渡される name
+		wantCmd    string // NewWindow に渡される command
 	}{
 		{
 			name:       "名前付きウィンドウを作成する",
@@ -147,6 +148,51 @@ func TestHandleCreateWindow(t *testing.T) {
 			newWindow:  &tmux.Window{Index: 2, Name: "bash", Active: true},
 			wantStatus: http.StatusCreated,
 			wantName:   "",
+		},
+		{
+			name:       "コマンド付きウィンドウを作成する（claude）",
+			session:    "main",
+			body:       `{"command": "claude"}`,
+			newWindow:  &tmux.Window{Index: 3, Name: "claude", Active: true},
+			wantStatus: http.StatusCreated,
+			wantName:   "",
+			wantCmd:    "claude",
+		},
+		{
+			name:       "コマンド付きウィンドウを作成する（claude --continue）",
+			session:    "main",
+			body:       `{"command": "claude --continue"}`,
+			newWindow:  &tmux.Window{Index: 4, Name: "claude", Active: true},
+			wantStatus: http.StatusCreated,
+			wantName:   "",
+			wantCmd:    "claude --continue",
+		},
+		{
+			name:       "コマンド付きウィンドウを作成する（claude --model opus）",
+			session:    "main",
+			body:       `{"command": "claude --model opus"}`,
+			newWindow:  &tmux.Window{Index: 5, Name: "claude", Active: true},
+			wantStatus: http.StatusCreated,
+			wantName:   "",
+			wantCmd:    "claude --model opus",
+		},
+		{
+			name:       "コマンド付きウィンドウを作成する（claude --continue --model sonnet）",
+			session:    "main",
+			body:       `{"command": "claude --continue --model sonnet"}`,
+			newWindow:  &tmux.Window{Index: 6, Name: "claude", Active: true},
+			wantStatus: http.StatusCreated,
+			wantName:   "",
+			wantCmd:    "claude --continue --model sonnet",
+		},
+		{
+			name:       "名前とコマンドの両方を指定",
+			session:    "main",
+			body:       `{"name": "ai", "command": "claude --model haiku"}`,
+			newWindow:  &tmux.Window{Index: 7, Name: "ai", Active: true},
+			wantStatus: http.StatusCreated,
+			wantName:   "ai",
+			wantCmd:    "claude --model haiku",
 		},
 		{
 			name:       "不正JSON: 400を返す",
@@ -196,6 +242,9 @@ func TestHandleCreateWindow(t *testing.T) {
 				}
 				if mock.calledNewWindow.name != tt.wantName {
 					t.Errorf("NewWindow name = %q, want %q", mock.calledNewWindow.name, tt.wantName)
+				}
+				if mock.calledNewWindow.command != tt.wantCmd {
+					t.Errorf("NewWindow command = %q, want %q", mock.calledNewWindow.command, tt.wantCmd)
 				}
 			}
 		})
