@@ -29,6 +29,7 @@ export class Drawer {
    * @param {function(): void} [options.onClose] - Drawer が閉じた後のコールバック
    */
   constructor(options) {
+    this._claudePath = options.claudePath || 'claude';
     this._onSelectWindow = options.onSelectWindow;
     this._onSelectSession = options.onSelectSession;
     this._onCreateSession = options.onCreateSession || null;
@@ -1589,8 +1590,8 @@ export class Drawer {
     menu.appendChild(title);
 
     const options = [
-      { label: 'claude · new session', command: 'claude', isClaude: true },
-      { label: 'claude · resume', command: 'claude --continue', isClaude: true },
+      { label: 'claude · new session', command: this._claudePath, isClaude: true },
+      { label: 'claude · resume', command: `${this._claudePath} --continue`, isClaude: true },
       { label: 'shell', command: '' },
     ];
 

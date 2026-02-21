@@ -61,6 +61,9 @@ make build-arm     # Linux arm64
 
 # 同時接続数の上限を変更
 ./palmux --max-connections 10
+
+# Claude のコマンドパスを指定（cgroup ラッパー等）
+./palmux --claude-path /usr/local/bin/claude-cgroup
 ```
 
 起動すると認証トークンが標準出力に表示される。ブラウザで `http://<host>:<port>` にアクセスし、セッション一覧からターミナルに接続する。
@@ -72,6 +75,7 @@ make build-arm     # Linux arm64
 | `--port` | `8080` | 待ち受けポート |
 | `--host` | `0.0.0.0` | 待ち受けアドレス |
 | `--tmux` | `tmux` | tmux バイナリのパス |
+| `--claude-path` | `claude` | Drawer から Claude 起動時に使うコマンドパス |
 | `--token` | (自動生成) | 認証トークン |
 | `--base-path` | `/` | ベースパス |
 | `--tls-cert` | (なし) | TLS 証明書ファイル |

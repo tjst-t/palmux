@@ -971,8 +971,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const toolbarToggleBtnEl = document.getElementById('toolbar-toggle-btn');
   const drawerBtnEl = document.getElementById('drawer-btn');
 
+  // claude-path meta タグからコマンドパスを読み取る
+  const claudePathMeta = document.querySelector('meta[name="claude-path"]');
+  const claudePath = claudePathMeta ? (claudePathMeta.getAttribute('content') || 'claude') : 'claude';
+
   // Drawer 初期化
   drawer = new Drawer({
+    claudePath,
     onSelectWindow: (session, windowIndex) => {
       // 同一セッション内のウィンドウ切り替え
       switchWindow(session, windowIndex);

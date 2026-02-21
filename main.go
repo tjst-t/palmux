@@ -25,6 +25,7 @@ func main() {
 	port := flag.Int("port", 8080, "Listen port")
 	host := flag.String("host", "0.0.0.0", "Listen address")
 	tmuxBin := flag.String("tmux", "tmux", "tmux binary path")
+	claudePath := flag.String("claude-path", "claude", "claude command path or wrapper script")
 	tlsCert := flag.String("tls-cert", "", "TLS certificate file")
 	tlsKey := flag.String("tls-key", "", "TLS private key file")
 	token := flag.String("token", "", "Fixed auth token (auto-generated if empty)")
@@ -87,6 +88,7 @@ func main() {
 		Tmux:           mgr,
 		Token:          authToken,
 		BasePath:       normalizedBasePath,
+		ClaudePath:     *claudePath,
 		Frontend:       frontFS,
 		MaxConnections: *maxConnections,
 		Version:        version,
