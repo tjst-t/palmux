@@ -9,7 +9,9 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/tjst-t/palmux/internal/server"
 	"github.com/tjst-t/palmux/internal/tmux"
@@ -92,8 +94,19 @@ func main() {
 
 	addr := fmt.Sprintf("%s:%d", *host, *port)
 
-	// Hook スクリプト用の env ファイルを書き出す
-	writeEnvFile(*port, authToken, normalizedBasePath)
+	// Hook スクリプト用の env ファイルを書き出す（ポート番号ごとに分離）
+	envPath := writeEnvFile(*port, authToken, normalizedBasePath)
+
+	// シグナルハンドラ: 終了時に env ファイルを削除
+	if envPath != "" {
+		go func() {
+			sigCh := make(chan os.Signal, 1)
+			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+			<-sigCh
+			os.Remove(envPath)
+			os.Exit(0)
+		}()
+	}
 
 	if *tlsCert != "" {
 		// TLS 証明書ファイルの存在チェック
@@ -116,26 +129,31 @@ func main() {
 	}
 }
 
-// writeEnvFile は ~/.config/palmux/env にサーバー情報を書き出す。
-// Claude Code の Hook スクリプトが source して利用する。
-func writeEnvFile(port int, token, basePath string) {
+// writeEnvFile は ~/.config/palmux/env.<port> にサーバー情報を書き出す。
+// ポート番号ごとにファイルを分離し、複数インスタンスの同時起動に対応する。
+// Claude Code の Hook スクリプトが全 env.* ファイルを source して利用する。
+// 書き出したファイルパスを返す（エラー時は空文字列）。
+func writeEnvFile(port int, token, basePath string) string {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		log.Printf("Warning: cannot determine home directory for env file: %v", err)
-		return
+		return ""
 	}
 
 	dir := filepath.Join(homeDir, ".config", "palmux")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		log.Printf("Warning: cannot create config directory %s: %v", dir, err)
-		return
+		return ""
 	}
 
-	envPath := filepath.Join(dir, "env")
+	envPath := filepath.Join(dir, fmt.Sprintf("env.%d", port))
 	content := fmt.Sprintf("export PALMUX_PORT=%d\nexport PALMUX_TOKEN=%s\nexport PALMUX_BASE_PATH=%s\n",
 		port, token, basePath)
 
 	if err := os.WriteFile(envPath, []byte(content), 0600); err != nil {
 		log.Printf("Warning: cannot write env file %s: %v", envPath, err)
+		return ""
 	}
+
+	return envPath
 }
