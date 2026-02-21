@@ -372,7 +372,7 @@ func TestManager_NewWindow(t *testing.T) {
 				Active: true,
 			},
 			wantErr:  false,
-			wantArgs: []string{"new-window", "-t", "main", "-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}", `exec "$SHELL" -lc 'claude; ret=$?; if [ $ret -ne 0 ]; then echo "[palmux] command exited ($ret). Press Enter to close."; read -r; fi'`},
+			wantArgs: []string{"new-window", "-t", "main", "-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}", `exec "$SHELL" -lc 'exec claude; echo "[palmux] command not found. Press Enter to close."; read -r'`},
 		},
 		{
 			name:    "正常系: claude --continue コマンド付きウィンドウを作成（ログインシェルでラップ）",
@@ -387,7 +387,7 @@ func TestManager_NewWindow(t *testing.T) {
 				Active: true,
 			},
 			wantErr:  false,
-			wantArgs: []string{"new-window", "-t", "main", "-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}", `exec "$SHELL" -lc 'claude --continue; ret=$?; if [ $ret -ne 0 ]; then echo "[palmux] command exited ($ret). Press Enter to close."; read -r; fi'`},
+			wantArgs: []string{"new-window", "-t", "main", "-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}", `exec "$SHELL" -lc 'exec claude --continue; echo "[palmux] command not found. Press Enter to close."; read -r'`},
 		},
 		{
 			name:    "正常系: claude --model opus コマンド付きウィンドウを作成（ログインシェルでラップ）",
@@ -402,7 +402,7 @@ func TestManager_NewWindow(t *testing.T) {
 				Active: true,
 			},
 			wantErr:  false,
-			wantArgs: []string{"new-window", "-t", "main", "-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}", `exec "$SHELL" -lc 'claude --model opus; ret=$?; if [ $ret -ne 0 ]; then echo "[palmux] command exited ($ret). Press Enter to close."; read -r; fi'`},
+			wantArgs: []string{"new-window", "-t", "main", "-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}", `exec "$SHELL" -lc 'exec claude --model opus; echo "[palmux] command not found. Press Enter to close."; read -r'`},
 		},
 		{
 			name:    "正常系: claude --continue --model sonnet コマンド付きウィンドウを作成（ログインシェルでラップ）",
@@ -417,7 +417,7 @@ func TestManager_NewWindow(t *testing.T) {
 				Active: true,
 			},
 			wantErr:  false,
-			wantArgs: []string{"new-window", "-t", "dev", "-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}", `exec "$SHELL" -lc 'claude --continue --model sonnet; ret=$?; if [ $ret -ne 0 ]; then echo "[palmux] command exited ($ret). Press Enter to close."; read -r; fi'`},
+			wantArgs: []string{"new-window", "-t", "dev", "-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}", `exec "$SHELL" -lc 'exec claude --continue --model sonnet; echo "[palmux] command not found. Press Enter to close."; read -r'`},
 		},
 		{
 			name:    "正常系: シングルクォートを含むコマンドのエスケープ",
@@ -432,7 +432,7 @@ func TestManager_NewWindow(t *testing.T) {
 				Active: true,
 			},
 			wantErr:  false,
-			wantArgs: []string{"new-window", "-t", "main", "-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}", `exec "$SHELL" -lc 'echo '"'"'hello world'"'"'; ret=$?; if [ $ret -ne 0 ]; then echo "[palmux] command exited ($ret). Press Enter to close."; read -r; fi'`},
+			wantArgs: []string{"new-window", "-t", "main", "-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}", `exec "$SHELL" -lc 'exec echo '"'"'hello world'"'"'; echo "[palmux] command not found. Press Enter to close."; read -r'`},
 		},
 		{
 			name:     "異常系: Executorがエラーを返す",
