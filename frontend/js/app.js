@@ -383,9 +383,6 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
   currentSession = sessionName;
   currentWindowIndex = windowIndex;
 
-  // 通知をクリア（そのウィンドウに通知があれば削除）
-  deleteNotification(sessionName, windowIndex).catch(() => {});
-
   // ブラウザ履歴を更新
   const hash = `#terminal/${encodeURIComponent(sessionName)}/${windowIndex}`;
   const state = { view: 'terminal', session: sessionName, window: windowIndex };
@@ -415,7 +412,14 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
     currentWindowIndex = window;
 
     // 通知をクリア（切替先ウィンドウに通知があれば削除）
-    deleteNotification(session, window).catch(() => {});
+    deleteNotification(session, window)
+      .then(() => listNotifications())
+      .then((notifications) => {
+        if (drawer && notifications) {
+          drawer.setNotifications(notifications);
+        }
+      })
+      .catch(() => {});
 
     // ヘッダータイトルを更新
     const headerTitleEl = document.getElementById('header-title');
@@ -507,7 +511,21 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
   // ConnectionManager を作成して接続を管理
   connectionManager = new ConnectionManager({
     getWSUrl: () => getWebSocketURL(currentSession, currentWindowIndex),
-    onStateChange: (state) => updateConnectionUI(state),
+    onStateChange: (state) => {
+      updateConnectionUI(state);
+      if (state === 'connected') {
+        // WebSocket 接続確立後に通知をクリアしてリストを再取得
+        // （connectToWindow 時点では WS 未接続のためブロードキャストを受け取れない）
+        deleteNotification(currentSession, currentWindowIndex)
+          .then(() => listNotifications())
+          .then((notifications) => {
+            if (drawer && notifications) {
+              drawer.setNotifications(notifications);
+            }
+          })
+          .catch(() => {});
+      }
+    },
     terminal: terminal,
   });
   connectionManager.connect();
