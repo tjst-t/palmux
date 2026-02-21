@@ -1158,6 +1158,18 @@ html, body {
   box-shadow: 0 4px 16px rgba(211, 47, 47, 0.3);
 }
 
+.drawer-toast--info {
+  background: #1976d2;
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(25, 118, 210, 0.3);
+}
+
+.drawer-toast--success {
+  background: #388e3c;
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(56, 142, 60, 0.3);
+}
+
 /* Context Menu for window operations */
 .drawer-context-menu-overlay {
   position: fixed;
