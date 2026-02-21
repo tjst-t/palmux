@@ -372,7 +372,7 @@ func TestManager_NewWindow(t *testing.T) {
 				Active: true,
 			},
 			wantErr:  false,
-			wantArgs: []string{"new-window", "-t", "main", "-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}", `exec "$SHELL" -lc 'claude'`},
+			wantArgs: []string{"new-window", "-t", "main", "-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}", `exec "$SHELL" -lc 'claude; ret=$?; if [ $ret -ne 0 ]; then echo "[palmux] command exited ($ret). Press Enter to close."; read -r; fi'`},
 		},
 		{
 			name:    "正常系: claude --continue コマンド付きウィンドウを作成（ログインシェルでラップ）",
@@ -387,7 +387,7 @@ func TestManager_NewWindow(t *testing.T) {
 				Active: true,
 			},
 			wantErr:  false,
-			wantArgs: []string{"new-window", "-t", "main", "-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}", `exec "$SHELL" -lc 'claude --continue'`},
+			wantArgs: []string{"new-window", "-t", "main", "-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}", `exec "$SHELL" -lc 'claude --continue; ret=$?; if [ $ret -ne 0 ]; then echo "[palmux] command exited ($ret). Press Enter to close."; read -r; fi'`},
 		},
 		{
 			name:    "正常系: claude --model opus コマンド付きウィンドウを作成（ログインシェルでラップ）",
@@ -402,7 +402,7 @@ func TestManager_NewWindow(t *testing.T) {
 				Active: true,
 			},
 			wantErr:  false,
-			wantArgs: []string{"new-window", "-t", "main", "-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}", `exec "$SHELL" -lc 'claude --model opus'`},
+			wantArgs: []string{"new-window", "-t", "main", "-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}", `exec "$SHELL" -lc 'claude --model opus; ret=$?; if [ $ret -ne 0 ]; then echo "[palmux] command exited ($ret). Press Enter to close."; read -r; fi'`},
 		},
 		{
 			name:    "正常系: claude --continue --model sonnet コマンド付きウィンドウを作成（ログインシェルでラップ）",
@@ -417,7 +417,7 @@ func TestManager_NewWindow(t *testing.T) {
 				Active: true,
 			},
 			wantErr:  false,
-			wantArgs: []string{"new-window", "-t", "dev", "-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}", `exec "$SHELL" -lc 'claude --continue --model sonnet'`},
+			wantArgs: []string{"new-window", "-t", "dev", "-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}", `exec "$SHELL" -lc 'claude --continue --model sonnet; ret=$?; if [ $ret -ne 0 ]; then echo "[palmux] command exited ($ret). Press Enter to close."; read -r; fi'`},
 		},
 		{
 			name:    "正常系: シングルクォートを含むコマンドのエスケープ",
@@ -432,7 +432,7 @@ func TestManager_NewWindow(t *testing.T) {
 				Active: true,
 			},
 			wantErr:  false,
-			wantArgs: []string{"new-window", "-t", "main", "-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}", `exec "$SHELL" -lc 'echo '"'"'hello world'"'"''`},
+			wantArgs: []string{"new-window", "-t", "main", "-P", "-F", "#{window_index}\t#{window_name}\t#{window_active}", `exec "$SHELL" -lc 'echo '"'"'hello world'"'"'; ret=$?; if [ $ret -ne 0 ]; then echo "[palmux] command exited ($ret). Press Enter to close."; read -r; fi'`},
 		},
 		{
 			name:     "異常系: Executorがエラーを返す",
@@ -1174,6 +1174,69 @@ func TestManager_ListGhqRepos(t *testing.T) {
 				if got[i].FullPath != tt.want[i].FullPath {
 					t.Errorf("repo[%d].FullPath = %q, want %q", i, got[i].FullPath, tt.want[i].FullPath)
 				}
+			}
+		})
+	}
+}
+
+func TestManager_GetClientSessionWindow(t *testing.T) {
+	tests := []struct {
+		name        string
+		output      []byte
+		err         error
+		wantSession string
+		wantWindow  int
+		wantErr     bool
+		wantArgs    []string
+	}{
+		{
+			name:        "正常系: セッション名とウィンドウインデックスを返す",
+			output:      []byte("main\t2\n"),
+			wantSession: "main",
+			wantWindow:  2,
+			wantArgs:    []string{"display-message", "-p", "-t", "/dev/pts/5", "#{session_name}\t#{window_index}"},
+		},
+		{
+			name:        "正常系: 別セッション",
+			output:      []byte("dev\t0\n"),
+			wantSession: "dev",
+			wantWindow:  0,
+			wantArgs:    []string{"display-message", "-p", "-t", "/dev/pts/5", "#{session_name}\t#{window_index}"},
+		},
+		{
+			name:     "エラー系: tmux エラー",
+			err:      fmt.Errorf("no client on /dev/pts/5"),
+			wantErr:  true,
+			wantArgs: []string{"display-message", "-p", "-t", "/dev/pts/5", "#{session_name}\t#{window_index}"},
+		},
+		{
+			name:     "エラー系: 不正な出力",
+			output:   []byte("onlyone\n"),
+			wantErr:  true,
+			wantArgs: []string{"display-message", "-p", "-t", "/dev/pts/5", "#{session_name}\t#{window_index}"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockExecutor{output: tt.output, err: tt.err}
+			m := &Manager{Exec: mock}
+
+			gotSession, gotWindow, err := m.GetClientSessionWindow("/dev/pts/5")
+
+			assertArgs(t, mock, tt.wantArgs)
+
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("GetClientSessionWindow() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil {
+				return
+			}
+			if gotSession != tt.wantSession {
+				t.Errorf("session = %q, want %q", gotSession, tt.wantSession)
+			}
+			if gotWindow != tt.wantWindow {
+				t.Errorf("window = %d, want %d", gotWindow, tt.wantWindow)
 			}
 		})
 	}

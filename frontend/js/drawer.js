@@ -158,12 +158,42 @@ export class Drawer {
 
   /**
    * 現在のセッション/ウィンドウを設定する。
+   * セッションまたはウィンドウが変わり、Drawer が開いている場合は再描画する。
    * @param {string} session - セッション名
    * @param {number} windowIndex - ウィンドウインデックス
    */
-  setCurrent(session, windowIndex) {
+  /**
+   * 現在のセッション/ウィンドウを設定する。
+   * セッションまたはウィンドウが変わり、Drawer が開いている場合は再描画する。
+   * @param {string} session - セッション名
+   * @param {number} windowIndex - ウィンドウインデックス
+   * @param {{ sessionChanged?: boolean }} [opts]
+   */
+  setCurrent(session, windowIndex, { sessionChanged = false } = {}) {
+    const changed = (this._currentSession !== session || this._currentWindowIndex !== windowIndex);
     this._currentSession = session;
     this._currentWindowIndex = windowIndex;
+
+    if (!changed || !this._visible) return;
+
+    if (sessionChanged) {
+      // セッション切替: セッション一覧とウィンドウ一覧を再取得して再描画
+      this._expandedSessions.clear();
+      this._expandedSessions.add(session);
+      this._loadSessions()
+        .then(() => this._loadWindows(session).catch(() => {}))
+        .then(() => this._renderContent())
+        .catch(() => this._renderContent());
+    } else {
+      // ウィンドウ切替: キャッシュの active フラグを更新して即再描画
+      // （旧・新ウィンドウ両方に ● が表示される問題を回避）
+      if (this._windowsCache[session]) {
+        for (const w of this._windowsCache[session]) {
+          w.active = (w.index === windowIndex);
+        }
+      }
+      this._renderContent();
+    }
   }
 
   /**

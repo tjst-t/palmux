@@ -24,6 +24,7 @@ type TmuxManager interface {
 	Attach(session string, windowIndex int) (*os.File, *exec.Cmd, error)
 	GetSessionCwd(session string) (string, error)
 	GetSessionProjectDir(session string) (string, error)
+	GetClientSessionWindow(tty string) (string, int, error)
 	ListGhqRepos() ([]tmux.GhqRepo, error)
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/creack/pty"
@@ -136,8 +137,12 @@ func (m *Manager) NewWindow(session, name, command string) (*Window, error) {
 		// tmux new-window は $SHELL -c "command" で実行するが、非ログインシェルのため
 		// ~/.bash_profile 等で設定される PATH が効かない。
 		// ログインシェルでラップすることで claude 等のコマンドが確実に見つかるようにする。
+		// コマンド失敗時はエラーコードを表示し Enter 待ちにする（ウィンドウが即消えるのを防ぐ）。
 		escaped := strings.ReplaceAll(command, "'", `'"'"'`)
-		wrapped := fmt.Sprintf(`exec "$SHELL" -lc '%s'`, escaped)
+		wrapped := fmt.Sprintf(
+			`exec "$SHELL" -lc '%s; ret=$?; if [ $ret -ne 0 ]; then echo "[palmux] command exited ($ret). Press Enter to close."; read -r; fi'`,
+			escaped,
+		)
 		args = append(args, wrapped)
 	}
 
@@ -192,6 +197,26 @@ func (m *Manager) GetSessionCwd(session string) (string, error) {
 	}
 
 	return strings.TrimRight(string(out), "\n"), nil
+}
+
+// GetClientSessionWindow は指定した tty のクライアントが現在表示している
+// セッション名とウィンドウインデックスを返す。
+// tty には pts のデバイスパス（例: /dev/pts/5）を渡す。
+func (m *Manager) GetClientSessionWindow(tty string) (string, int, error) {
+	out, err := m.Exec.Run("display-message", "-p", "-t", tty, "#{session_name}\t#{window_index}")
+	if err != nil {
+		return "", -1, fmt.Errorf("get client session window: %w", err)
+	}
+	line := strings.TrimSpace(string(out))
+	parts := strings.SplitN(line, "\t", 2)
+	if len(parts) != 2 {
+		return "", -1, fmt.Errorf("get client session window: unexpected output %q", out)
+	}
+	winIndex, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return "", -1, fmt.Errorf("get client session window: invalid window index %q: %w", parts[1], err)
+	}
+	return parts[0], winIndex, nil
 }
 
 // GetSessionProjectDir はセッションの ghq プロジェクトディレクトリを返す。

@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -119,6 +120,10 @@ func (m *configurableMock) GetSessionProjectDir(session string) (string, error) 
 func (m *configurableMock) ListGhqRepos() ([]tmux.GhqRepo, error) {
 	m.calledListGhqRepos = true
 	return m.ghqRepos, m.ghqReposErr
+}
+
+func (m *configurableMock) GetClientSessionWindow(tty string) (string, int, error) {
+	return "", -1, fmt.Errorf("not implemented")
 }
 
 // newTestServer はテスト用 Server を作成するヘルパー。

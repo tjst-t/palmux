@@ -22,6 +22,8 @@ export class PalmuxTerminal {
     this._onDisconnect = null;
     /** @type {function|null} 接続成功時のコールバック */
     this._onConnect = null;
+    /** @type {function|null} クライアントセッション/ウィンドウ変更時のコールバック */
+    this._onClientStatus = null;
     /** @type {import('./toolbar.js').Toolbar|null} */
     this._toolbar = null;
     /** @type {boolean} IME モード有効時は onData ハンドラからの入力送信を抑制する */
@@ -141,6 +143,10 @@ export class PalmuxTerminal {
         } else if (msg.type === 'ping') {
           // サーバーからの ping に pong で応答（Cloudflare アイドルタイムアウト対策）
           this._ws.send(JSON.stringify({ type: 'pong' }));
+        } else if (msg.type === 'client_status') {
+          if (this._onClientStatus) {
+            this._onClientStatus(msg.session, msg.window);
+          }
         }
       } catch (e) {
         console.error('Failed to parse WebSocket message:', e);
@@ -217,6 +223,10 @@ export class PalmuxTerminal {
           this._term.write(msg.data);
         } else if (msg.type === 'ping') {
           this._ws.send(JSON.stringify({ type: 'pong' }));
+        } else if (msg.type === 'client_status') {
+          if (this._onClientStatus) {
+            this._onClientStatus(msg.session, msg.window);
+          }
         }
       } catch (e) {
         console.error('Failed to parse WebSocket message:', e);
@@ -425,6 +435,16 @@ export class PalmuxTerminal {
    */
   setOnConnect(callback) {
     this._onConnect = callback;
+  }
+
+  /**
+   * クライアントのセッション/ウィンドウ変更時のコールバックを設定する。
+   * サーバーから client_status メッセージを受信した際に呼ばれる。
+   * セッション切替・ウィンドウ切替の両方を通知する。
+   * @param {function(string, number): void|null} callback - (session, window) を受け取るコールバック
+   */
+  setOnClientStatus(callback) {
+    this._onClientStatus = callback;
   }
 
   /**
