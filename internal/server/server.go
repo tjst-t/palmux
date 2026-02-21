@@ -35,7 +35,8 @@ type Server struct {
 	token       string
 	basePath    string
 	handler     http.Handler
-	connTracker *connectionTracker
+	connTracker    *connectionTracker
+	notifications  *NotificationStore
 }
 
 // Options は Server の生成オプション。
@@ -62,7 +63,8 @@ func NewServer(opts Options) *Server {
 		gitCmd:      gitCmd,
 		token:       opts.Token,
 		basePath:    NormalizeBasePath(opts.BasePath),
-		connTracker: newConnectionTracker(opts.MaxConnections),
+		connTracker:   newConnectionTracker(opts.MaxConnections),
+		notifications: NewNotificationStore(),
 	}
 
 	mux := http.NewServeMux()
@@ -90,6 +92,9 @@ func NewServer(opts Options) *Server {
 	mux.Handle("GET /api/sessions/{session}/git/show", auth(s.handleGitShow()))
 	mux.Handle("GET /api/sessions/{session}/git/branches", auth(s.handleGitBranches()))
 	mux.Handle("POST /api/upload", auth(s.handleUploadImage()))
+	mux.Handle("POST /api/notifications", auth(s.handlePostNotification()))
+	mux.Handle("DELETE /api/notifications", auth(s.handleDeleteNotification()))
+	mux.Handle("GET /api/notifications", auth(s.handleGetNotifications()))
 
 	// 静的ファイル配信
 	if opts.Frontend != nil {
