@@ -137,10 +137,12 @@ func (m *Manager) NewWindow(session, name, command string) (*Window, error) {
 		// tmux new-window は $SHELL -c "command" で実行するが、非ログインシェルのため
 		// ~/.bash_profile 等で設定される PATH が効かない。
 		// ログインシェルでラップすることで claude 等のコマンドが確実に見つかるようにする。
-		// コマンド失敗時はエラーコードを表示し Enter 待ちにする（ウィンドウが即消えるのを防ぐ）。
+		// exec でコマンドを実行し、bash をコマンドに置き換える。
+		// これにより tmux の pane_current_command がコマンド名（例: claude）を正しく返す。
+		// exec 失敗時（コマンド未検出等）はエラー表示して Enter 待ちにする。
 		escaped := strings.ReplaceAll(command, "'", `'"'"'`)
 		wrapped := fmt.Sprintf(
-			`exec "$SHELL" -lc '%s; ret=$?; if [ $ret -ne 0 ]; then echo "[palmux] command exited ($ret). Press Enter to close."; read -r; fi'`,
+			`exec "$SHELL" -lc 'exec %s; echo "[palmux] command not found. Press Enter to close."; read -r'`,
 			escaped,
 		)
 		args = append(args, wrapped)
