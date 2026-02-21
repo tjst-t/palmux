@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/tjst-t/palmux/internal/server"
 	"github.com/tjst-t/palmux/internal/tmux"
@@ -91,6 +92,9 @@ func main() {
 
 	addr := fmt.Sprintf("%s:%d", *host, *port)
 
+	// Hook スクリプト用の env ファイルを書き出す
+	writeEnvFile(*port, authToken, normalizedBasePath)
+
 	if *tlsCert != "" {
 		// TLS 証明書ファイルの存在チェック
 		if _, err := os.Stat(*tlsCert); os.IsNotExist(err) {
@@ -109,5 +113,29 @@ func main() {
 		fmt.Printf("Palmux started on %s (base path: %s)\n", addr, normalizedBasePath)
 		fmt.Printf("Auth token: %s\n", authToken)
 		log.Fatal(srv.ListenAndServe(addr))
+	}
+}
+
+// writeEnvFile は ~/.config/palmux/env にサーバー情報を書き出す。
+// Claude Code の Hook スクリプトが source して利用する。
+func writeEnvFile(port int, token, basePath string) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Printf("Warning: cannot determine home directory for env file: %v", err)
+		return
+	}
+
+	dir := filepath.Join(homeDir, ".config", "palmux")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		log.Printf("Warning: cannot create config directory %s: %v", dir, err)
+		return
+	}
+
+	envPath := filepath.Join(dir, "env")
+	content := fmt.Sprintf("export PALMUX_PORT=%d\nexport PALMUX_TOKEN=%s\nexport PALMUX_BASE_PATH=%s\n",
+		port, token, basePath)
+
+	if err := os.WriteFile(envPath, []byte(content), 0600); err != nil {
+		log.Printf("Warning: cannot write env file %s: %v", envPath, err)
 	}
 }
