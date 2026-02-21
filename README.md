@@ -15,6 +15,7 @@ Go シングルバイナリにフロントエンドを埋め込んでデプロ�
 - **認証** — Bearer トークンによる API 保護（起動時に自動生成）
 - **ベースパス対応** — リバースプロキシ配下でのサブパス運用に対応
 - **ファイルブラウザ** — セッションのカレントディレクトリを起点にファイル閲覧。Markdown レンダリング、シンタックスハイライト、画像プレビュー対応
+- **通知バッジ** — Claude Code の入力待ち状態をドロワーにリアルタイム表示（Hook 連携）
 
 ## 必要環境
 
@@ -124,6 +125,58 @@ set -g mouse on
 - ウィンドウタップで切り替え
 - 長押しで削除
 - ウィンドウ名タップでインラインリネーム
+- 通知バッジ — Claude Code が入力待ちのウィンドウに amber ドットを表示
+
+## 通知バッジ（Claude Code 連携）
+
+Claude Code が入力待ち（`Stop`）になったウィンドウをドロワーに amber のパルスドットで表示する。ユーザーが入力を再開（`UserPromptSubmit`）するとバッジが消える。
+
+### 仕組み
+
+1. Palmux 起動時に `~/.config/palmux/env` が生成される（ポート・トークン・ベースパス）
+2. Claude Code の Hook が `Stop` / `UserPromptSubmit` 時に Palmux API を呼び出す
+3. WebSocket 経由でリアルタイムにドロワーへ反映
+
+### Hook 設定
+
+`~/.claude/settings.json` に以下を追加：
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "source ~/.config/palmux/env 2>/dev/null && [ -n \"$PALMUX_TOKEN\" ] && curl -sf -X POST \"http://localhost:${PALMUX_PORT}${PALMUX_BASE_PATH}api/notifications\" -H \"Authorization: Bearer $PALMUX_TOKEN\" -H 'Content-Type: application/json' -d \"{\\\"session\\\":\\\"$(tmux display-message -p '#S')\\\",\\\"window_index\\\":$(tmux display-message -p '#I'),\\\"type\\\":\\\"stop\\\"}\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "source ~/.config/palmux/env 2>/dev/null && [ -n \"$PALMUX_TOKEN\" ] && curl -sf -X DELETE \"http://localhost:${PALMUX_PORT}${PALMUX_BASE_PATH}api/notifications?session=$(tmux display-message -p '#S')&window=$(tmux display-message -p '#I')\" -H \"Authorization: Bearer $PALMUX_TOKEN\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### 通知 API
+
+| メソッド | エンドポイント | 説明 |
+|---|---|---|
+| `POST` | `/api/notifications` | 通知を追加（30分 TTL） |
+| `DELETE` | `/api/notifications?session=X&window=Y` | 通知を削除 |
+| `GET` | `/api/notifications` | 通知一覧を取得 |
 
 ## ファイルブラウザ
 
