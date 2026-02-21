@@ -133,9 +133,12 @@ Claude Code が入力待ち（`Stop`）になったウィンドウをドロワ�
 
 ### 仕組み
 
-1. Palmux 起動時に `~/.config/palmux/env` が生成される（ポート・トークン・ベースパス）
-2. Claude Code の Hook が `Stop` / `UserPromptSubmit` 時に Palmux API を呼び出す
+1. Palmux 起動時に `~/.config/palmux/env.<port>` が生成される（ポート・トークン・ベースパス）
+2. Claude Code の Hook が `Stop` / `UserPromptSubmit` 時に全インスタンスの Palmux API を呼び出す
 3. WebSocket 経由でリアルタイムにドロワーへ反映
+4. Palmux 終了時に env ファイルが自動削除される
+
+複数の Palmux を同時に起動しても、ポートごとに env ファイルが分離されるため正しく動作する。
 
 ### Hook 設定
 
@@ -149,7 +152,7 @@ Claude Code が入力待ち（`Stop`）になったウィンドウをドロワ�
         "hooks": [
           {
             "type": "command",
-            "command": "source ~/.config/palmux/env 2>/dev/null && [ -n \"$PALMUX_TOKEN\" ] && curl -sf -X POST \"http://localhost:${PALMUX_PORT}${PALMUX_BASE_PATH}api/notifications\" -H \"Authorization: Bearer $PALMUX_TOKEN\" -H 'Content-Type: application/json' -d \"{\\\"session\\\":\\\"$(tmux display-message -p '#S')\\\",\\\"window_index\\\":$(tmux display-message -p '#I'),\\\"type\\\":\\\"stop\\\"}\"",
+            "command": "for f in ~/.config/palmux/env.*; do source \"$f\" 2>/dev/null && [ -n \"$PALMUX_TOKEN\" ] && curl -sf -X POST \"http://localhost:${PALMUX_PORT}${PALMUX_BASE_PATH}api/notifications\" -H \"Authorization: Bearer $PALMUX_TOKEN\" -H 'Content-Type: application/json' -d \"{\\\"session\\\":\\\"$(tmux display-message -p '#S')\\\",\\\"window_index\\\":$(tmux display-message -p '#I'),\\\"type\\\":\\\"stop\\\"}\"; done",
             "timeout": 5
           }
         ]
@@ -160,7 +163,7 @@ Claude Code が入力待ち（`Stop`）になったウィンドウをドロワ�
         "hooks": [
           {
             "type": "command",
-            "command": "source ~/.config/palmux/env 2>/dev/null && [ -n \"$PALMUX_TOKEN\" ] && curl -sf -X DELETE \"http://localhost:${PALMUX_PORT}${PALMUX_BASE_PATH}api/notifications?session=$(tmux display-message -p '#S')&window=$(tmux display-message -p '#I')\" -H \"Authorization: Bearer $PALMUX_TOKEN\"",
+            "command": "for f in ~/.config/palmux/env.*; do source \"$f\" 2>/dev/null && [ -n \"$PALMUX_TOKEN\" ] && curl -sf -X DELETE \"http://localhost:${PALMUX_PORT}${PALMUX_BASE_PATH}api/notifications?session=$(tmux display-message -p '#S')&window=$(tmux display-message -p '#I')\" -H \"Authorization: Bearer $PALMUX_TOKEN\"; done",
             "timeout": 5
           }
         ]
