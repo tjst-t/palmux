@@ -22,6 +22,10 @@ import (
 // Cloudflare Tunnel の 100 秒アイドルタイムアウト対策。
 var wsPingInterval = 30 * time.Second
 
+// wsWatchActiveWindowInterval は WebSocket のアクティブウィンドウ監視間隔。
+// テスト時に上書き可能。
+var wsWatchActiveWindowInterval = 2 * time.Second
+
 // connectionInfo は個々の WebSocket 接続のメタデータ。
 type connectionInfo struct {
 	Session   string    `json:"session"`
@@ -101,6 +105,14 @@ func generateConnID() string {
 		return fmt.Sprintf("conn-%d", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(b)
+}
+
+// wsClientStatusMessage はクライアントのセッション/ウィンドウ変更通知メッセージ。
+// セッション切替・ウィンドウ切替の両方を通知する。
+type wsClientStatusMessage struct {
+	Type    string `json:"type"`
+	Session string `json:"session"`
+	Window  int    `json:"window"`
 }
 
 // wsInputMessage はクライアントから送られる入力メッセージ。
@@ -188,11 +200,22 @@ func (s *Server) handleAttach() http.Handler {
 		}
 		defer cleanup()
 
+		// 全 WebSocket 書き込みをシリアライズする（concurrent writes 対策）
+		var wsMu sync.Mutex
+		writeWS := func(ctx context.Context, data []byte) error {
+			wsMu.Lock()
+			defer wsMu.Unlock()
+			return conn.Write(ctx, websocket.MessageText, data)
+		}
+
 		// WebSocket ping (Cloudflare Tunnel の 100 秒アイドルタイムアウト対策)
-		go s.wsPing(ctx, conn, cleanup)
+		go s.wsPing(ctx, writeWS, cleanup)
 
 		// pty → WebSocket (出力)
-		go s.ptyToWS(ctx, conn, ptmx, cleanup)
+		go s.ptyToWS(ctx, writeWS, ptmx, cleanup)
+
+		// クライアントのセッション/ウィンドウ変更を監視して WebSocket に通知
+		go s.watchActiveWindow(ctx, writeWS, ptmx, cleanup)
 
 		// WebSocket → pty (入力)
 		s.wsToPty(ctx, conn, ptmx, cleanup)
@@ -210,7 +233,7 @@ func (s *Server) handleListConnections() http.Handler {
 
 // wsPing は定期的に ping メッセージを WebSocket に送信する。
 // Cloudflare Tunnel 等のアイドルタイムアウトによる切断を防止する。
-func (s *Server) wsPing(ctx context.Context, conn *websocket.Conn, cleanup func()) {
+func (s *Server) wsPing(ctx context.Context, writeWS func(context.Context, []byte) error, cleanup func()) {
 	ticker := time.NewTicker(wsPingInterval)
 	defer ticker.Stop()
 	for {
@@ -223,7 +246,7 @@ func (s *Server) wsPing(ctx context.Context, conn *websocket.Conn, cleanup func(
 			if err != nil {
 				continue
 			}
-			if err := conn.Write(ctx, websocket.MessageText, data); err != nil {
+			if err := writeWS(ctx, data); err != nil {
 				cleanup()
 				return
 			}
@@ -232,7 +255,7 @@ func (s *Server) wsPing(ctx context.Context, conn *websocket.Conn, cleanup func(
 }
 
 // ptyToWS は pty からの出力を WebSocket に中継する。
-func (s *Server) ptyToWS(ctx context.Context, conn *websocket.Conn, ptmx *os.File, cleanup func()) {
+func (s *Server) ptyToWS(ctx context.Context, writeWS func(context.Context, []byte) error, ptmx *os.File, cleanup func()) {
 	buf := make([]byte, 4096)
 	for {
 		n, err := ptmx.Read(buf)
@@ -252,7 +275,7 @@ func (s *Server) ptyToWS(ctx context.Context, conn *websocket.Conn, ptmx *os.Fil
 			continue
 		}
 
-		if err := conn.Write(ctx, websocket.MessageText, data); err != nil {
+		if err := writeWS(ctx, data); err != nil {
 			// WebSocket 書き込みエラー（クライアント切断など）
 			cleanup()
 			return
@@ -297,6 +320,63 @@ func (s *Server) wsToPty(ctx context.Context, conn *websocket.Conn, ptmx *os.Fil
 			// クライアントからの ping 応答 — 処理不要
 		default:
 			log.Printf("unknown message type: %q", msg.Type)
+		}
+	}
+}
+
+// watchActiveWindow は wsWatchActiveWindowInterval ごとにクライアントの
+// セッション/ウィンドウを監視し、変化を検知したら client_status メッセージを送信する。
+// ptmx からスレーブ pts 名を取得し、tmux display-message でクライアントの現在状態を問い合わせる。
+// これによりセッション切替（tmux switch-client 等）もウィンドウ切替も検知できる。
+func (s *Server) watchActiveWindow(
+	ctx context.Context,
+	writeWS func(context.Context, []byte) error,
+	ptmx *os.File,
+	cleanup func(),
+) {
+	ptsName := getPTSName(ptmx)
+	if ptsName == "" {
+		// pts 名を取得できない場合は監視不可
+		return
+	}
+
+	ticker := time.NewTicker(wsWatchActiveWindowInterval)
+	defer ticker.Stop()
+
+	lastSession := "" // 空文字 = ベースライン未確立
+	lastWindow := -1
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			curSession, curWindow, err := s.tmux.GetClientSessionWindow(ptsName)
+			if err != nil || curSession == "" {
+				continue
+			}
+			if lastSession == "" {
+				// ベースライン確立（通知不要）
+				lastSession = curSession
+				lastWindow = curWindow
+				continue
+			}
+			if curSession != lastSession || curWindow != lastWindow {
+				lastSession = curSession
+				lastWindow = curWindow
+				msg := wsClientStatusMessage{
+					Type:    "client_status",
+					Session: curSession,
+					Window:  curWindow,
+				}
+				data, err := json.Marshal(msg)
+				if err != nil {
+					continue
+				}
+				if err := writeWS(ctx, data); err != nil {
+					cleanup()
+					return
+				}
+			}
 		}
 	}
 }

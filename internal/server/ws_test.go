@@ -28,9 +28,22 @@ type wsMock struct {
 	multiPty bool
 	ptsPairs []*os.File // テスト側がアクセスするスレーブ側の一覧
 
-	calledAttach       string
-	calledWindowIndex  int
-	mu                 sync.Mutex
+	calledAttach      string
+	calledWindowIndex int
+	mu                sync.Mutex
+
+	// getClientInfoFunc が設定されている場合、GetClientSessionWindow 呼び出し時に使用する
+	getClientInfoFunc func(tty string) (string, int, error)
+}
+
+func (m *wsMock) GetClientSessionWindow(tty string) (string, int, error) {
+	m.mu.Lock()
+	fn := m.getClientInfoFunc
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(tty)
+	}
+	return m.configurableMock.GetClientSessionWindow(tty)
 }
 
 func (m *wsMock) Attach(session string, windowIndex int) (*os.File, *exec.Cmd, error) {
@@ -881,4 +894,140 @@ func TestHandleAttach_DefaultMaxConnections(t *testing.T) {
 		pts.Close()
 	}
 	mock.mu.Unlock()
+}
+
+func TestHandleAttach_ClientStatusSent_WindowChange(t *testing.T) {
+	pts, mock, cleanup := setupWSTest(t)
+	defer cleanup()
+	_ = pts
+
+	// 監視間隔を短く設定（テスト用）
+	origInterval := wsWatchActiveWindowInterval
+	wsWatchActiveWindowInterval = 50 * time.Millisecond
+	defer func() { wsWatchActiveWindowInterval = origInterval }()
+
+	var callCount int
+	var callMu sync.Mutex
+
+	// 1回目: ベースライン（session=main, window=0）
+	// 2回目以降: ウィンドウ変更（session=main, window=1）
+	mock.getClientInfoFunc = func(tty string) (string, int, error) {
+		callMu.Lock()
+		defer callMu.Unlock()
+		callCount++
+		if callCount == 1 {
+			return "main", 0, nil
+		}
+		return "main", 1, nil
+	}
+
+	srv, token := newTestServerWithWS(mock)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	conn, ctx, cancel := dialWS(t, ts.URL, "/api/sessions/main/windows/0/attach", token)
+	defer cancel()
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	// client_status メッセージを受信するまで待つ（最大 3 秒）
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for client_status message")
+		default:
+		}
+
+		readCtx, readCancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		_, msgData, err := conn.Read(readCtx)
+		readCancel()
+		if err != nil {
+			continue
+		}
+
+		var msg struct {
+			Type    string `json:"type"`
+			Session string `json:"session"`
+			Window  int    `json:"window"`
+		}
+		if err := json.Unmarshal(msgData, &msg); err != nil {
+			continue
+		}
+		if msg.Type == "client_status" {
+			if msg.Session != "main" {
+				t.Errorf("session = %q, want %q", msg.Session, "main")
+			}
+			if msg.Window != 1 {
+				t.Errorf("window = %d, want 1", msg.Window)
+			}
+			return // success
+		}
+	}
+}
+
+func TestHandleAttach_ClientStatusSent_SessionChange(t *testing.T) {
+	pts, mock, cleanup := setupWSTest(t)
+	defer cleanup()
+	_ = pts
+
+	origInterval := wsWatchActiveWindowInterval
+	wsWatchActiveWindowInterval = 50 * time.Millisecond
+	defer func() { wsWatchActiveWindowInterval = origInterval }()
+
+	var callCount int
+	var callMu sync.Mutex
+
+	// 1回目: ベースライン（session=main, window=0）
+	// 2回目以降: セッション切替（session=dev, window=0）
+	mock.getClientInfoFunc = func(tty string) (string, int, error) {
+		callMu.Lock()
+		defer callMu.Unlock()
+		callCount++
+		if callCount == 1 {
+			return "main", 0, nil
+		}
+		return "dev", 0, nil
+	}
+
+	srv, token := newTestServerWithWS(mock)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	conn, ctx, cancel := dialWS(t, ts.URL, "/api/sessions/main/windows/0/attach", token)
+	defer cancel()
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for client_status message (session change)")
+		default:
+		}
+
+		readCtx, readCancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		_, msgData, err := conn.Read(readCtx)
+		readCancel()
+		if err != nil {
+			continue
+		}
+
+		var msg struct {
+			Type    string `json:"type"`
+			Session string `json:"session"`
+			Window  int    `json:"window"`
+		}
+		if err := json.Unmarshal(msgData, &msg); err != nil {
+			continue
+		}
+		if msg.Type == "client_status" {
+			if msg.Session != "dev" {
+				t.Errorf("session = %q, want %q", msg.Session, "dev")
+			}
+			if msg.Window != 0 {
+				t.Errorf("window = %d, want 0", msg.Window)
+			}
+			return // success
+		}
+	}
 }

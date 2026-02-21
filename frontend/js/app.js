@@ -396,6 +396,27 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
   // ターミナル初期化・接続
   terminal = new PalmuxTerminal(terminalContainerEl);
 
+  // クライアントのセッション/ウィンドウ変更通知のハンドラを設定
+  // tmux でのセッション切替（switch-client 等）もウィンドウ切替も検知する
+  terminal.setOnClientStatus((session, window) => {
+    const sessionChanged = session !== currentSession;
+    const windowChanged = window !== currentWindowIndex;
+    if (!sessionChanged && !windowChanged) return;
+
+    currentSession = session;
+    currentWindowIndex = window;
+
+    // ヘッダータイトルを更新
+    const headerTitleEl = document.getElementById('header-title');
+    if (headerTitleEl) {
+      headerTitleEl.textContent = `${session}:${window}`;
+    }
+
+    if (drawer) {
+      drawer.setCurrent(session, window, { sessionChanged });
+    }
+  });
+
   // IME 入力フィールド初期化
   imeInput = new IMEInput(imeContainerEl, {
     onSend: (text) => terminal.sendInput(text),

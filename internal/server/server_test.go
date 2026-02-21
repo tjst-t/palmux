@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -37,6 +38,9 @@ func (m *mockTmuxManager) GetSessionProjectDir(session string) (string, error) {
 	return "", nil
 }
 func (m *mockTmuxManager) ListGhqRepos() ([]tmux.GhqRepo, error) { return nil, nil }
+func (m *mockTmuxManager) GetClientSessionWindow(tty string) (string, int, error) {
+	return "", -1, fmt.Errorf("not implemented")
+}
 
 func TestNormalizeBasePath(t *testing.T) {
 	tests := []struct {
