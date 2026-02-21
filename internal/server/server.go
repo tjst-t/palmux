@@ -34,6 +34,7 @@ type Server struct {
 	gitCmd      git.CommandRunner
 	token       string
 	basePath    string
+	claudePath  string
 	handler     http.Handler
 	connTracker    *connectionTracker
 	notifications  *NotificationStore
@@ -45,6 +46,7 @@ type Options struct {
 	GitCmd         git.CommandRunner // git コマンドランナー（nil の場合 RealCommandRunner を使用）
 	Token          string
 	BasePath       string
+	ClaudePath     string // Claude コマンドのパス（デフォルト: "claude"）
 	Frontend       fs.FS // 静的ファイル配信用 FS（テスト時は nil 可）
 	MaxConnections int   // 同一セッションへの最大同時接続数（デフォルト: 5）
 	Version        string
@@ -58,11 +60,17 @@ func NewServer(opts Options) *Server {
 		gitCmd = &git.RealCommandRunner{}
 	}
 
+	claudePath := opts.ClaudePath
+	if claudePath == "" {
+		claudePath = "claude"
+	}
+
 	s := &Server{
 		tmux:        opts.Tmux,
 		gitCmd:      gitCmd,
 		token:       opts.Token,
 		basePath:    NormalizeBasePath(opts.BasePath),
+		claudePath:  claudePath,
 		connTracker:   newConnectionTracker(opts.MaxConnections),
 		notifications: NewNotificationStore(),
 	}
@@ -100,11 +108,12 @@ func NewServer(opts Options) *Server {
 	if opts.Frontend != nil {
 		fileServer := http.FileServerFS(opts.Frontend)
 		mux.Handle("/", &indexInjector{
-			fs:       opts.Frontend,
-			basePath: s.basePath,
-			token:    s.token,
-			version:  opts.Version,
-			fallback: fileServer,
+			fs:         opts.Frontend,
+			basePath:   s.basePath,
+			token:      s.token,
+			claudePath: s.claudePath,
+			version:    opts.Version,
+			fallback:   fileServer,
 		})
 	}
 
@@ -134,14 +143,15 @@ func (s *Server) ListenAndServeTLS(addr, certFile, keyFile string) error {
 }
 
 // indexInjector は index.html のリクエストを横取りして、
-// base-path と auth-token と app-version の meta タグに実際の値を注入するハンドラ。
+// base-path と auth-token と app-version と claude-path の meta タグに実際の値を注入するハンドラ。
 // それ以外のリクエストは fallback ハンドラに委譲する。
 type indexInjector struct {
-	fs       fs.FS
-	basePath string
-	token    string
-	version  string
-	fallback http.Handler
+	fs         fs.FS
+	basePath   string
+	token      string
+	claudePath string
+	version    string
+	fallback   http.Handler
 }
 
 // ServeHTTP は "/" と "/index.html" へのリクエストを横取りして meta タグを注入する。
@@ -168,6 +178,11 @@ func (h *indexInjector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		html = strings.Replace(html,
 			`<meta name="app-version" content="">`,
 			`<meta name="app-version" content="`+h.version+`">`,
+			1)
+		// claude-path meta タグの content 属性を置換
+		html = strings.Replace(html,
+			`<meta name="claude-path" content="claude">`,
+			`<meta name="claude-path" content="`+h.claudePath+`">`,
 			1)
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
