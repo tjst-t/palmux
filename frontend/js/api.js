@@ -317,6 +317,14 @@ export async function uploadImage(file) {
 }
 
 /**
+ * 通知一覧を取得する。
+ * @returns {Promise<Array<{session: string, window_index: number, type: string}>>}
+ */
+export async function listNotifications() {
+  return fetchAPI('api/notifications');
+}
+
+/**
  * WebSocket 接続用の URL を生成する。
  * base-path とプロトコル（ws/wss）を考慮し、認証トークンをクエリパラメータに付与する。
  * @param {string} session - セッション名
