@@ -549,6 +549,41 @@
   color: #8888aa;
 }
 
+/* Side-by-side diff (PC/iPad) */
+.gb-diff-content--sbs {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.gb-diff-meta-block {
+  flex-shrink: 0;
+  border-bottom: 1px solid #2a2a4a;
+}
+
+.gb-diff-sbs {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.gb-diff-sbs-left,
+.gb-diff-sbs-right {
+  flex: 1;
+  overflow: auto;
+  min-width: 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.gb-diff-sbs-left {
+  border-right: 1px solid #2a2a4a;
+}
+
+.gb-diff-line--empty {
+  background: rgba(42, 42, 74, 0.3);
+}
+
 /* Mobile optimizations */
 @media (max-width: 600px) {
   .gb-file-header {
