@@ -371,9 +371,13 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
     fontSizeControlsEl.classList.remove('hidden');
   }
 
-  // drawer ボタンを表示（ターミナル接続中のみ）
+  // drawer ボタンを表示（ターミナル接続中のみ、ピン留め中は非表示）
   if (drawerBtnEl) {
-    drawerBtnEl.classList.remove('hidden');
+    if (drawer && drawer.isPinned) {
+      drawerBtnEl.classList.add('hidden');
+    } else {
+      drawerBtnEl.classList.remove('hidden');
+    }
   }
 
   currentSession = sessionName;
@@ -391,6 +395,7 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
   // Drawer の現在位置を更新
   if (drawer) {
     drawer.setCurrent(sessionName, windowIndex);
+    drawer.restorePinState();
   }
 
   // ターミナル初期化・接続

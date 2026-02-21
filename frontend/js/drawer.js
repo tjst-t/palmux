@@ -57,13 +57,25 @@ export class Drawer {
     this._creatingWindow = false;
     /** @type {'activity'|'name'} セッション並び順 */
     this._sortOrder = 'activity';
+    /** @type {boolean} Drawer が固定表示（ピン留め）されているか */
+    this._pinned = false;
+    /** @type {Function|null} リサイズハンドラ（解除用） */
+    this._resizeHandler = null;
+
+    /** @type {number} ピン留め時の Drawer 幅 */
+    this._drawerWidth = this._loadDrawerWidth() || 280;
+    /** @type {HTMLElement|null} リサイズハンドル */
+    this._resizeHandle = null;
 
     this._el = document.getElementById('drawer');
     this._overlay = document.getElementById('drawer-overlay');
     this._content = document.getElementById('drawer-content');
     this._sortCheckbox = document.getElementById('drawer-sort-checkbox');
+    this._pinBtn = document.getElementById('drawer-pin-btn');
 
     this._setupEvents();
+    this._setupPinButton();
+    this._setupResizeHandle();
   }
 
   /**
@@ -106,12 +118,242 @@ export class Drawer {
   }
 
   /**
+   * ピンボタンのイベントリスナーとリサイズ監視を設定する。
+   */
+  _setupPinButton() {
+    if (this._pinBtn) {
+      this._pinBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.togglePin();
+      });
+    }
+
+    // 画面が狭くなったら自動的にピン解除
+    this._resizeHandler = () => {
+      if (this._pinned && window.innerWidth <= 600) {
+        this._unpin();
+      }
+    };
+    window.addEventListener('resize', this._resizeHandler);
+  }
+
+  /**
+   * Drawer がピン留めされているかどうか。
+   * @returns {boolean}
+   */
+  get isPinned() {
+    return this._pinned;
+  }
+
+  /**
+   * ピン/アンピンを切り替える。
+   */
+  togglePin() {
+    if (this._pinned) {
+      this._unpin();
+    } else {
+      this._pin();
+    }
+  }
+
+  /**
+   * Drawer をピン留めする（固定表示）。
+   * オーバーレイを非表示にし、メインコンテンツを右にずらす。
+   */
+  async _pin() {
+    this._pinned = true;
+    this._setDrawerWidth(this._drawerWidth);
+    this._el.classList.add('drawer--pinned');
+    this._overlay.classList.remove('drawer-overlay--visible');
+    document.body.classList.add('drawer-pinned');
+
+    if (this._pinBtn) {
+      this._pinBtn.classList.add('drawer-pin-btn--active');
+      this._pinBtn.setAttribute('aria-label', 'Unpin drawer');
+    }
+
+    // ハンバーガーボタンを非表示（Drawer が常に見えるため不要）
+    const drawerBtn = document.getElementById('drawer-btn');
+    if (drawerBtn) {
+      drawerBtn.classList.add('hidden');
+    }
+
+    // Drawer が未オープンならオープンする
+    if (!this._visible) {
+      await this.open();
+    }
+
+    this._savePinState();
+  }
+
+  /**
+   * Drawer のピン留めを解除する（自動で閉じるモードに戻す）。
+   */
+  _unpin() {
+    this._pinned = false;
+    this._el.classList.remove('drawer--pinned');
+    document.body.classList.remove('drawer-pinned');
+    document.documentElement.style.removeProperty('--drawer-pinned-width');
+
+    if (this._pinBtn) {
+      this._pinBtn.classList.remove('drawer-pin-btn--active');
+      this._pinBtn.setAttribute('aria-label', 'Pin drawer');
+    }
+
+    // ハンバーガーボタンを再表示
+    const drawerBtn = document.getElementById('drawer-btn');
+    if (drawerBtn) {
+      drawerBtn.classList.remove('hidden');
+    }
+
+    this.close();
+    this._savePinState();
+  }
+
+  /**
+   * ピン状態を localStorage に保存する。
+   */
+  _savePinState() {
+    try {
+      localStorage.setItem('palmux-drawer-pinned', this._pinned ? '1' : '0');
+    } catch (e) {
+      // localStorage が利用できない環境
+    }
+  }
+
+  /**
+   * localStorage にピン状態が保存されているか確認する。
+   * @returns {boolean}
+   */
+  _checkSavedPinState() {
+    try {
+      return localStorage.getItem('palmux-drawer-pinned') === '1' && window.innerWidth > 600;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /**
+   * 保存されたピン状態を復元する。
+   * 画面が十分広い場合のみピンする。
+   */
+  async restorePinState() {
+    if (this._pinned) return;
+    if (this._checkSavedPinState()) {
+      await this._pin();
+    }
+  }
+
+  /**
+   * リサイズハンドルを作成し、ドラッグによる幅変更を設定する。
+   */
+  _setupResizeHandle() {
+    this._resizeHandle = document.createElement('div');
+    this._resizeHandle.className = 'drawer-resize-handle';
+    this._el.appendChild(this._resizeHandle);
+
+    let startX = 0;
+    let startWidth = 0;
+
+    const onMove = (clientX) => {
+      const newWidth = startWidth + (clientX - startX);
+      const clamped = Math.max(200, Math.min(600, newWidth));
+      this._setDrawerWidth(clamped);
+    };
+
+    const onEnd = () => {
+      this._resizeHandle.classList.remove('drawer-resize-handle--active');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.body.style.webkitUserSelect = '';
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.removeEventListener('touchmove', onTouchMove);
+      document.removeEventListener('touchend', onTouchEnd);
+      document.removeEventListener('touchcancel', onTouchEnd);
+      this._saveDrawerWidth();
+    };
+
+    const onMouseMove = (e) => onMove(e.clientX);
+    const onMouseUp = () => onEnd();
+    const onTouchMove = (e) => {
+      if (e.touches.length > 0) onMove(e.touches[0].clientX);
+    };
+    const onTouchEnd = () => onEnd();
+
+    this._resizeHandle.addEventListener('mousedown', (e) => {
+      if (!this._pinned) return;
+      e.preventDefault();
+      startX = e.clientX;
+      startWidth = this._el.offsetWidth;
+      this._resizeHandle.classList.add('drawer-resize-handle--active');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      document.body.style.webkitUserSelect = 'none';
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    });
+
+    this._resizeHandle.addEventListener('touchstart', (e) => {
+      if (!this._pinned || e.touches.length !== 1) return;
+      e.preventDefault();
+      startX = e.touches[0].clientX;
+      startWidth = this._el.offsetWidth;
+      this._resizeHandle.classList.add('drawer-resize-handle--active');
+      document.body.style.userSelect = 'none';
+      document.body.style.webkitUserSelect = 'none';
+      document.addEventListener('touchmove', onTouchMove, { passive: true });
+      document.addEventListener('touchend', onTouchEnd);
+      document.addEventListener('touchcancel', onTouchEnd);
+    });
+  }
+
+  /**
+   * Drawer の幅を設定する（CSS 変数経由）。
+   * @param {number} width - 幅（px）
+   */
+  _setDrawerWidth(width) {
+    this._drawerWidth = width;
+    document.documentElement.style.setProperty('--drawer-pinned-width', width + 'px');
+  }
+
+  /**
+   * Drawer の幅を localStorage に保存する。
+   */
+  _saveDrawerWidth() {
+    try {
+      localStorage.setItem('palmux-drawer-width', String(this._drawerWidth));
+    } catch (e) {
+      // localStorage が利用できない環境
+    }
+  }
+
+  /**
+   * localStorage から Drawer の幅を読み込む。
+   * @returns {number|null}
+   */
+  _loadDrawerWidth() {
+    try {
+      const saved = localStorage.getItem('palmux-drawer-width');
+      if (saved) {
+        const width = parseInt(saved, 10);
+        if (width >= 200 && width <= 600) return width;
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /**
    * Drawer を開く。最新のセッション一覧を API から取得する。
    */
   async open() {
     this._visible = true;
     this._el.classList.add('drawer--open');
-    this._overlay.classList.add('drawer-overlay--visible');
+    if (!this._pinned) {
+      this._overlay.classList.add('drawer-overlay--visible');
+    }
 
     // 現在のセッションだけ自動展開（アコーディオン）
     this._expandedSessions.clear();
@@ -139,6 +381,11 @@ export class Drawer {
    * Drawer を閉じる。
    */
   close() {
+    if (this._pinned) {
+      // ピン留め中は閉じない。ハイライト更新のため再描画だけ行う。
+      this._renderContent();
+      return;
+    }
     this._visible = false;
     this._el.classList.remove('drawer--open');
     this._overlay.classList.remove('drawer-overlay--visible');
@@ -1478,6 +1725,26 @@ export class Drawer {
     this._windowsCache = {};
     this._expandedSessions.clear();
     this._clearLongPressTimer();
+
+    // ピン状態をクリア
+    if (this._pinned) {
+      this._pinned = false;
+      this._el.classList.remove('drawer--pinned');
+      document.body.classList.remove('drawer-pinned');
+      document.documentElement.style.removeProperty('--drawer-pinned-width');
+    }
+
+    // リサイズハンドルを除去
+    if (this._resizeHandle) {
+      this._resizeHandle.remove();
+      this._resizeHandle = null;
+    }
+
+    // リサイズリスナーを解除
+    if (this._resizeHandler) {
+      window.removeEventListener('resize', this._resizeHandler);
+      this._resizeHandler = null;
+    }
 
     // 残っているモーダル/トーストを除去
     const modal = document.querySelector('.drawer-delete-modal-overlay');
