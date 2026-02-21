@@ -25,6 +25,8 @@ export class PalmuxTerminal {
     this._onConnect = null;
     /** @type {function|null} クライアントセッション/ウィンドウ変更時のコールバック */
     this._onClientStatus = null;
+    /** @type {function|null} 通知更新時のコールバック */
+    this._onNotificationUpdate = null;
     /** @type {import('./toolbar.js').Toolbar|null} */
     this._toolbar = null;
     /** @type {boolean} IME モード有効時は onData ハンドラからの入力送信を抑制する */
@@ -158,6 +160,10 @@ export class PalmuxTerminal {
           if (this._onClientStatus) {
             this._onClientStatus(msg.session, msg.window);
           }
+        } else if (msg.type === 'notification_update') {
+          if (this._onNotificationUpdate) {
+            this._onNotificationUpdate(msg.notifications || []);
+          }
         }
       } catch (e) {
         console.error('Failed to parse WebSocket message:', e);
@@ -237,6 +243,10 @@ export class PalmuxTerminal {
         } else if (msg.type === 'client_status') {
           if (this._onClientStatus) {
             this._onClientStatus(msg.session, msg.window);
+          }
+        } else if (msg.type === 'notification_update') {
+          if (this._onNotificationUpdate) {
+            this._onNotificationUpdate(msg.notifications || []);
           }
         }
       } catch (e) {
@@ -460,6 +470,15 @@ export class PalmuxTerminal {
    */
   setOnClientStatus(callback) {
     this._onClientStatus = callback;
+  }
+
+  /**
+   * 通知更新時のコールバックを設定する。
+   * サーバーから notification_update メッセージを受信した際に呼ばれる。
+   * @param {function(Array<{session: string, window_index: number, type: string}>): void|null} callback
+   */
+  setOnNotificationUpdate(callback) {
+    this._onNotificationUpdate = callback;
   }
 
   /**

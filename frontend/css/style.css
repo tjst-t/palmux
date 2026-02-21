@@ -710,6 +710,47 @@ html, body {
   text-align: center;
 }
 
+/* Notification Badge (window level) */
+.drawer-window-badge {
+  display: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ffb300;
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+
+.drawer-window-badge--active {
+  display: inline-block;
+  animation: notification-pulse 2s infinite;
+}
+
+/* Notification Badge (session level, visible when collapsed) */
+.drawer-session-badge {
+  display: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ffb300;
+  flex-shrink: 0;
+  margin-left: auto;
+  margin-right: 4px;
+}
+
+.drawer-session-badge--active {
+  display: inline-block;
+}
+
+@keyframes notification-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
 /* Drawer New Window Button */
 .drawer-new-window-btn {
   display: flex;
@@ -789,8 +830,25 @@ html, body {
   background: rgba(126, 200, 227, 0.25);
 }
 
+#drawer-btn {
+  position: relative;
+}
+
 #drawer-btn.hidden {
   display: none;
+}
+
+/* ハンバーガーボタンの通知ドット */
+#drawer-btn.drawer-btn--has-notification::after {
+  content: '';
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  background: #ffb300;
+  border-radius: 50%;
+  animation: notification-pulse 2s infinite;
 }
 
 /* Drawer New Session Button */

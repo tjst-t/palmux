@@ -57,6 +57,8 @@ export class Drawer {
     this._creatingWindow = false;
     /** @type {'activity'|'name'} セッション並び順 */
     this._sortOrder = 'activity';
+    /** @type {Array<{session: string, window_index: number, type: string}>} 通知一覧 */
+    this._notifications = [];
     /** @type {boolean} Drawer が固定表示（ピン留め）されているか */
     this._pinned = false;
     /** @type {Function|null} リサイズハンドラ（解除用） */
@@ -936,8 +938,16 @@ export class Drawer {
     name.className = 'drawer-session-name';
     name.textContent = session.name;
 
+    // セッションレベルの通知バッジ（折りたたみ時に表示）
+    const sessionBadge = document.createElement('span');
+    sessionBadge.className = 'drawer-session-badge';
+    if (this._hasSessionNotification(session.name)) {
+      sessionBadge.classList.add('drawer-session-badge--active');
+    }
+
     header.appendChild(arrow);
     header.appendChild(name);
+    header.appendChild(sessionBadge);
 
     // 長押しで削除オプション表示
     this._setupLongPress(header, session);
@@ -1225,8 +1235,16 @@ export class Drawer {
       indicator.textContent = '\u25CF';
     }
 
+    // 通知バッジ
+    const badge = document.createElement('span');
+    badge.className = 'drawer-window-badge';
+    if (this._hasNotification(sessionName, win.index)) {
+      badge.classList.add('drawer-window-badge--active');
+    }
+
     el.appendChild(indexEl);
     el.appendChild(nameEl);
+    el.appendChild(badge);
     el.appendChild(indicator);
 
     // 長押しでウィンドウ操作メニュー表示（Rename / Delete）
@@ -1713,6 +1731,53 @@ export class Drawer {
       this._creatingWindow = false;
       console.error('Failed to create window:', err);
       this._showDeleteError(`Failed to create window: ${err.message}`);
+    }
+  }
+
+  /**
+   * 通知一覧を更新し、Drawer が開いていれば再描画する。
+   * ハンバーガーボタンの通知ドットも更新する。
+   * @param {Array<{session: string, window_index: number, type: string}>} notifications
+   */
+  setNotifications(notifications) {
+    this._notifications = notifications || [];
+    this._updateDrawerBtnBadge();
+    if (this._visible) {
+      this._renderContent();
+    }
+  }
+
+  /**
+   * 指定ウィンドウに通知があるかを返す。
+   * @param {string} session
+   * @param {number} windowIndex
+   * @returns {boolean}
+   */
+  _hasNotification(session, windowIndex) {
+    return this._notifications.some(
+      (n) => n.session === session && n.window_index === windowIndex
+    );
+  }
+
+  /**
+   * 指定セッションに通知があるかを返す。
+   * @param {string} session
+   * @returns {boolean}
+   */
+  _hasSessionNotification(session) {
+    return this._notifications.some((n) => n.session === session);
+  }
+
+  /**
+   * ハンバーガーボタンの通知ドットを更新する。
+   */
+  _updateDrawerBtnBadge() {
+    const drawerBtn = document.getElementById('drawer-btn');
+    if (!drawerBtn) return;
+    if (this._notifications.length > 0) {
+      drawerBtn.classList.add('drawer-btn--has-notification');
+    } else {
+      drawerBtn.classList.remove('drawer-btn--has-notification');
     }
   }
 

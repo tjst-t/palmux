@@ -2,7 +2,7 @@
 // セッション一覧→選択→ターミナル表示のフロー
 // Drawer による セッション/ウィンドウ切り替え
 
-import { listSessions, listWindows, getWebSocketURL } from './api.js';
+import { listSessions, listWindows, getWebSocketURL, listNotifications } from './api.js';
 import { PalmuxTerminal } from './terminal.js';
 import { Toolbar } from './toolbar.js';
 import { IMEInput } from './ime-input.js';
@@ -419,6 +419,13 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
 
     if (drawer) {
       drawer.setCurrent(session, window, { sessionChanged });
+    }
+  });
+
+  // 通知更新のハンドラを設定
+  terminal.setOnNotificationUpdate((notifications) => {
+    if (drawer) {
+      drawer.setNotifications(notifications);
     }
   });
 
@@ -1143,6 +1150,17 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
   });
+
+  // 初期通知を取得してドロワーに反映
+  listNotifications()
+    .then((notifications) => {
+      if (drawer && notifications) {
+        drawer.setNotifications(notifications);
+      }
+    })
+    .catch((err) => {
+      console.error('Failed to load initial notifications:', err);
+    });
 
   // 初期表示: ハッシュがあればそこから復元、なければ自動接続
   const initialHash = window.location.hash;
