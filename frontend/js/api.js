@@ -325,6 +325,19 @@ export async function listNotifications() {
 }
 
 /**
+ * 指定ウィンドウの通知を削除する。
+ * @param {string} session - セッション名
+ * @param {number} windowIndex - ウィンドウインデックス
+ * @returns {Promise<null>}
+ */
+export async function deleteNotification(session, windowIndex) {
+  return fetchAPI(
+    `api/notifications?session=${encodeURIComponent(session)}&window=${windowIndex}`,
+    { method: 'DELETE' }
+  );
+}
+
+/**
  * WebSocket 接続用の URL を生成する。
  * base-path とプロトコル（ws/wss）を考慮し、認証トークンをクエリパラメータに付与する。
  * @param {string} session - セッション名

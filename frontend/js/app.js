@@ -2,7 +2,7 @@
 // セッション一覧→選択→ターミナル表示のフロー
 // Drawer による セッション/ウィンドウ切り替え
 
-import { listSessions, listWindows, getWebSocketURL, listNotifications } from './api.js';
+import { listSessions, listWindows, getWebSocketURL, listNotifications, deleteNotification } from './api.js';
 import { PalmuxTerminal } from './terminal.js';
 import { Toolbar } from './toolbar.js';
 import { IMEInput } from './ime-input.js';
@@ -383,6 +383,9 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
   currentSession = sessionName;
   currentWindowIndex = windowIndex;
 
+  // 通知をクリア（そのウィンドウに通知があれば削除）
+  deleteNotification(sessionName, windowIndex).catch(() => {});
+
   // ブラウザ履歴を更新
   const hash = `#terminal/${encodeURIComponent(sessionName)}/${windowIndex}`;
   const state = { view: 'terminal', session: sessionName, window: windowIndex };
@@ -410,6 +413,9 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
 
     currentSession = session;
     currentWindowIndex = window;
+
+    // 通知をクリア（切替先ウィンドウに通知があれば削除）
+    deleteNotification(session, window).catch(() => {});
 
     // ヘッダータイトルを更新
     const headerTitleEl = document.getElementById('header-title');
