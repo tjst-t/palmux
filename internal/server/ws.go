@@ -217,6 +217,9 @@ func (s *Server) handleAttach() http.Handler {
 		// クライアントのセッション/ウィンドウ変更を監視して WebSocket に通知
 		go s.watchActiveWindow(ctx, writeWS, ptmx, cleanup)
 
+		// 通知ストアの変更を WebSocket に配信
+		go s.watchNotifications(ctx, writeWS, cleanup)
+
 		// WebSocket → pty (入力)
 		s.wsToPty(ctx, conn, ptmx, cleanup)
 	})
@@ -242,6 +245,46 @@ func (s *Server) wsPing(ctx context.Context, writeWS func(context.Context, []byt
 			return
 		case <-ticker.C:
 			msg := wsOutputMessage{Type: "ping"}
+			data, err := json.Marshal(msg)
+			if err != nil {
+				continue
+			}
+			if err := writeWS(ctx, data); err != nil {
+				cleanup()
+				return
+			}
+		}
+	}
+}
+
+// wsNotificationMessage は通知更新メッセージ。
+type wsNotificationMessage struct {
+	Type          string         `json:"type"`
+	Notifications []Notification `json:"notifications"`
+}
+
+// watchNotifications は NotificationStore の変更を監視し、
+// notification_update メッセージを WebSocket に送信する。
+func (s *Server) watchNotifications(
+	ctx context.Context,
+	writeWS func(context.Context, []byte) error,
+	cleanup func(),
+) {
+	ch := s.notifications.Subscribe()
+	defer s.notifications.Unsubscribe(ch)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-ch:
+			if !ok {
+				return
+			}
+			msg := wsNotificationMessage{
+				Type:          "notification_update",
+				Notifications: event.Notifications,
+			}
 			data, err := json.Marshal(msg)
 			if err != nil {
 				continue
