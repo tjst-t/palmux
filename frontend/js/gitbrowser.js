@@ -804,29 +804,17 @@ export class GitBrowser {
         return;
       }
 
-      const pre = document.createElement('pre');
-      pre.className = 'gb-diff-pre';
+      const fileStatus = this._getFileStatus(path);
+      const isNewFile = fileStatus === 'A' || fileStatus === '?' || this._isAllAddedDiff(result.diff);
+      const isWideScreen = window.innerWidth >= 768;
 
-      const lines = result.diff.split('\n');
-      for (const line of lines) {
-        const lineEl = document.createElement('div');
-        lineEl.className = 'gb-diff-line';
-
-        if (line.startsWith('+')) {
-          lineEl.classList.add('gb-diff-line--added');
-        } else if (line.startsWith('-')) {
-          lineEl.classList.add('gb-diff-line--removed');
-        } else if (line.startsWith('@@')) {
-          lineEl.classList.add('gb-diff-line--hunk');
-        } else if (line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')) {
-          lineEl.classList.add('gb-diff-line--meta');
-        }
-
-        lineEl.textContent = line;
-        pre.appendChild(lineEl);
+      if (isNewFile) {
+        this._renderNewFileDiff(content, result.diff);
+      } else if (isWideScreen) {
+        this._renderSideBySideDiff(content, result.diff);
+      } else {
+        this._renderUnifiedDiff(content, result.diff);
       }
-
-      content.appendChild(pre);
     } catch (err) {
       console.error('Failed to load diff:', err);
       content.innerHTML = '';
@@ -835,6 +823,263 @@ export class GitBrowser {
       error.textContent = `Failed to load diff: ${err.message}`;
       content.appendChild(error);
     }
+  }
+
+  // --- Diff ヘルパー ---
+
+  /**
+   * ファイルパスに対応するステータスコードを返す。
+   * @param {string} path
+   * @returns {string|null}
+   */
+  _getFileStatus(path) {
+    const files = this._selectedCommit
+      ? (this._commitFiles || [])
+      : (this._status ? this._status.files : []);
+    const file = files.find(f => f.path === path);
+    return file ? file.status : null;
+  }
+
+  /**
+   * diff の全行が追加行（+）かどうか判定する（新規ファイルのフォールバック検出）。
+   * @param {string} diffText
+   * @returns {boolean}
+   */
+  _isAllAddedDiff(diffText) {
+    const lines = diffText.split('\n');
+    let hasContentLine = false;
+    for (const line of lines) {
+      if (line.startsWith('diff ') || line.startsWith('index ') ||
+          line.startsWith('---') || line.startsWith('+++') ||
+          line.startsWith('@@') || line === '' || line.startsWith('\\')) {
+        continue;
+      }
+      hasContentLine = true;
+      if (!line.startsWith('+')) return false;
+    }
+    return hasContentLine;
+  }
+
+  /**
+   * unified diff を side-by-side 用に解析する。
+   * @param {string} diffText
+   * @returns {{ meta: string[], hunks: Array<{ header: string, left: Array<string|null>, right: Array<string|null> }> }}
+   */
+  _parseDiffLines(diffText) {
+    const lines = diffText.split('\n');
+    const meta = [];
+    const hunks = [];
+    let currentHunk = null;
+    let removedBuf = [];
+    let addedBuf = [];
+
+    const flushBuffers = () => {
+      if (!currentHunk) return;
+      const maxLen = Math.max(removedBuf.length, addedBuf.length);
+      for (let i = 0; i < maxLen; i++) {
+        currentHunk.left.push(i < removedBuf.length ? removedBuf[i] : null);
+        currentHunk.right.push(i < addedBuf.length ? addedBuf[i] : null);
+      }
+      removedBuf = [];
+      addedBuf = [];
+    };
+
+    for (const line of lines) {
+      if (line.startsWith('diff ') || line.startsWith('index ') ||
+          line.startsWith('--- ') || line.startsWith('+++ ')) {
+        meta.push(line);
+      } else if (line.startsWith('@@')) {
+        flushBuffers();
+        currentHunk = { header: line, left: [], right: [] };
+        hunks.push(currentHunk);
+      } else if (currentHunk) {
+        if (line.startsWith('-')) {
+          removedBuf.push(line);
+        } else if (line.startsWith('+')) {
+          addedBuf.push(line);
+        } else {
+          flushBuffers();
+          currentHunk.left.push(line);
+          currentHunk.right.push(line);
+        }
+      }
+    }
+    flushBuffers();
+
+    return { meta, hunks };
+  }
+
+  /**
+   * unified diff をそのまま表示する（モバイル用）。
+   * @param {HTMLElement} container
+   * @param {string} diffText
+   */
+  _renderUnifiedDiff(container, diffText) {
+    const pre = document.createElement('pre');
+    pre.className = 'gb-diff-pre';
+
+    const lines = diffText.split('\n');
+    for (const line of lines) {
+      const lineEl = document.createElement('div');
+      lineEl.className = 'gb-diff-line';
+
+      if (line.startsWith('+')) {
+        lineEl.classList.add('gb-diff-line--added');
+      } else if (line.startsWith('-')) {
+        lineEl.classList.add('gb-diff-line--removed');
+      } else if (line.startsWith('@@')) {
+        lineEl.classList.add('gb-diff-line--hunk');
+      } else if (line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')) {
+        lineEl.classList.add('gb-diff-line--meta');
+      }
+
+      lineEl.textContent = line;
+      pre.appendChild(lineEl);
+    }
+
+    container.appendChild(pre);
+  }
+
+  /**
+   * 新規ファイルの diff を表示する（+ プレフィックスを除去して通常表示）。
+   * @param {HTMLElement} container
+   * @param {string} diffText
+   */
+  _renderNewFileDiff(container, diffText) {
+    const pre = document.createElement('pre');
+    pre.className = 'gb-diff-pre';
+
+    const lines = diffText.split('\n');
+    for (const line of lines) {
+      const lineEl = document.createElement('div');
+      lineEl.className = 'gb-diff-line';
+
+      if (line.startsWith('diff ') || line.startsWith('index ') ||
+          line.startsWith('---') || line.startsWith('+++')) {
+        lineEl.classList.add('gb-diff-line--meta');
+        lineEl.textContent = line;
+      } else if (line.startsWith('@@')) {
+        lineEl.classList.add('gb-diff-line--hunk');
+        lineEl.textContent = line;
+      } else if (line.startsWith('+')) {
+        lineEl.textContent = ' ' + line.substring(1);
+      } else {
+        lineEl.textContent = line;
+      }
+
+      pre.appendChild(lineEl);
+    }
+
+    container.appendChild(pre);
+  }
+
+  /**
+   * side-by-side diff を表示する（PC/iPad 用）。
+   * @param {HTMLElement} container
+   * @param {string} diffText
+   */
+  _renderSideBySideDiff(container, diffText) {
+    const parsed = this._parseDiffLines(diffText);
+
+    // content を flex column に切り替え
+    container.classList.add('gb-diff-content--sbs');
+
+    // メタ行（diff, index, ---, +++）
+    if (parsed.meta.length > 0) {
+      const metaPre = document.createElement('pre');
+      metaPre.className = 'gb-diff-pre gb-diff-meta-block';
+      for (const line of parsed.meta) {
+        const lineEl = document.createElement('div');
+        lineEl.className = 'gb-diff-line gb-diff-line--meta';
+        lineEl.textContent = line;
+        metaPre.appendChild(lineEl);
+      }
+      container.appendChild(metaPre);
+    }
+
+    // side-by-side コンテナ
+    const sbs = document.createElement('div');
+    sbs.className = 'gb-diff-sbs';
+
+    const leftPane = document.createElement('div');
+    leftPane.className = 'gb-diff-sbs-left';
+    const leftPre = document.createElement('pre');
+    leftPre.className = 'gb-diff-pre';
+
+    const rightPane = document.createElement('div');
+    rightPane.className = 'gb-diff-sbs-right';
+    const rightPre = document.createElement('pre');
+    rightPre.className = 'gb-diff-pre';
+
+    for (const hunk of parsed.hunks) {
+      // ハンクヘッダーを両ペインに表示
+      const leftHunk = document.createElement('div');
+      leftHunk.className = 'gb-diff-line gb-diff-line--hunk';
+      leftHunk.textContent = hunk.header;
+      leftPre.appendChild(leftHunk);
+
+      const rightHunk = document.createElement('div');
+      rightHunk.className = 'gb-diff-line gb-diff-line--hunk';
+      rightHunk.textContent = hunk.header;
+      rightPre.appendChild(rightHunk);
+
+      for (let i = 0; i < hunk.left.length; i++) {
+        const leftLine = hunk.left[i];
+        const rightLine = hunk.right[i];
+
+        // 左ペイン（旧）
+        const leftEl = document.createElement('div');
+        leftEl.className = 'gb-diff-line';
+        if (leftLine === null) {
+          leftEl.classList.add('gb-diff-line--empty');
+          leftEl.textContent = '\u00A0';
+        } else if (leftLine.startsWith('-')) {
+          leftEl.classList.add('gb-diff-line--removed');
+          leftEl.textContent = leftLine;
+        } else {
+          leftEl.textContent = leftLine;
+        }
+        leftPre.appendChild(leftEl);
+
+        // 右ペイン（新）
+        const rightEl = document.createElement('div');
+        rightEl.className = 'gb-diff-line';
+        if (rightLine === null) {
+          rightEl.classList.add('gb-diff-line--empty');
+          rightEl.textContent = '\u00A0';
+        } else if (rightLine.startsWith('+')) {
+          rightEl.classList.add('gb-diff-line--added');
+          rightEl.textContent = rightLine;
+        } else {
+          rightEl.textContent = rightLine;
+        }
+        rightPre.appendChild(rightEl);
+      }
+    }
+
+    leftPane.appendChild(leftPre);
+    rightPane.appendChild(rightPre);
+    sbs.appendChild(leftPane);
+    sbs.appendChild(rightPane);
+
+    // 左右スクロール同期
+    let syncing = false;
+    leftPane.addEventListener('scroll', () => {
+      if (syncing) return;
+      syncing = true;
+      rightPane.scrollTop = leftPane.scrollTop;
+      rightPane.scrollLeft = leftPane.scrollLeft;
+      syncing = false;
+    });
+    rightPane.addEventListener('scroll', () => {
+      if (syncing) return;
+      syncing = true;
+      leftPane.scrollTop = rightPane.scrollTop;
+      leftPane.scrollLeft = rightPane.scrollLeft;
+      syncing = false;
+    });
+
+    container.appendChild(sbs);
   }
 
   // --- フォントサイズ ---
