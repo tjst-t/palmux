@@ -4,6 +4,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
+import { uploadImage } from './api.js';
 
 /**
  * PalmuxTerminal は xterm.js のラッパー。
@@ -32,6 +33,8 @@ export class PalmuxTerminal {
     this._modifierHandled = false;
     /** @type {function|null} document レベルの keydown ハンドラー参照 */
     this._boundGlobalKeyHandler = null;
+    /** @type {function|null} document レベルの paste ハンドラー参照 */
+    this._boundPasteHandler = null;
   }
 
   /**
@@ -93,6 +96,14 @@ export class PalmuxTerminal {
       this.fit();
     });
     this._resizeObserver.observe(this._container);
+
+    // クリップボードから画像をペースト → アップロード → パスをターミナルに入力
+    // xterm.js が paste イベントの伝播を止めるため、キャプチャフェーズで先に捕捉する
+    if (this._boundPasteHandler) {
+      document.removeEventListener('paste', this._boundPasteHandler, true);
+    }
+    this._boundPasteHandler = this._handlePaste.bind(this);
+    document.addEventListener('paste', this._boundPasteHandler, true);
 
     // 修飾キー有効時の即時送信: IME の composing を待たずに制御文字を送信
     if (helperTextarea) {
@@ -251,6 +262,10 @@ export class PalmuxTerminal {
     if (this._boundGlobalKeyHandler) {
       document.removeEventListener('keydown', this._boundGlobalKeyHandler);
       this._boundGlobalKeyHandler = null;
+    }
+    if (this._boundPasteHandler) {
+      document.removeEventListener('paste', this._boundPasteHandler, true);
+      this._boundPasteHandler = null;
     }
     if (this._ws) {
       this._ws.close();
@@ -448,6 +463,99 @@ export class PalmuxTerminal {
   }
 
   /**
+   * Ctrl+V / Cmd+V 時にクリップボードから画像を非同期チェックする。
+   * navigator.clipboard.read() で画像が見つかればアップロードしてパスを送信する。
+   * テキストのみの場合は何もしない（xterm.js の通常ペースト処理に任せる）。
+   */
+  async _checkClipboardForImage() {
+    if (!navigator.clipboard?.read) return;
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imageType = item.types.find((t) => t.startsWith('image/'));
+        if (!imageType) continue;
+
+        const blob = await item.getType(imageType);
+        const extMap = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp' };
+        const ext = extMap[imageType] || '.png';
+        const file = new File([blob], 'clipboard' + ext, { type: imageType });
+
+        this._showUploadFeedback('Uploading...', 'info');
+        try {
+          const resp = await uploadImage(file);
+          this._sendInput(resp.path);
+          this._showUploadFeedback('Pasted: ' + resp.path, 'success');
+        } catch (err) {
+          console.error('Image upload failed:', err);
+          this._showUploadFeedback('Upload failed', 'error');
+        }
+        return;
+      }
+    } catch (e) {
+      // Permission denied or API not available — Shift+右クリックのフォールバックに任せる
+    }
+  }
+
+  /**
+   * paste イベントハンドラ。
+   * クリップボードに画像がある場合のみインターセプトし、アップロードしてパスを送信する。
+   * 画像がない場合は何もせず xterm.js のテキストペースト処理に任せる。
+   * @param {ClipboardEvent} e
+   */
+  _handlePaste(e) {
+    if (!this._ws || this._ws.readyState !== WebSocket.OPEN) return;
+
+    const files = e.clipboardData?.files;
+    if (!files || files.length === 0) return;
+
+    const imageFile = Array.from(files).find((f) => f.type.startsWith('image/'));
+    if (!imageFile) return;
+
+    // 画像が見つかった場合のみ既定の paste 動作を止める
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    this._showUploadFeedback('Uploading...', 'info');
+
+    uploadImage(imageFile)
+      .then((resp) => {
+        this._sendInput(resp.path);
+        this._showUploadFeedback('Pasted: ' + resp.path, 'success');
+      })
+      .catch((err) => {
+        console.error('Image upload failed:', err);
+        this._showUploadFeedback('Upload failed', 'error');
+      });
+  }
+
+  /**
+   * アップロードフィードバックをトースト表示する。
+   * 既存の .drawer-toast CSS クラスを再利用する。
+   * @param {string} message - 表示メッセージ
+   * @param {'info'|'success'|'error'} type - トーストの種類
+   */
+  _showUploadFeedback(message, type) {
+    // 既存のトーストがあれば削除
+    const existing = document.querySelector('.drawer-toast--upload');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.className = `drawer-toast drawer-toast--upload drawer-toast--${type}`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+
+    // 表示アニメーション
+    requestAnimationFrame(() => {
+      toast.classList.add('drawer-toast--visible');
+    });
+
+    // 自動で非表示 + 削除
+    setTimeout(() => {
+      toast.classList.remove('drawer-toast--visible');
+      setTimeout(() => toast.remove(), 300);
+    }, type === 'error' ? 3000 : 2000);
+  }
+
+  /**
    * document レベルの keydown ハンドラー。
    * ターミナル接続中にブラウザショートカットを抑止し、
    * xterm にフォーカスがない場合は制御文字を直接送信する。
@@ -459,6 +567,12 @@ export class PalmuxTerminal {
     // ブラウザ DevTools は許可
     if (e.key === 'F12') return;
     if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J')) return;
+
+    // Ctrl+V / Cmd+V: クリップボードに画像があればアップロード
+    // xterm.js は Ctrl+V を内部で readText() 処理するため paste イベントが発火しない
+    if (e.key.toLowerCase() === 'v' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+      this._checkClipboardForImage();
+    }
 
     // Ctrl+<key>: ブラウザデフォルト動作を抑止（Ctrl+V はペーストのため除外）
     if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {

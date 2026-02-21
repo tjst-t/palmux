@@ -284,6 +284,39 @@ export async function getGitBranches(session) {
 }
 
 /**
+ * 画像ファイルをサーバーにアップロードし、保存先パスを返す。
+ * fetchAPI() は Content-Type: application/json を固定するため、直接 fetch + FormData を使用する。
+ * @param {File} file - アップロードする画像ファイル
+ * @returns {Promise<{path: string}>} 保存先パス
+ */
+export async function uploadImage(file) {
+  const basePath = getBasePath();
+  const token = getToken();
+  const url = basePath + 'api/upload';
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const headers = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Upload error: ${res.status} ${text}`);
+  }
+
+  return res.json();
+}
+
+/**
  * WebSocket 接続用の URL を生成する。
  * base-path とプロトコル（ws/wss）を考慮し、認証トークンをクエリパラメータに付与する。
  * @param {string} session - セッション名

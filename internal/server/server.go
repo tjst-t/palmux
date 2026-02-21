@@ -89,6 +89,7 @@ func NewServer(opts Options) *Server {
 	mux.Handle("GET /api/sessions/{session}/git/diff", auth(s.handleGitDiff()))
 	mux.Handle("GET /api/sessions/{session}/git/show", auth(s.handleGitShow()))
 	mux.Handle("GET /api/sessions/{session}/git/branches", auth(s.handleGitBranches()))
+	mux.Handle("POST /api/upload", auth(s.handleUploadImage()))
 
 	// 静的ファイル配信
 	if opts.Frontend != nil {
