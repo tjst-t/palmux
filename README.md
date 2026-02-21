@@ -152,7 +152,7 @@ Claude Code が入力待ち（`Stop`）になったウィンドウをドロワ�
         "hooks": [
           {
             "type": "command",
-            "command": "for f in ~/.config/palmux/env.*; do [ -f \"$f\" ] && source \"$f\" 2>/dev/null && [ -n \"$PALMUX_TOKEN\" ] && curl -sf -X POST \"http://localhost:${PALMUX_PORT}${PALMUX_BASE_PATH}api/notifications\" -H \"Authorization: Bearer $PALMUX_TOKEN\" -H 'Content-Type: application/json' -d \"{\\\"session\\\":\\\"$(tmux display-message -p '#S')\\\",\\\"window_index\\\":$(tmux display-message -p '#I'),\\\"type\\\":\\\"stop\\\"}\"; done; true",
+            "command": "for f in ~/.config/palmux/env.*; do [ -f \"$f\" ] && . \"$f\" 2>/dev/null && [ -n \"$PALMUX_TOKEN\" ] && curl -sf -X POST \"http://localhost:${PALMUX_PORT}${PALMUX_BASE_PATH}api/notifications\" -H \"Authorization: Bearer $PALMUX_TOKEN\" -H 'Content-Type: application/json' -d \"{\\\"session\\\":\\\"$(tmux display-message -p '#S')\\\",\\\"window_index\\\":$(tmux display-message -p '#I'),\\\"type\\\":\\\"stop\\\"}\"; done; true",
             "timeout": 5
           }
         ]
@@ -163,7 +163,7 @@ Claude Code が入力待ち（`Stop`）になったウィンドウをドロワ�
         "hooks": [
           {
             "type": "command",
-            "command": "for f in ~/.config/palmux/env.*; do [ -f \"$f\" ] && source \"$f\" 2>/dev/null && [ -n \"$PALMUX_TOKEN\" ] && curl -sf -X DELETE \"http://localhost:${PALMUX_PORT}${PALMUX_BASE_PATH}api/notifications?session=$(tmux display-message -p '#S')&window=$(tmux display-message -p '#I')\" -H \"Authorization: Bearer $PALMUX_TOKEN\"; done; true",
+            "command": "for f in ~/.config/palmux/env.*; do [ -f \"$f\" ] && . \"$f\" 2>/dev/null && [ -n \"$PALMUX_TOKEN\" ] && curl -sf -X DELETE \"http://localhost:${PALMUX_PORT}${PALMUX_BASE_PATH}api/notifications?session=$(tmux display-message -p '#S')&window=$(tmux display-message -p '#I')\" -H \"Authorization: Bearer $PALMUX_TOKEN\"; done; true",
             "timeout": 5
           }
         ]
