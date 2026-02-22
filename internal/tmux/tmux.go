@@ -251,6 +251,10 @@ func (m *Manager) Attach(session string, windowIndex int) (*os.File, *exec.Cmd, 
 	}
 
 	cmd := exec.Command(tmuxBin, args...)
+	// xterm.js は xterm 互換ターミナルなので TERM=xterm-256color を設定する。
+	// これにより tmux が外側ターミナルの OSC 52 サポートを正しく検出し、
+	// クリップボード同期（set-clipboard）が機能する。
+	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		return nil, nil, fmt.Errorf("attach session %q: %w", session, err)
