@@ -64,6 +64,8 @@ export class Drawer {
     this._pinned = false;
     /** @type {Function|null} リサイズハンドラ（解除用） */
     this._resizeHandler = null;
+    /** @type {number|null} ウィンドウ一覧の定期リフレッシュタイマー ID */
+    this._refreshTimer = null;
 
     /** @type {number} ピン留め時の Drawer 幅 */
     this._drawerWidth = this._loadDrawerWidth() || 280;
@@ -374,6 +376,8 @@ export class Drawer {
         await this._loadWindows(this._currentSession).catch(() => {});
       }
       this._renderContent();
+      // ウィンドウ名の定期リフレッシュを開始
+      this._startRefreshPolling();
     } catch (err) {
       console.error('Failed to load sessions for drawer:', err);
       this._content.innerHTML = '<div class="drawer-error">Failed to load sessions</div>';
@@ -393,6 +397,7 @@ export class Drawer {
     this._el.classList.remove('drawer--open');
     this._overlay.classList.remove('drawer-overlay--visible');
     this._clearLongPressTimer();
+    this._stopRefreshPolling();
     if (this._onClose) {
       this._onClose();
     }
@@ -466,6 +471,75 @@ export class Drawer {
     const windows = await listWindows(sessionName) || [];
     this._windowsCache[sessionName] = windows;
     return windows;
+  }
+
+  /**
+   * 展開中のセッションのウィンドウ一覧を定期的にリフレッシュするポーリングを開始する。
+   * ウィンドウ名（プロセス名）の変化を半リアルタイムで反映する。
+   */
+  _startRefreshPolling() {
+    this._stopRefreshPolling();
+    this._refreshTimer = window.setInterval(() => {
+      this._refreshExpandedWindows();
+    }, 5000);
+  }
+
+  /**
+   * ウィンドウ一覧のポーリングを停止する。
+   */
+  _stopRefreshPolling() {
+    if (this._refreshTimer !== null) {
+      window.clearInterval(this._refreshTimer);
+      this._refreshTimer = null;
+    }
+  }
+
+  /**
+   * 展開中の各セッションのウィンドウ一覧を API から再取得し、
+   * 変更があれば再描画する。
+   */
+  async _refreshExpandedWindows() {
+    if (!this._visible) return;
+    if (this._expandedSessions.size === 0) return;
+
+    let changed = false;
+
+    for (const sessionName of this._expandedSessions) {
+      try {
+        const freshWindows = await listWindows(sessionName) || [];
+        const cached = this._windowsCache[sessionName] || [];
+
+        // ウィンドウ数やプロパティが変わったかを簡易比較
+        if (this._windowsChanged(cached, freshWindows)) {
+          this._windowsCache[sessionName] = freshWindows;
+          changed = true;
+        }
+      } catch (err) {
+        // ネットワークエラー等は無視（次回ポーリングで再試行）
+      }
+    }
+
+    if (changed) {
+      this._renderContent();
+    }
+  }
+
+  /**
+   * 2つのウィンドウ配列が異なるかを比較する。
+   * @param {Array} oldWindows
+   * @param {Array} newWindows
+   * @returns {boolean} 変更があれば true
+   */
+  _windowsChanged(oldWindows, newWindows) {
+    if (oldWindows.length !== newWindows.length) return true;
+    for (let i = 0; i < oldWindows.length; i++) {
+      const o = oldWindows[i];
+      const n = newWindows[i];
+      if (o.index !== n.index || o.name !== n.name || o.active !== n.active) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -1824,6 +1898,7 @@ export class Drawer {
     this._windowsCache = {};
     this._expandedSessions.clear();
     this._clearLongPressTimer();
+    this._stopRefreshPolling();
 
     // ピン状態をクリア
     if (this._pinned) {
