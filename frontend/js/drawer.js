@@ -1095,12 +1095,6 @@ export class Drawer {
       existing.remove();
     }
 
-    // 現在接続中のセッションは削除不可
-    if (session.name === this._currentSession) {
-      this._showDeleteError('Cannot delete the currently connected session');
-      return;
-    }
-
     const overlay = document.createElement('div');
     overlay.className = 'drawer-delete-modal-overlay';
 
@@ -1153,6 +1147,8 @@ export class Drawer {
       deleteBtn.disabled = true;
       deleteBtn.textContent = 'Deleting...';
 
+      const wasActive = session.name === this._currentSession;
+
       try {
         await deleteSession(session.name);
         closeModal();
@@ -1162,8 +1158,10 @@ export class Drawer {
         this._expandedSessions.delete(session.name);
         this._renderContent();
 
-        // コールバック呼び出し
-        if (this._onDeleteSession) {
+        if (wasActive) {
+          // 削除したのが active session → 別セッションに自動遷移
+          await this._transitionToRecentSession();
+        } else if (this._onDeleteSession) {
           this._onDeleteSession();
         }
       } catch (err) {
@@ -1172,6 +1170,44 @@ export class Drawer {
         this._showDeleteError(`Failed to delete session: ${err.message}`);
       }
     });
+  }
+
+  /**
+   * 最近アクセスしたセッションに自動遷移する。
+   * セッションが0件の場合は _onDeleteSession コールバックを呼ぶ。
+   */
+  async _transitionToRecentSession() {
+    if (this._sessions.length === 0) {
+      if (this._onDeleteSession) {
+        this._onDeleteSession();
+      }
+      return;
+    }
+
+    // activity 降順（最近アクセスした順）でソート
+    const sorted = [...this._sessions].sort(
+      (a, b) => new Date(b.activity) - new Date(a.activity)
+    );
+    const target = sorted[0];
+
+    // ウィンドウ一覧を取得し、active なウィンドウに遷移
+    try {
+      const windows = await this._loadWindows(target.name);
+      if (windows.length > 0) {
+        const activeWindow = windows.find((w) => w.active) || windows[0];
+        this._currentSession = target.name;
+        this._currentWindowIndex = activeWindow.index;
+        this._onSelectSession(target.name, activeWindow.index);
+        this._renderContent();
+      } else if (this._onDeleteSession) {
+        this._onDeleteSession();
+      }
+    } catch (err) {
+      console.error('Failed to transition to recent session:', err);
+      if (this._onDeleteSession) {
+        this._onDeleteSession();
+      }
+    }
   }
 
   /**
@@ -1469,10 +1505,6 @@ export class Drawer {
     // Delete
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'drawer-context-menu-item drawer-context-menu-item--danger';
-    if (windowCount <= 1) {
-      deleteBtn.disabled = true;
-      deleteBtn.title = 'Cannot delete the last window';
-    }
     deleteBtn.textContent = 'Delete';
     deleteBtn.addEventListener('click', () => {
       closeMenu();
@@ -1508,12 +1540,6 @@ export class Drawer {
    * @param {number} windowCount - セッション内のウィンドウ総数
    */
   async _doDeleteWindow(sessionName, win, windowCount) {
-    // セッション内の最後のウィンドウは削除不可（tmux の制約）
-    if (windowCount <= 1) {
-      this._showDeleteError('Cannot delete the last window in a session');
-      return;
-    }
-
     try {
       await deleteWindow(sessionName, win.index);
 
@@ -1521,20 +1547,27 @@ export class Drawer {
       delete this._windowsCache[sessionName];
       const updatedWindows = await this._loadWindows(sessionName);
 
+      if (updatedWindows.length === 0) {
+        // 最後のウィンドウを削除 → セッションも消えるので再取得して遷移
+        await this._loadSessions();
+        this._expandedSessions.delete(sessionName);
+        this._renderContent();
+        await this._transitionToRecentSession();
+        return;
+      }
+
       // 削除したウィンドウが現在表示中だった場合、前のウィンドウに切り替え
       if (sessionName === this._currentSession && win.index === this._currentWindowIndex) {
-        if (updatedWindows.length > 0) {
-          // 削除されたインデックスより前のウィンドウに切り替え、なければ最初のウィンドウ
-          const prevWindow = updatedWindows.reduce((prev, w) => {
-            if (w.index < win.index && (prev === null || w.index > prev.index)) {
-              return w;
-            }
-            return prev;
-          }, null) || updatedWindows[0];
+        // 削除されたインデックスより前のウィンドウに切り替え、なければ最初のウィンドウ
+        const prevWindow = updatedWindows.reduce((prev, w) => {
+          if (w.index < win.index && (prev === null || w.index > prev.index)) {
+            return w;
+          }
+          return prev;
+        }, null) || updatedWindows[0];
 
-          this._currentWindowIndex = prevWindow.index;
-          this._onSelectWindow(sessionName, prevWindow.index);
-        }
+        this._currentWindowIndex = prevWindow.index;
+        this._onSelectWindow(sessionName, prevWindow.index);
       }
 
       this._renderContent();
