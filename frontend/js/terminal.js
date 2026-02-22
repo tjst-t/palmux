@@ -4,6 +4,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
+import { ClipboardAddon } from '@xterm/addon-clipboard';
 import { uploadImage } from './api.js';
 
 /**
@@ -75,6 +76,26 @@ export class PalmuxTerminal {
     const unicode11Addon = new Unicode11Addon();
     this._term.loadAddon(unicode11Addon);
     this._term.unicode.activeVersion = '11';
+
+    // OSC 52 クリップボード同期（tmux コピーモード等 → ブラウザクリップボード）
+    // HTTPS または localhost でのみ navigator.clipboard API が利用可能
+    // tmux は selection パラメータを空文字で送るため、デフォルトプロバイダ（"c" のみ受付）
+    // では動作しない。全 selection タイプを受け付けるカスタムプロバイダを使用する。
+    this._term.loadAddon(new ClipboardAddon(undefined, {
+      readText() { return navigator.clipboard.readText(); },
+      writeText(_selection, text) { return navigator.clipboard.writeText(text); },
+    }));
+
+    // Ctrl+V / Cmd+V: xterm.js が ^V 制御文字を送信するのを抑止する。
+    // return false でキー処理をスキップするが、preventDefault() は呼ばないので
+    // ブラウザのネイティブ paste イベントが発火し、テキスト・画像ペーストが動作する。
+    this._term.attachCustomKeyEventHandler((e) => {
+      if (e.type === 'keydown' && e.key.toLowerCase() === 'v' &&
+          (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+        return false; // xterm.js の ^V 送信を抑止、paste イベントに委譲
+      }
+      return true;
+    });
 
     // ブラウザショートカット（Ctrl+N, Ctrl+T 等）を抑止し、ターミナルに送信する。
     // document レベルで捕捉することで、xterm にフォーカスがない場合でも動作する。
@@ -482,40 +503,6 @@ export class PalmuxTerminal {
   }
 
   /**
-   * Ctrl+V / Cmd+V 時にクリップボードから画像を非同期チェックする。
-   * navigator.clipboard.read() で画像が見つかればアップロードしてパスを送信する。
-   * テキストのみの場合は何もしない（xterm.js の通常ペースト処理に任せる）。
-   */
-  async _checkClipboardForImage() {
-    if (!navigator.clipboard?.read) return;
-    try {
-      const items = await navigator.clipboard.read();
-      for (const item of items) {
-        const imageType = item.types.find((t) => t.startsWith('image/'));
-        if (!imageType) continue;
-
-        const blob = await item.getType(imageType);
-        const extMap = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp' };
-        const ext = extMap[imageType] || '.png';
-        const file = new File([blob], 'clipboard' + ext, { type: imageType });
-
-        this._showUploadFeedback('Uploading...', 'info');
-        try {
-          const resp = await uploadImage(file);
-          this._sendInput(resp.path);
-          this._showUploadFeedback('Pasted: ' + resp.path, 'success');
-        } catch (err) {
-          console.error('Image upload failed:', err);
-          this._showUploadFeedback('Upload failed', 'error');
-        }
-        return;
-      }
-    } catch (e) {
-      // Permission denied or API not available — Shift+右クリックのフォールバックに任せる
-    }
-  }
-
-  /**
    * paste イベントハンドラ。
    * クリップボードに画像がある場合のみインターセプトし、アップロードしてパスを送信する。
    * 画像がない場合は何もせず xterm.js のテキストペースト処理に任せる。
@@ -587,13 +574,18 @@ export class PalmuxTerminal {
     if (e.key === 'F12') return;
     if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J')) return;
 
-    // Ctrl+V / Cmd+V: クリップボードに画像があればアップロード
-    // xterm.js は Ctrl+V を内部で readText() 処理するため paste イベントが発火しない
+    // Ctrl+V / Cmd+V: ブラウザのネイティブ paste イベントに委譲する。
+    // preventDefault() を呼ばないことで paste イベントが発火し、
+    // _handlePaste（画像）と xterm.js（テキスト）が処理する。
+    // ターミナル非フォーカス時はフォーカスを移してから paste を発火させる。
     if (e.key.toLowerCase() === 'v' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
-      this._checkClipboardForImage();
+      if (!this._isTerminalFocused()) {
+        this._term.focus();
+      }
+      return; // preventDefault() を呼ばない → paste イベント発火
     }
 
-    // Ctrl+<key>: ブラウザデフォルト動作を抑止（Ctrl+V はペーストのため除外）
+    // Ctrl+<key>: ブラウザデフォルト動作を抑止（Ctrl+V は上で除外）
     if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
       const key = e.key.toLowerCase();
       if (key !== 'v' && key.length === 1) {

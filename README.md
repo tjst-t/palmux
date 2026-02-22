@@ -11,6 +11,7 @@ Go シングルバイナリにフロントエンドを埋め込んでデプロ�
 - **セッション/ウィンドウ管理** — Drawer UI から作成・削除・リネーム・切り替え
 - **自動再接続** — 指数バックオフによる WebSocket 自動再接続、接続状態インジケーター
 - **PWA 対応** — ホーム画面に追加してスタンドアロンアプリとして利用可能
+- **クリップボード同期** — tmux コピーモード/マウス選択でコピーした内容がブラウザのクリップボードに自動反映（OSC 52）。Ctrl+V でテキスト・画像のペーストも可能
 - **TLS サポート** — 証明書を指定して HTTPS で起動可能
 - **認証** — Bearer トークンによる API 保護（起動時に自動生成）
 - **ベースパス対応** — リバースプロキシ配下でのサブパス運用に対応
@@ -115,11 +116,22 @@ example.com {
 
 ### tmux 推奨設定
 
-スマートフォンでのタッチスクロールによるログ閲覧を有効にするため、tmux の設定ファイル (`~/.tmux.conf`) に以下を追加してください：
+`~/.tmux.conf` に以下を追加してください：
 
 ```bash
+# マウスサポート（タッチスクロール、マウス選択に必要）
 set -g mouse on
+
+# クリップボード同期（OSC 52 経由でブラウザのクリップボードと連携）
+set -g set-clipboard on
+set -as terminal-features 'xterm-256color:clipboard'
 ```
+
+- `set -g mouse on` — スマートフォンでのタッチスクロール・マウス選択でのコピーに必要
+- `set -g set-clipboard on` — tmux がコピー時に OSC 52 エスケープシーケンスを発行し、ブラウザのクリップボードに反映する
+- `set -as terminal-features ...` — tmux に外側ターミナル（Palmux）の OSC 52 サポートを認識させる
+
+クリップボード同期は HTTPS 接続時のみ動作する（`navigator.clipboard` API の要件）。localhost では HTTP でも動作する。
 
 ### Drawer
 
@@ -207,7 +219,14 @@ make frontend
 
 # クリーンアップ
 make clean
+
+# HTTPS 付きでテスト起動（自己署名証明書を自動生成）
+./dev-serve.sh <ホスト名|IP> [ポート]
+# 例: ./dev-serve.sh 192.168.1.100
+# 例: ./dev-serve.sh mydev.local 9443
 ```
+
+`dev-serve.sh` は `make build` 実行後、自己署名証明書が `/tmp/palmux-dev-certs/` になければ自動生成し、HTTPS で Palmux を起動する。ホスト名/IP ごとに別の証明書ファイルが作成されるため、アドレスが変わっても再生成される。
 
 ## 技術スタック
 
