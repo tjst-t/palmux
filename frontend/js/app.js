@@ -991,8 +991,8 @@ document.addEventListener('DOMContentLoaded', () => {
       connectToWindow(sessionName, 0);
     },
     onDeleteSession: () => {
-      // セッション削除後の処理（現在は特に何もしない。
-      // 現在接続中のセッション削除は drawer 側でブロックされている）
+      // セッションが0件になった場合にセッション一覧画面に戻る
+      showSessionList({ replace: true });
     },
     onCreateWindow: (session, windowIndex) => {
       // ウィンドウ作成後、ヘッダータイトルを更新
