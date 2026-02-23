@@ -50,9 +50,11 @@ marked.setOptions({
  */
 const MARKDOWN_EXTS = ['.md'];
 
+const HTML_EXTS = ['.html', '.htm'];
+
 const CODE_EXTS = [
   '.go', '.js', '.py', '.sh', '.yaml', '.yml', '.json', '.css',
-  '.html', '.htm', '.sql', '.ts', '.tsx', '.jsx',
+  '.sql', '.ts', '.tsx', '.jsx',
 ];
 
 const PLAINTEXT_EXTS = [
@@ -77,6 +79,7 @@ export function getPreviewType(ext, name) {
   const lowerExt = (ext || '').toLowerCase();
 
   if (MARKDOWN_EXTS.includes(lowerExt)) return 'markdown';
+  if (HTML_EXTS.includes(lowerExt)) return 'html';
   if (CODE_EXTS.includes(lowerExt)) return 'code';
   if (PLAINTEXT_EXTS.includes(lowerExt)) return 'plaintext';
   if (PLAINTEXT_NAMES.includes(name)) return 'plaintext';
@@ -92,7 +95,7 @@ export function getPreviewType(ext, name) {
  * @returns {boolean}
  */
 function isEditableType(previewType) {
-  return previewType === 'markdown' || previewType === 'code' || previewType === 'plaintext';
+  return previewType === 'markdown' || previewType === 'code' || previewType === 'plaintext' || previewType === 'html';
 }
 
 /**
@@ -814,6 +817,8 @@ export class FilePreview {
 
     if (this._previewType === 'markdown') {
       this._renderMarkdown(this._originalContent, this._isTruncated);
+    } else if (this._previewType === 'html') {
+      this._renderHTML();
     } else if (this._previewType === 'code') {
       this._renderCode(this._originalContent, ext, this._isTruncated);
     } else {
@@ -960,6 +965,23 @@ export class FilePreview {
         case 'pdf':
           this._renderPDF();
           break;
+        case 'html': {
+          // Fetch content for edit mode, then render via iframe
+          if (this._fetchFile) {
+            const data = await this._fetchFileContent();
+            if (this._disposed) return;
+            if (data) {
+              this._originalContent = data.content || '';
+              this._isTruncated = !!data.truncated;
+              this._isEditable = !data.truncated && !!this._saveFile;
+            }
+          }
+          this._renderHTML();
+          if (this._isEditable) {
+            this._addEditToggle();
+          }
+          break;
+        }
         case 'markdown':
         case 'code':
         case 'plaintext': {
@@ -1244,6 +1266,32 @@ export class FilePreview {
     }
 
     this._contentEl.appendChild(pdfContainer);
+  }
+
+  /**
+   * Render HTML file via iframe using the raw file URL.
+   */
+  _renderHTML() {
+    this._contentEl.innerHTML = '';
+
+    const container = document.createElement('div');
+    container.className = 'fp-html';
+
+    if (this._getRawURL) {
+      const iframe = document.createElement('iframe');
+      iframe.className = 'fp-html-iframe';
+      iframe.src = this._getRawURL(this._session, this._path);
+      iframe.setAttribute('frameborder', '0');
+      iframe.setAttribute('title', this._entry.name || 'HTML preview');
+      container.appendChild(iframe);
+    } else {
+      const msg = document.createElement('div');
+      msg.className = 'fp-unknown-msg';
+      msg.textContent = 'HTML preview not available';
+      container.appendChild(msg);
+    }
+
+    this._contentEl.appendChild(container);
   }
 
   /**
