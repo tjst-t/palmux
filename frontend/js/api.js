@@ -184,6 +184,17 @@ export async function getFileContent(session, path) {
 }
 
 /**
+ * ファイル名を再帰的に検索する。
+ * @param {string} session - セッション名
+ * @param {string} query - 検索クエリ（ファイル名部分一致）
+ * @param {string} [path='.'] - 検索起点の相対パス
+ * @returns {Promise<{query: string, results: Array<{path: string, name: string, is_dir: boolean, size: number}>}>}
+ */
+export async function searchFiles(session, query, path = '.') {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/files/search?q=${encodeURIComponent(query)}&path=${encodeURIComponent(path)}`);
+}
+
+/**
  * ファイルの内容を保存する（上書き）。
  * @param {string} session - セッション名
  * @param {string} path - ファイルの相対パス

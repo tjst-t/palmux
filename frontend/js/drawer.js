@@ -457,6 +457,8 @@ export class Drawer {
   async _loadSessions() {
     this._sessions = await listSessions() || [];
     this._windowsCache = {};
+    // セッション一覧が更新されたので、ハンバーガーバッジも再評価する
+    this._updateDrawerBtnBadge();
   }
 
   /**
@@ -1878,11 +1880,24 @@ export class Drawer {
 
   /**
    * ハンバーガーボタンの通知ドットを更新する。
+   * セッション一覧が読み込み済みの場合は、存在するセッションへの通知のみを対象にする。
+   * これにより、削除済みセッションへの古い通知でバッジが残り続けるバグを防ぐ。
    */
   _updateDrawerBtnBadge() {
     const drawerBtn = document.getElementById('drawer-btn');
     if (!drawerBtn) return;
-    if (this._notifications.length > 0) {
+
+    let hasNotification;
+    if (this._sessions.length > 0) {
+      // セッション一覧が読み込まれている場合は、既知のセッションへの通知のみカウント
+      const sessionNames = new Set(this._sessions.map((s) => s.name));
+      hasNotification = this._notifications.some((n) => sessionNames.has(n.session));
+    } else {
+      // セッション一覧が未読み込みの場合は通知の有無のみチェック
+      hasNotification = this._notifications.length > 0;
+    }
+
+    if (hasNotification) {
       drawerBtn.classList.add('drawer-btn--has-notification');
     } else {
       drawerBtn.classList.remove('drawer-btn--has-notification');

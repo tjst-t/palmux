@@ -93,6 +93,7 @@ func NewServer(opts Options) *Server {
 	mux.Handle("GET /api/sessions/{session}/windows/{index}/attach", auth(s.handleAttach()))
 	mux.Handle("GET /api/sessions/{session}/cwd", auth(s.handleGetCwd()))
 	mux.Handle("GET /api/sessions/{session}/files", auth(s.handleGetFiles()))
+	mux.Handle("GET /api/sessions/{session}/files/search", auth(s.handleSearchFiles()))
 	mux.Handle("PUT /api/sessions/{session}/files", auth(s.handlePutFile()))
 	mux.Handle("GET /api/connections", auth(s.handleListConnections()))
 	mux.Handle("GET /api/ghq/repos", auth(s.handleListGhqRepos()))

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -361,6 +362,97 @@ func classifyContentType(contentType string) string {
 func isTextContent(data []byte) bool {
 	return !bytes.Contains(data, []byte{0})
 }
+
+// SearchResult はファイル検索の結果を表す。
+type SearchResult struct {
+	Path  string `json:"path"`
+	Name  string `json:"name"`
+	IsDir bool   `json:"is_dir"`
+	Size  int64  `json:"size"`
+}
+
+const maxSearchResults = 200
+
+// Search はルートディレクトリ以下を再帰的に走査し、名前がqueryにマッチするエントリを返す。
+// basePath からの再帰検索を行い、結果パスはルートからの相対パス。
+// マッチ判定は大文字・小文字を区別しない部分一致。
+func (fs *FileServer) Search(query string, basePath string) ([]SearchResult, error) {
+	if query == "" {
+		return []SearchResult{}, nil
+	}
+
+	// ルートを実パスに解決
+	rootReal, err := filepath.EvalSymlinks(fs.RootDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve root: %w", err)
+	}
+	rootReal = filepath.Clean(rootReal)
+
+	// basePath を検証・解決
+	absBase, err := fs.ValidatePath(basePath)
+	if err != nil {
+		return nil, err
+	}
+
+	queryLower := strings.ToLower(query)
+	var results []SearchResult
+
+	walkErr := filepath.WalkDir(absBase, func(path string, d fsEntry, err error) error {
+		if err != nil {
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// .git ディレクトリはスキップ
+		if d.IsDir() && d.Name() == ".git" {
+			return filepath.SkipDir
+		}
+
+		// 起点ディレクトリ自体はスキップ
+		if path == absBase {
+			return nil
+		}
+
+		// 名前の部分一致（大文字小文字不問）
+		if strings.Contains(strings.ToLower(d.Name()), queryLower) {
+			relPath, relErr := filepath.Rel(rootReal, path)
+			if relErr != nil {
+				return nil
+			}
+
+			var size int64
+			if !d.IsDir() {
+				if info, infoErr := d.Info(); infoErr == nil {
+					size = info.Size()
+				}
+			}
+
+			results = append(results, SearchResult{
+				Path:  relPath,
+				Name:  d.Name(),
+				IsDir: d.IsDir(),
+				Size:  size,
+			})
+
+			if len(results) >= maxSearchResults {
+				return filepath.SkipAll
+			}
+		}
+
+		return nil
+	})
+
+	if walkErr != nil {
+		return nil, walkErr
+	}
+
+	return results, nil
+}
+
+// fsEntry は filepath.WalkDir のコールバックで受け取る DirEntry のエイリアス。
+type fsEntry = fs.DirEntry
 
 // isGitDir は指定パスが .git ディレクトリ（またはそのサブディレクトリ）かどうかを判定する。
 func isGitDir(relPath string) bool {

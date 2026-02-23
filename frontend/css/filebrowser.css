@@ -178,6 +178,72 @@
   user-select: none;
 }
 
+/* Search box in breadcrumb */
+.fb-search-box {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: 6px;
+}
+
+.fb-search-input {
+  width: 120px;
+  height: 30px;
+  padding: 0 8px;
+  background: rgba(42, 42, 74, 0.7);
+  border: 1px solid #2a2a4a;
+  border-radius: 15px;
+  color: #e0e0e0;
+  font-size: 12px;
+  outline: none;
+  transition: width 0.2s, border-color 0.15s;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.fb-search-input:focus {
+  width: 160px;
+  border-color: #7ec8e3;
+}
+
+.fb-search-input::placeholder {
+  color: #666;
+}
+
+/* Search result label in breadcrumb */
+.fb-search-result-label {
+  flex: 1;
+  font-size: 13px;
+  color: #8888aa;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 6px;
+}
+
+/* Search result entry */
+.fb-search-result-entry {
+  align-items: flex-start;
+  padding: 8px 12px;
+}
+
+.fb-search-result-names {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fb-search-result-path {
+  font-size: 11px;
+  color: #555;
+  font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* File List */
 .fb-list {
   flex: 1;
@@ -678,6 +744,106 @@
 }
 
 /* ===========================
+   Edit Mode Toolbar (undo/redo + search/replace)
+   =========================== */
+
+.fp-edit-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: #12192e;
+  border-bottom: 1px solid #2a2a4a;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  min-height: 38px;
+}
+
+.fp-edit-tool-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  min-height: 28px;
+  padding: 0 6px;
+  background: rgba(42, 42, 74, 0.6);
+  border: 1px solid #2a2a4a;
+  border-radius: 5px;
+  color: #e0e0e0;
+  font-size: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.fp-edit-tool-btn:hover:not(:disabled) {
+  background: rgba(126, 200, 227, 0.15);
+}
+
+.fp-edit-tool-btn:active:not(:disabled) {
+  background: rgba(126, 200, 227, 0.25);
+}
+
+.fp-edit-tool-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.fp-edit-toolbar-sep {
+  width: 1px;
+  height: 20px;
+  background: #2a2a4a;
+  flex-shrink: 0;
+  margin: 0 2px;
+}
+
+.fp-edit-search-input {
+  height: 28px;
+  min-width: 80px;
+  flex: 1;
+  max-width: 160px;
+  padding: 0 8px;
+  background: rgba(13, 17, 23, 0.8);
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.15s;
+  font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
+}
+
+.fp-edit-search-input:focus {
+  border-color: #7ec8e3;
+}
+
+.fp-edit-replace-input {
+  height: 28px;
+  min-width: 80px;
+  flex: 1;
+  max-width: 140px;
+  padding: 0 8px;
+  background: rgba(13, 17, 23, 0.8);
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.15s;
+  font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
+}
+
+.fp-edit-replace-input:focus {
+  border-color: #ffb74d;
+}
+
+.fp-edit-replace-btn {
+  font-size: 11px;
+}
+
+/* ===========================
    Edit Mode Components
    =========================== */
 
@@ -916,6 +1082,16 @@
 
 /* Mobile optimizations */
 @media (max-width: 600px) {
+  .fb-search-input {
+    width: 90px;
+    height: 26px;
+    font-size: 11px;
+  }
+
+  .fb-search-input:focus {
+    width: 120px;
+  }
+
   .fb-breadcrumb {
     padding: 6px 8px;
     min-height: 36px;
@@ -1020,6 +1196,25 @@
   }
 
   /* Edit mode mobile adjustments */
+  .fp-edit-toolbar {
+    gap: 3px;
+    padding: 3px 6px;
+    min-height: 34px;
+  }
+
+  .fp-edit-tool-btn {
+    min-width: 26px;
+    min-height: 26px;
+    font-size: 13px;
+  }
+
+  .fp-edit-search-input,
+  .fp-edit-replace-input {
+    height: 26px;
+    min-width: 60px;
+    font-size: 11px;
+  }
+
   .fp-edit-toggle-label {
     display: none;
   }
