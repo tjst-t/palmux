@@ -345,3 +345,21 @@ func (m *Manager) ListGhqRepos() ([]GhqRepo, error) {
 	}
 	return m.Ghq.ListRepos()
 }
+
+// CloneGhqRepo は ghq get でリポジトリをクローンし、クローンされたリポジトリ情報を返す。
+// GhqResolver が未設定の場合はエラーを返す。
+func (m *Manager) CloneGhqRepo(url string) (*GhqRepo, error) {
+	if m.Ghq == nil {
+		return nil, fmt.Errorf("ghq is not configured")
+	}
+	return m.Ghq.CloneRepo(url)
+}
+
+// DeleteGhqRepo は指定パスのリポジトリを削除する。
+// GhqResolver が未設定の場合はエラーを返す。
+func (m *Manager) DeleteGhqRepo(fullPath string) error {
+	if m.Ghq == nil {
+		return fmt.Errorf("ghq is not configured")
+	}
+	return m.Ghq.DeleteRepo(fullPath)
+}

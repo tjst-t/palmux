@@ -54,6 +54,11 @@ type configurableMock struct {
 	ghqRepos    []tmux.GhqRepo
 	ghqReposErr error
 	calledListGhqRepos bool
+	cloneGhqRepo    *tmux.GhqRepo
+	cloneGhqRepoErr error
+	calledCloneGhqRepo string
+	deleteGhqRepoErr    error
+	calledDeleteGhqRepo string
 }
 
 func (m *configurableMock) ListSessions() ([]tmux.Session, error) {
@@ -126,6 +131,16 @@ func (m *configurableMock) GetSessionProjectDir(session string) (string, error) 
 func (m *configurableMock) ListGhqRepos() ([]tmux.GhqRepo, error) {
 	m.calledListGhqRepos = true
 	return m.ghqRepos, m.ghqReposErr
+}
+
+func (m *configurableMock) CloneGhqRepo(url string) (*tmux.GhqRepo, error) {
+	m.calledCloneGhqRepo = url
+	return m.cloneGhqRepo, m.cloneGhqRepoErr
+}
+
+func (m *configurableMock) DeleteGhqRepo(fullPath string) error {
+	m.calledDeleteGhqRepo = fullPath
+	return m.deleteGhqRepoErr
 }
 
 func (m *configurableMock) GetClientSessionWindow(tty string) (string, int, error) {
