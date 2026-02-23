@@ -1,52 +1,17 @@
 // app.js - メインアプリケーションロジック
 // セッション一覧→選択→ターミナル表示のフロー
 // Drawer による セッション/ウィンドウ切り替え
+// PanelManager による分割画面サポート
 
-import { listSessions, listWindows, getWebSocketURL, listNotifications, deleteNotification } from './api.js';
-import { PalmuxTerminal } from './terminal.js';
-import { Toolbar } from './toolbar.js';
-import { IMEInput } from './ime-input.js';
+import { listSessions, listWindows, listNotifications, deleteNotification } from './api.js';
 import { Drawer } from './drawer.js';
-import { TouchHandler } from './touch.js';
-import { ConnectionManager } from './connection.js';
-import { FileBrowser } from './filebrowser.js';
-import { GitBrowser } from './gitbrowser.js';
-
-/** @type {PalmuxTerminal|null} */
-let terminal = null;
-
-/** @type {Toolbar|null} */
-let toolbar = null;
-
-/** @type {IMEInput|null} */
-let imeInput = null;
+import { PanelManager } from './panel-manager.js';
 
 /** @type {Drawer|null} */
 let drawer = null;
 
-/** @type {import('./touch.js').TouchHandler|null} */
-let touchHandler = null;
-
-/** @type {ConnectionManager|null} */
-let connectionManager = null;
-
-/** @type {Map<string, {wrapper: HTMLElement, browser: FileBrowser}>} セッションごとのファイルブラウザ */
-const fileBrowsers = new Map();
-
-/** @type {Map<string, {wrapper: HTMLElement, browser: GitBrowser}>} セッションごとの Git ブラウザ */
-const gitBrowsers = new Map();
-
-/** @type {Map<string, string>} セッションごとの表示モード ('terminal' | 'filebrowser' | 'gitbrowser') */
-const sessionViewModes = new Map();
-
-/** 現在接続中のセッション名 */
-let currentSession = null;
-
-/** 現在接続中のウィンドウインデックス */
-let currentWindowIndex = null;
-
-/** 現在の表示モード: 'terminal' | 'filebrowser' | 'gitbrowser' */
-let currentViewMode = 'terminal';
+/** @type {PanelManager|null} */
+let panelManager = null;
 
 /** ツールバー/IME のグローバル状態（セッション切替で保持） */
 const globalUIState = {
@@ -57,55 +22,99 @@ const globalUIState = {
 };
 
 /**
+ * パネルの状態を URL フラグメントに変換する。
+ * @param {import('./panel.js').Panel} panel
+ * @returns {string} - "terminal/session/0", "files/session/0/path", "git/session/0"
+ */
+function _buildPanelFragment(panel) {
+  const s = encodeURIComponent(panel.session);
+  const w = panel.windowIndex;
+  switch (panel.viewMode) {
+    case 'filebrowser': {
+      const path = panel.getCurrentFilePath();
+      return `files/${s}/${w}${path && path !== '.' ? '/' + path : ''}`;
+    }
+    case 'gitbrowser':
+      return `git/${s}/${w}`;
+    default:
+      return `terminal/${s}/${w}`;
+  }
+}
+
+/**
+ * 分割モード時の URL サフィックスを返す。
+ * @returns {string} - "", "&split", "&split=terminal/dev/1" など
+ */
+function _getSplitSuffix() {
+  if (!panelManager || !panelManager.isSplit) return '';
+  const right = panelManager.getRightPanel();
+  if (!right || !right.isConnected) return '&split';
+  return '&split=' + _buildPanelFragment(right);
+}
+
+/**
+ * 分割モード時の右パネル状態オブジェクトを返す。
+ * @returns {object|null}
+ */
+function _buildRightPanelState() {
+  if (!panelManager || !panelManager.isSplit) return null;
+  const right = panelManager.getRightPanel();
+  if (!right || !right.isConnected) return null;
+  return {
+    view: right.viewMode === 'filebrowser' ? 'files' : right.viewMode === 'gitbrowser' ? 'git' : 'terminal',
+    session: right.session,
+    window: right.windowIndex,
+    path: right.getCurrentFilePath(),
+  };
+}
+
+/**
+ * 右パネルの URL フラグメントから状態を復元する。
+ * @param {string} fragment - "terminal/dev/1", "files/dev/1/path/to/file", "git/dev/1"
+ */
+function _restoreRightPanel(fragment) {
+  const parts = fragment.split('/');
+  const view = parts[0];
+  const session = decodeURIComponent(parts[1] || '');
+  const win = parseInt(parts[2], 10);
+  if (!session || isNaN(win)) return;
+
+  const rightPanel = panelManager.getRightPanel();
+  if (!rightPanel) return;
+
+  rightPanel.connectToWindow(session, win);
+
+  switch (view) {
+    case 'files': {
+      const path = parts.slice(3).map(decodeURIComponent).join('/') || '.';
+      rightPanel.showFileBrowser(session, { path });
+      break;
+    }
+    case 'git':
+      rightPanel.showGitBrowser(session);
+      break;
+    // 'terminal' はデフォルト（connectToWindow 後の初期状態）
+  }
+}
+
+/**
  * セッション一覧画面に切り替えるUI処理（セッション読み込みは含まない）。
- * タッチハンドラー・IME・ツールバー・接続をクリーンアップし、
- * セッション一覧パネルを表示する。
+ * PanelManager のパネルをクリーンアップし、セッション一覧パネルを表示する。
  */
 function _switchToSessionListView() {
   const sessionListEl = document.getElementById('session-list');
-  const terminalViewEl = document.getElementById('terminal-view');
+  const panelContainerEl = document.getElementById('panel-container');
   const headerTitleEl = document.getElementById('header-title');
   const drawerBtnEl = document.getElementById('drawer-btn');
 
-  // タッチハンドラーのクリーンアップ
-  if (touchHandler) {
-    touchHandler.destroy();
-    touchHandler = null;
+  // PanelManager のパネルをクリーンアップ
+  if (panelManager) {
+    // 分割モードの場合は解除
+    if (panelManager.isSplit) {
+      panelManager.toggleSplit();
+    }
+    panelManager.getLeftPanel().cleanup();
   }
-
-  // ツールバー/IME の状態を保存してからクリーンアップ
-  if (toolbar) {
-    globalUIState.toolbarVisible = toolbar.visible;
-    globalUIState.keyboardMode = toolbar.keyboardMode;
-    globalUIState.ctrlState = toolbar.ctrlState;
-    globalUIState.altState = toolbar.altState;
-  }
-
-  // IME 入力のクリーンアップ
-  if (imeInput) {
-    imeInput.destroy();
-    imeInput = null;
-  }
-
-  // ツールバーのクリーンアップ
-  if (toolbar) {
-    toolbar.dispose();
-    toolbar = null;
-  }
-
-  // ConnectionManager のクリーンアップ（自動再接続を止める）
-  if (connectionManager) {
-    connectionManager.disconnect();
-    connectionManager = null;
-  }
-
-  // ターミナルが接続中なら切断
-  if (terminal) {
-    terminal.disconnect();
-    terminal = null;
-  }
-  currentSession = null;
-  currentWindowIndex = null;
 
   // 接続状態インジケーターを非表示
   const connectionStatusEl = document.getElementById('connection-status');
@@ -113,37 +122,10 @@ function _switchToSessionListView() {
     connectionStatusEl.classList.add('hidden');
   }
 
-  // 再接続オーバーレイを非表示
-  const reconnectOverlayEl = document.getElementById('reconnect-overlay');
-  if (reconnectOverlayEl) {
-    reconnectOverlayEl.classList.add('hidden');
-  }
-
-  // FileBrowser のクリーンアップ（全セッション分）
-  for (const [, entry] of fileBrowsers) {
-    entry.browser.dispose();
-  }
-  fileBrowsers.clear();
-
-  // GitBrowser のクリーンアップ（全セッション分）
-  for (const [, entry] of gitBrowsers) {
-    entry.browser.dispose();
-  }
-  gitBrowsers.clear();
-
-  sessionViewModes.clear();
-  currentViewMode = 'terminal';
-
   // UI 切り替え
   sessionListEl.classList.remove('hidden');
-  terminalViewEl.classList.add('hidden');
-  const filebrowserViewEl = document.getElementById('filebrowser-view');
-  if (filebrowserViewEl) {
-    filebrowserViewEl.classList.add('hidden');
-  }
-  const gitbrowserViewEl = document.getElementById('gitbrowser-view');
-  if (gitbrowserViewEl) {
-    gitbrowserViewEl.classList.add('hidden');
+  if (panelContainerEl) {
+    panelContainerEl.classList.add('hidden');
   }
   headerTitleEl.textContent = 'Palmux';
 
@@ -165,10 +147,19 @@ function _switchToSessionListView() {
     fontSizeControlsEl.classList.add('hidden');
   }
 
+  // Split toggle ボタンを非表示
+  const splitToggleBtnEl = document.getElementById('split-toggle-btn');
+  if (splitToggleBtnEl) {
+    splitToggleBtnEl.classList.add('hidden');
+  }
+
   // drawer ボタンを非表示（セッション一覧では不要）
   if (drawerBtnEl) {
     drawerBtnEl.classList.add('hidden');
   }
+
+  // Drawer パネルターゲットを非表示
+  _updateDrawerPanelTarget();
 }
 
 /**
@@ -284,81 +275,35 @@ async function showWindowList(sessionName, { push = true } = {}) {
 
 /**
  * 指定セッションのウィンドウにターミナル接続する。
+ * PanelManager のフォーカスパネルに委譲する。
  * @param {string} sessionName - セッション名
  * @param {number} windowIndex - ウィンドウインデックス
  * @param {{ push?: boolean, replace?: boolean }} [opts]
  */
 function connectToWindow(sessionName, windowIndex, { push = true, replace = false } = {}) {
   const sessionListEl = document.getElementById('session-list');
-  const terminalViewEl = document.getElementById('terminal-view');
-  const terminalContainerEl = document.getElementById('terminal-container');
-  const imeContainerEl = document.getElementById('ime-container');
-  const toolbarContainerEl = document.getElementById('toolbar-container');
+  const panelContainerEl = document.getElementById('panel-container');
   const headerTitleEl = document.getElementById('header-title');
   const toolbarToggleBtnEl = document.getElementById('toolbar-toggle-btn');
   const drawerBtnEl = document.getElementById('drawer-btn');
 
-  // ツールバー/IME の状態を保存してからクリーンアップ
-  if (toolbar) {
-    globalUIState.toolbarVisible = toolbar.visible;
-    globalUIState.keyboardMode = toolbar.keyboardMode;
-    globalUIState.ctrlState = toolbar.ctrlState;
-    globalUIState.altState = toolbar.altState;
-  }
-
-  // 既存ターミナルをクリーンアップ
-  if (touchHandler) {
-    touchHandler.destroy();
-    touchHandler = null;
-  }
-  if (imeInput) {
-    imeInput.destroy();
-    imeInput = null;
-  }
-  if (toolbar) {
-    toolbar.dispose();
-    toolbar = null;
-  }
-  if (connectionManager) {
-    connectionManager.disconnect();
-    connectionManager = null;
-  }
-  if (terminal) {
-    terminal.disconnect();
-    terminal = null;
-  }
-
   // UI 切り替え
   sessionListEl.classList.add('hidden');
-  terminalViewEl.classList.remove('hidden');
-  const filebrowserViewEl = document.getElementById('filebrowser-view');
-  if (filebrowserViewEl) {
-    filebrowserViewEl.classList.add('hidden');
-  }
-  const gitbrowserViewEl = document.getElementById('gitbrowser-view');
-  if (gitbrowserViewEl) {
-    gitbrowserViewEl.classList.add('hidden');
+  if (panelContainerEl) {
+    panelContainerEl.classList.remove('hidden');
   }
   headerTitleEl.textContent = `${sessionName}:${windowIndex}`;
-  currentViewMode = 'terminal';
 
-  // ヘッダータブを表示してターミナルをアクティブにする
+  // ヘッダータブを表示（シングルモード時のみ。分割時はパネルヘッダーにタブがある）
   const headerTabsEl = document.getElementById('header-tabs');
   if (headerTabsEl) {
-    headerTabsEl.classList.remove('hidden');
+    if (panelManager && panelManager.isSplit) {
+      headerTabsEl.classList.add('hidden');
+    } else {
+      headerTabsEl.classList.remove('hidden');
+    }
   }
-  const headerTabTerminal = document.getElementById('header-tab-terminal');
-  const headerTabFiles = document.getElementById('header-tab-files');
-  const headerTabGit = document.getElementById('header-tab-git');
-  if (headerTabTerminal) {
-    headerTabTerminal.classList.add('header-tab-btn--active');
-  }
-  if (headerTabFiles) {
-    headerTabFiles.classList.remove('header-tab-btn--active');
-  }
-  if (headerTabGit) {
-    headerTabGit.classList.remove('header-tab-btn--active');
-  }
+  _updateHeaderTabs('terminal');
 
   // ツールバートグルボタンを表示
   if (toolbarToggleBtnEl) {
@@ -371,6 +316,12 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
     fontSizeControlsEl.classList.remove('hidden');
   }
 
+  // Split toggle を表示
+  const splitToggleBtnEl = document.getElementById('split-toggle-btn');
+  if (splitToggleBtnEl) {
+    splitToggleBtnEl.classList.remove('hidden');
+  }
+
   // drawer ボタンを表示（ターミナル接続中のみ、ピン留め中は非表示）
   if (drawerBtnEl) {
     if (drawer && drawer.isPinned) {
@@ -380,12 +331,15 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
     }
   }
 
-  currentSession = sessionName;
-  currentWindowIndex = windowIndex;
+  // PanelManager のフォーカスパネルに接続
+  if (panelManager) {
+    panelManager.connectToWindow(sessionName, windowIndex);
+  }
 
   // ブラウザ履歴を更新
-  const hash = `#terminal/${encodeURIComponent(sessionName)}/${windowIndex}`;
-  const state = { view: 'terminal', session: sessionName, window: windowIndex };
+  const splitSuffix = _getSplitSuffix();
+  const hash = `#terminal/${encodeURIComponent(sessionName)}/${windowIndex}${splitSuffix}`;
+  const state = { view: 'terminal', session: sessionName, window: windowIndex, split: !!(panelManager && panelManager.isSplit), rightPanel: _buildRightPanelState() };
   if (replace) {
     history.replaceState(state, '', hash);
   } else if (push) {
@@ -398,161 +352,18 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
     drawer.restorePinState();
   }
 
-  // ターミナル初期化・接続
-  terminal = new PalmuxTerminal(terminalContainerEl);
-
-  // クライアントのセッション/ウィンドウ変更通知のハンドラを設定
-  // tmux でのセッション切替（switch-client 等）もウィンドウ切替も検知する
-  terminal.setOnClientStatus((session, window) => {
-    const sessionChanged = session !== currentSession;
-    const windowChanged = window !== currentWindowIndex;
-    if (!sessionChanged && !windowChanged) return;
-
-    currentSession = session;
-    currentWindowIndex = window;
-
-    // 通知をクリア（切替先ウィンドウに通知があれば削除）
-    deleteNotification(session, window)
-      .then(() => listNotifications())
-      .then((notifications) => {
-        if (drawer && notifications) {
-          drawer.setNotifications(notifications);
-        }
-      })
-      .catch(() => {});
-
-    // ヘッダータイトルを更新
-    const headerTitleEl = document.getElementById('header-title');
-    if (headerTitleEl) {
-      headerTitleEl.textContent = `${session}:${window}`;
-    }
-
-    if (drawer) {
-      drawer.setCurrent(session, window, { sessionChanged });
-    }
-  });
-
-  // 通知更新のハンドラを設定
-  terminal.setOnNotificationUpdate((notifications) => {
-    if (drawer) {
-      drawer.setNotifications(notifications);
-    }
-  });
-
-  // IME 入力フィールド初期化
-  imeInput = new IMEInput(imeContainerEl, {
-    onSend: (text) => terminal.sendInput(text),
-    onToggle: (visible) => {
-      terminal.setIMEMode(visible);
-      // IME 表示/非表示でレイアウトが変わるのでターミナルを再フィット
-      requestAnimationFrame(() => {
-        terminal.fit();
-      });
-    },
-  });
-
-  // ツールバー初期化
-  toolbar = new Toolbar(toolbarContainerEl, {
-    onSendKey: (key) => terminal.sendInput(key),
-    onKeyboardMode: (mode) => {
-      terminal.setKeyboardMode(mode);
-      if (mode === 'ime') {
-        // IME モード: IME 入力バーを表示（show() 内の onToggle で setIMEMode も実行される）
-        if (imeInput) {
-          imeInput.show();
-        }
-      } else {
-        // none / direct モード: IME 入力バーを非表示（hide() 内の onToggle で setIMEMode も実行される）
-        if (imeInput) {
-          imeInput.hide();
-        }
-      }
-      requestAnimationFrame(() => {
-        terminal.fit();
-      });
-    },
-  });
-  terminal.setToolbar(toolbar);
-  imeInput.setToolbar(toolbar);
-
-  // 保存された状態を復元
-  toolbar.restoreState(globalUIState);
-
-  // ツールバー表示/非表示（初回はデバイスデフォルト）
-  if (globalUIState.toolbarVisible === null) {
-    if (!isMobileDevice()) {
-      toolbar.toggleVisibility();
-      globalUIState.toolbarVisible = false;
-    } else {
-      globalUIState.toolbarVisible = true;
-    }
-  }
-
-  // キーボードモードに応じてターミナルと IME バーを復元
-  if (globalUIState.keyboardMode !== 'none') {
-    terminal.setKeyboardMode(globalUIState.keyboardMode);
-    if (globalUIState.keyboardMode === 'ime' && imeInput) {
-      imeInput.show();
-    }
-  }
-
-  // タッチハンドラー初期化（ピンチズーム、スクロール、長押し選択）
-  touchHandler = new TouchHandler(terminalContainerEl, {
-    terminal: terminal,
-    onPinchZoom: (delta) => {
-      if (delta > 0) {
-        terminal.increaseFontSize();
-      } else {
-        terminal.decreaseFontSize();
-      }
-    },
-  });
-
-  // ConnectionManager を作成して接続を管理
-  connectionManager = new ConnectionManager({
-    getWSUrl: () => getWebSocketURL(currentSession, currentWindowIndex),
-    onStateChange: (state) => {
-      updateConnectionUI(state);
-      if (state === 'connected') {
-        // WebSocket 接続確立後に通知をクリアしてリストを再取得
-        // （connectToWindow 時点では WS 未接続のためブロードキャストを受け取れない）
-        deleteNotification(currentSession, currentWindowIndex)
-          .then(() => listNotifications())
-          .then((notifications) => {
-            if (drawer && notifications) {
-              drawer.setNotifications(notifications);
-            }
-          })
-          .catch(() => {});
-      }
-    },
-    terminal: terminal,
-  });
-  connectionManager.connect();
-
-  // セッションごとの表示モードを復元
-  // ただし push: false（履歴ナビゲーション）の場合はスキップ
-  // — popstate ハンドラが必要なら showFileBrowser/showGitBrowser を別途呼び出す
-  const savedViewMode = push || replace ? (sessionViewModes.get(sessionName) || 'terminal') : 'terminal';
-  if (savedViewMode === 'filebrowser') {
-    showFileBrowser(sessionName);
-  } else if (savedViewMode === 'gitbrowser') {
-    showGitBrowser(sessionName);
-  } else {
-    currentViewMode = 'terminal';
-    terminal.focus();
-  }
+  // Drawer パネルターゲットを更新
+  _updateDrawerPanelTarget();
 }
 
 /**
- * 接続状態に応じて UI を更新する。
+ * 接続状態に応じてヘッダーの接続インジケーターを更新する。
  * @param {string} state - 'connected' | 'connecting' | 'disconnected'
  */
 function updateConnectionUI(state) {
   const connectionStatusEl = document.getElementById('connection-status');
   const connectionDotEl = connectionStatusEl?.querySelector('.connection-dot');
   const connectionTextEl = connectionStatusEl?.querySelector('.connection-text');
-  const reconnectOverlayEl = document.getElementById('reconnect-overlay');
 
   if (!connectionStatusEl || !connectionDotEl || !connectionTextEl) return;
 
@@ -573,33 +384,23 @@ function updateConnectionUI(state) {
     case 'connected':
       connectionDotEl.classList.add('connection-dot--connected');
       connectionTextEl.textContent = '';
-      if (reconnectOverlayEl) {
-        reconnectOverlayEl.classList.add('hidden');
-      }
       break;
 
     case 'connecting':
       connectionDotEl.classList.add('connection-dot--connecting');
       connectionTextEl.textContent = 'Reconnecting...';
-      if (reconnectOverlayEl) {
-        reconnectOverlayEl.classList.remove('hidden');
-      }
       break;
 
     case 'disconnected':
       connectionDotEl.classList.add('connection-dot--disconnected');
       connectionTextEl.textContent = 'Disconnected';
       connectionStatusEl.classList.add('connection-status--disconnected');
-      if (reconnectOverlayEl) {
-        reconnectOverlayEl.classList.add('hidden');
-      }
       break;
   }
 }
 
 /**
  * 同一セッション内のウィンドウを切り替える。
- * WebSocket を再接続して指定ウィンドウに接続する。
  * @param {string} sessionName - セッション名
  * @param {number} windowIndex - ウィンドウインデックス
  */
@@ -613,34 +414,23 @@ function switchWindow(sessionName, windowIndex) {
  * @param {number} windowIndex - ウィンドウインデックス
  */
 function switchSession(sessionName, windowIndex) {
-  // 完全に再接続する
   connectToWindow(sessionName, windowIndex);
 }
 
 /**
- * ファイルブラウザ表示に切り替える。
- * ターミナルビューを隠し、ファイラーパネルを表示する。
- * セッションごとに独立したファイルブラウザ状態を管理する。
+ * フォーカスパネルのファイルブラウザ表示に切り替える。
  * @param {string} sessionName - セッション名
  * @param {{ push?: boolean, path?: string|null }} [opts]
- *   path: 移動先ディレクトリ（null の場合は現在のパスを維持）
  */
 function showFileBrowser(sessionName, { push = true, path = null } = {}) {
-  const terminalViewEl = document.getElementById('terminal-view');
-  const filebrowserViewEl = document.getElementById('filebrowser-view');
-  const filebrowserContainerEl = document.getElementById('filebrowser-container');
-  const gitbrowserViewEl = document.getElementById('gitbrowser-view');
-  const headerTabTerminal = document.getElementById('header-tab-terminal');
-  const headerTabFiles = document.getElementById('header-tab-files');
-  const headerTabGit = document.getElementById('header-tab-git');
+  if (!panelManager) return;
+  const panel = panelManager.getFocusedPanel();
 
-  if (!terminalViewEl || !filebrowserViewEl || !filebrowserContainerEl) return;
+  panel.showFileBrowser(sessionName, { path });
 
-  // ターミナルと Git ブラウザを隠してファイラーを表示
-  terminalViewEl.classList.add('hidden');
-  filebrowserViewEl.classList.remove('hidden');
-  if (gitbrowserViewEl) {
-    gitbrowserViewEl.classList.add('hidden');
+  // ヘッダータブを更新（シングルモード時）
+  if (!panelManager.isSplit) {
+    _updateHeaderTabs('filebrowser');
   }
 
   // ツールバートグルを非表示（ターミナル専用）
@@ -649,247 +439,161 @@ function showFileBrowser(sessionName, { push = true, path = null } = {}) {
     toolbarToggleBtnEl.classList.add('hidden');
   }
 
-  // フォントサイズコントロールは表示したまま（ファイルブラウザでも使用）
-  const fontSizeControlsEl = document.getElementById('font-size-controls');
-  if (fontSizeControlsEl) {
-    fontSizeControlsEl.classList.remove('hidden');
-  }
-
-  // タブの状態を更新
-  if (headerTabTerminal) {
-    headerTabTerminal.classList.remove('header-tab-btn--active');
-  }
-  if (headerTabFiles) {
-    headerTabFiles.classList.add('header-tab-btn--active');
-  }
-  if (headerTabGit) {
-    headerTabGit.classList.remove('header-tab-btn--active');
-  }
-
-  currentViewMode = 'filebrowser';
-  sessionViewModes.set(sessionName, 'filebrowser');
-
-  // コンテナから現在のファイラーを取り外す（DOM を破壊せず保持）
-  while (filebrowserContainerEl.firstChild) {
-    filebrowserContainerEl.removeChild(filebrowserContainerEl.firstChild);
-  }
-
-  /** ハッシュ文字列を生成する。path が '.' のときはパス部分を省略 */
-  const buildHash = (p) =>
-    `#files/${encodeURIComponent(sessionName)}/${currentWindowIndex}${p && p !== '.' ? '/' + p : ''}`;
-
-  // セッション用の FileBrowser を取得 or 新規作成
-  if (!fileBrowsers.has(sessionName)) {
-    const wrapper = document.createElement('div');
-    wrapper.style.height = '100%';
-    const browser = new FileBrowser(wrapper, {
-      onFileSelect: () => {
-        // Preview is handled internally by FileBrowser.showPreview()
-      },
-      onNavigate: (p) => {
-        // ユーザー起点のディレクトリ移動を履歴に記録する
-        history.pushState(
-          { view: 'files', session: sessionName, window: currentWindowIndex, path: p },
-          '',
-          buildHash(p),
-        );
-      },
-    });
-    fileBrowsers.set(sessionName, { wrapper, browser });
-    const initialPath = path !== null ? path : '.';
-    browser.open(sessionName, initialPath);
-
-    // 新規作成時: 指定パス（またはルート）を履歴に積む
-    if (push && currentSession !== null && currentWindowIndex !== null) {
-      history.pushState(
-        { view: 'files', session: sessionName, window: currentWindowIndex, path: initialPath },
-        '',
-        buildHash(initialPath),
-      );
-    }
-  } else {
-    const fb = fileBrowsers.get(sessionName);
-    if (path !== null) {
-      // 指定パスへ移動（silent — 呼び出し元が履歴を管理）
-      fb.browser.navigateTo(path);
-    }
-    // ブラウザ履歴を更新
-    if (push && currentSession !== null && currentWindowIndex !== null) {
-      const navPath = path !== null ? path : fb.browser.getCurrentPath();
-      history.pushState(
-        { view: 'files', session: sessionName, window: currentWindowIndex, path: navPath },
-        '',
-        buildHash(navPath),
-      );
-    }
-  }
-
-  // セッション用のファイラー DOM をコンテナに追加（状態が保持される）
-  const entry = fileBrowsers.get(sessionName);
-  filebrowserContainerEl.appendChild(entry.wrapper);
-}
-
-/**
- * ターミナル表示に戻す。
- * ファイラーパネルを隠し、ターミナルビューを表示する。
- * @param {{ push?: boolean }} [opts]
- */
-function showTerminalView({ push = true } = {}) {
-  const terminalViewEl = document.getElementById('terminal-view');
-  const filebrowserViewEl = document.getElementById('filebrowser-view');
-  const gitbrowserViewEl = document.getElementById('gitbrowser-view');
-  const headerTabTerminal = document.getElementById('header-tab-terminal');
-  const headerTabFiles = document.getElementById('header-tab-files');
-  const headerTabGit = document.getElementById('header-tab-git');
-
-  if (!terminalViewEl || !filebrowserViewEl) return;
-
   // ブラウザ履歴を更新
+  const currentSession = panelManager.getCurrentSession();
+  const currentWindowIndex = panelManager.getCurrentWindowIndex();
   if (push && currentSession !== null && currentWindowIndex !== null) {
-    const hash = `#terminal/${encodeURIComponent(currentSession)}/${currentWindowIndex}`;
-    history.pushState({ view: 'terminal', session: currentSession, window: currentWindowIndex }, '', hash);
-  }
-
-  // ファイラーと Git ブラウザを隠してターミナルを表示
-  filebrowserViewEl.classList.add('hidden');
-  if (gitbrowserViewEl) {
-    gitbrowserViewEl.classList.add('hidden');
-  }
-  terminalViewEl.classList.remove('hidden');
-
-  // ツールバートグルとフォントサイズを再表示
-  const toolbarToggleBtnEl = document.getElementById('toolbar-toggle-btn');
-  if (toolbarToggleBtnEl) {
-    toolbarToggleBtnEl.classList.remove('hidden');
-  }
-  const fontSizeControlsEl = document.getElementById('font-size-controls');
-  if (fontSizeControlsEl) {
-    fontSizeControlsEl.classList.remove('hidden');
-  }
-
-  // タブの状態を更新
-  if (headerTabTerminal) {
-    headerTabTerminal.classList.add('header-tab-btn--active');
-  }
-  if (headerTabFiles) {
-    headerTabFiles.classList.remove('header-tab-btn--active');
-  }
-  if (headerTabGit) {
-    headerTabGit.classList.remove('header-tab-btn--active');
-  }
-
-  currentViewMode = 'terminal';
-  if (currentSession) {
-    sessionViewModes.set(currentSession, 'terminal');
-  }
-
-  // ターミナルを再フィット
-  if (terminal) {
-    requestAnimationFrame(() => {
-      terminal.fit();
-      terminal.focus();
-    });
-  }
-}
-
-/**
- * Git ブラウザ表示に切り替える。
- * ターミナルビューとファイラーを隠し、Git ブラウザパネルを表示する。
- * @param {string} sessionName - セッション名
- * @param {{ push?: boolean }} [opts]
- */
-function showGitBrowser(sessionName, { push = true } = {}) {
-  const terminalViewEl = document.getElementById('terminal-view');
-  const filebrowserViewEl = document.getElementById('filebrowser-view');
-  const gitbrowserViewEl = document.getElementById('gitbrowser-view');
-  const gitbrowserContainerEl = document.getElementById('gitbrowser-container');
-  const headerTabTerminal = document.getElementById('header-tab-terminal');
-  const headerTabFiles = document.getElementById('header-tab-files');
-  const headerTabGit = document.getElementById('header-tab-git');
-
-  if (!terminalViewEl || !gitbrowserViewEl || !gitbrowserContainerEl) return;
-
-  // ターミナルとファイラーを隠して Git ブラウザを表示
-  terminalViewEl.classList.add('hidden');
-  if (filebrowserViewEl) {
-    filebrowserViewEl.classList.add('hidden');
-  }
-  gitbrowserViewEl.classList.remove('hidden');
-
-  // ツールバートグルを非表示（ターミナル専用）
-  const toolbarToggleBtnEl = document.getElementById('toolbar-toggle-btn');
-  if (toolbarToggleBtnEl) {
-    toolbarToggleBtnEl.classList.add('hidden');
-  }
-
-  // フォントサイズコントロールは表示したまま
-  const fontSizeControlsEl = document.getElementById('font-size-controls');
-  if (fontSizeControlsEl) {
-    fontSizeControlsEl.classList.remove('hidden');
-  }
-
-  // タブの状態を更新
-  if (headerTabTerminal) {
-    headerTabTerminal.classList.remove('header-tab-btn--active');
-  }
-  if (headerTabFiles) {
-    headerTabFiles.classList.remove('header-tab-btn--active');
-  }
-  if (headerTabGit) {
-    headerTabGit.classList.add('header-tab-btn--active');
-  }
-
-  currentViewMode = 'gitbrowser';
-  sessionViewModes.set(sessionName, 'gitbrowser');
-
-  // コンテナから現在の Git ブラウザを取り外す
-  while (gitbrowserContainerEl.firstChild) {
-    gitbrowserContainerEl.removeChild(gitbrowserContainerEl.firstChild);
-  }
-
-  // ブラウザ履歴を更新
-  if (push && currentSession !== null && currentWindowIndex !== null) {
-    const hash = `#git/${encodeURIComponent(sessionName)}/${currentWindowIndex}`;
+    const splitSuffix = _getSplitSuffix();
+    const filePath = path || '.';
+    const hash = `#files/${encodeURIComponent(sessionName)}/${currentWindowIndex}${filePath !== '.' ? '/' + filePath : ''}${splitSuffix}`;
     history.pushState(
-      { view: 'git', session: sessionName, window: currentWindowIndex },
+      { view: 'files', session: sessionName, window: currentWindowIndex, path: filePath, split: panelManager.isSplit, rightPanel: _buildRightPanelState() },
       '',
       hash,
     );
   }
+}
 
-  // セッション用の GitBrowser を取得 or 新規作成
-  if (!gitBrowsers.has(sessionName)) {
-    const wrapper = document.createElement('div');
-    wrapper.style.height = '100%';
-    wrapper.style.position = 'relative';
-    const browser = new GitBrowser(wrapper, {
-      onNavigate: (gitState) => {
-        // 内部遷移（コミット選択、diff 表示、ブランチ切替）を履歴に記録
-        const hash = `#git/${encodeURIComponent(sessionName)}/${currentWindowIndex}`;
-        history.pushState(
-          { view: 'git', session: sessionName, window: currentWindowIndex, gitState },
-          '',
-          hash,
-        );
-      },
-    });
-    gitBrowsers.set(sessionName, { wrapper, browser });
-    browser.open(sessionName);
+/**
+ * フォーカスパネルのターミナル表示に戻す。
+ * @param {{ push?: boolean }} [opts]
+ */
+function showTerminalView({ push = true } = {}) {
+  if (!panelManager) return;
+  const panel = panelManager.getFocusedPanel();
+
+  panel.showTerminalView();
+
+  // ヘッダータブを更新（シングルモード時）
+  if (!panelManager.isSplit) {
+    _updateHeaderTabs('terminal');
   }
 
-  // セッション用の Git ブラウザ DOM をコンテナに追加
-  const entry = gitBrowsers.get(sessionName);
-  gitbrowserContainerEl.appendChild(entry.wrapper);
+  // ツールバートグルを再表示
+  const toolbarToggleBtnEl = document.getElementById('toolbar-toggle-btn');
+  if (toolbarToggleBtnEl) {
+    toolbarToggleBtnEl.classList.remove('hidden');
+  }
+
+  // ブラウザ履歴を更新
+  const currentSession = panelManager.getCurrentSession();
+  const currentWindowIndex = panelManager.getCurrentWindowIndex();
+  if (push && currentSession !== null && currentWindowIndex !== null) {
+    const splitSuffix = _getSplitSuffix();
+    const hash = `#terminal/${encodeURIComponent(currentSession)}/${currentWindowIndex}${splitSuffix}`;
+    history.pushState({ view: 'terminal', session: currentSession, window: currentWindowIndex, split: panelManager.isSplit, rightPanel: _buildRightPanelState() }, '', hash);
+  }
+}
+
+/**
+ * フォーカスパネルの Git ブラウザ表示に切り替える。
+ * @param {string} sessionName - セッション名
+ * @param {{ push?: boolean }} [opts]
+ */
+function showGitBrowser(sessionName, { push = true } = {}) {
+  if (!panelManager) return;
+  const panel = panelManager.getFocusedPanel();
+
+  panel.showGitBrowser(sessionName);
+
+  // ヘッダータブを更新（シングルモード時）
+  if (!panelManager.isSplit) {
+    _updateHeaderTabs('gitbrowser');
+  }
+
+  // ツールバートグルを非表示（ターミナル専用）
+  const toolbarToggleBtnEl = document.getElementById('toolbar-toggle-btn');
+  if (toolbarToggleBtnEl) {
+    toolbarToggleBtnEl.classList.add('hidden');
+  }
+
+  // ブラウザ履歴を更新
+  const currentSession = panelManager.getCurrentSession();
+  const currentWindowIndex = panelManager.getCurrentWindowIndex();
+  if (push && currentSession !== null && currentWindowIndex !== null) {
+    const splitSuffix = _getSplitSuffix();
+    const hash = `#git/${encodeURIComponent(sessionName)}/${currentWindowIndex}${splitSuffix}`;
+    history.pushState(
+      { view: 'git', session: sessionName, window: currentWindowIndex, split: panelManager.isSplit, rightPanel: _buildRightPanelState() },
+      '',
+      hash,
+    );
+  }
+}
+
+/**
+ * ヘッダータブの active 状態を更新する（シングルモード時に使用）。
+ * @param {'terminal'|'filebrowser'|'gitbrowser'} mode
+ */
+function _updateHeaderTabs(mode) {
+  const headerTabTerminal = document.getElementById('header-tab-terminal');
+  const headerTabFiles = document.getElementById('header-tab-files');
+  const headerTabGit = document.getElementById('header-tab-git');
+
+  if (headerTabTerminal) {
+    headerTabTerminal.classList.toggle('header-tab-btn--active', mode === 'terminal');
+  }
+  if (headerTabFiles) {
+    headerTabFiles.classList.toggle('header-tab-btn--active', mode === 'filebrowser');
+  }
+  if (headerTabGit) {
+    headerTabGit.classList.toggle('header-tab-btn--active', mode === 'gitbrowser');
+  }
+}
+
+/**
+ * Drawer のパネルターゲット表示を更新する。
+ */
+function _updateDrawerPanelTarget() {
+  const targetEl = document.getElementById('drawer-panel-target');
+  if (!targetEl) return;
+
+  if (panelManager && panelManager.isSplit) {
+    const focused = panelManager.getFocusedPanel();
+    const label = focused.id === 'left' ? 'Left' : 'Right';
+    targetEl.textContent = `\u2192 ${label} Panel`;
+    targetEl.classList.add('drawer-panel-target--visible');
+  } else {
+    targetEl.classList.remove('drawer-panel-target--visible');
+  }
 }
 
 /**
  * URL ハッシュから初期画面を復元する。
- * ページ読み込み時にハッシュが存在する場合に呼び出す。
- * @param {string} hash - window.location.hash（例: "#terminal/main/0"）
+ * @param {string} hash - window.location.hash（例: "#terminal/main/0" or "#terminal/main/0&split=terminal/dev/1"）
  */
 async function navigateFromHash(hash) {
-  const parts = hash.slice(1).split('/');
+  // Parse &split and optional right panel fragment
+  const hashBody = hash.slice(1);
+  const splitIdx = hashBody.indexOf('&split');
+  let hasSplit = false;
+  let rightFragment = null;
+  let cleanHash = hashBody;
+
+  if (splitIdx !== -1) {
+    hasSplit = true;
+    cleanHash = hashBody.slice(0, splitIdx);
+    const splitPart = hashBody.slice(splitIdx + 6); // "&split".length = 6
+    if (splitPart.startsWith('=') && splitPart.length > 1) {
+      rightFragment = splitPart.slice(1); // "=" の後ろ
+    }
+  }
+
+  const parts = cleanHash.split('/');
   const view = parts[0];
+
+  /**
+   * 分割モードを復元し、右パネルの状態を適用する。
+   */
+  const restoreSplit = () => {
+    if (hasSplit && panelManager && !panelManager.isSplit && window.innerWidth >= 900) {
+      // rightFragment がある場合は自動接続をスキップ
+      panelManager.toggleSplit({ skipAutoConnect: !!rightFragment });
+    }
+    if (hasSplit && rightFragment && panelManager && panelManager.isSplit) {
+      _restoreRightPanel(rightFragment);
+    }
+  };
 
   try {
     switch (view) {
@@ -910,20 +614,21 @@ async function navigateFromHash(hash) {
         const session = decodeURIComponent(parts[1] || '');
         const win = parseInt(parts[2], 10);
         if (!session || isNaN(win)) { await autoConnect(); break; }
-        history.replaceState({ view: 'terminal', session, window: win }, '', hash);
+        history.replaceState({ view: 'terminal', session, window: win, split: hasSplit }, '', hash);
         connectToWindow(session, win, { push: false });
+        restoreSplit();
         break;
       }
 
       case 'files': {
         const session = decodeURIComponent(parts[1] || '');
         const win = parseInt(parts[2], 10);
-        // parts[3..] がディレクトリパス（スラッシュを含む可能性あり）
         const filePath = parts.slice(3).map(decodeURIComponent).join('/') || '.';
         if (!session || isNaN(win)) { await autoConnect(); break; }
-        history.replaceState({ view: 'files', session, window: win, path: filePath }, '', hash);
+        history.replaceState({ view: 'files', session, window: win, path: filePath, split: hasSplit }, '', hash);
         connectToWindow(session, win, { push: false });
         showFileBrowser(session, { push: false, path: filePath });
+        restoreSplit();
         break;
       }
 
@@ -931,9 +636,10 @@ async function navigateFromHash(hash) {
         const session = decodeURIComponent(parts[1] || '');
         const win = parseInt(parts[2], 10);
         if (!session || isNaN(win)) { await autoConnect(); break; }
-        history.replaceState({ view: 'git', session, window: win }, '', hash);
+        history.replaceState({ view: 'git', session, window: win, split: hasSplit }, '', hash);
         connectToWindow(session, win, { push: false });
         showGitBrowser(session, { push: false });
+        restoreSplit();
         break;
       }
 
@@ -959,7 +665,6 @@ function escapeHTML(str) {
 
 /**
  * モバイルデバイスかどうかを判定する。
- * タッチ対応かつ画面幅が狭い場合にモバイルと判定する。
  * @returns {boolean}
  */
 function isMobileDevice() {
@@ -970,47 +675,107 @@ function isMobileDevice() {
 document.addEventListener('DOMContentLoaded', () => {
   const toolbarToggleBtnEl = document.getElementById('toolbar-toggle-btn');
   const drawerBtnEl = document.getElementById('drawer-btn');
+  const splitToggleBtnEl = document.getElementById('split-toggle-btn');
+  const panelContainerEl = document.getElementById('panel-container');
 
   // claude-path meta タグからコマンドパスを読み取る
   const claudePathMeta = document.querySelector('meta[name="claude-path"]');
   const claudePath = claudePathMeta ? (claudePathMeta.getAttribute('content') || 'claude') : 'claude';
 
+  // PanelManager 初期化
+  panelManager = new PanelManager({
+    container: panelContainerEl,
+    globalUIState,
+    isMobileDevice,
+    onClientStatus: (session, window) => {
+      // フォーカスパネルのセッション/ウィンドウ変更を反映
+      const currentSession = panelManager.getCurrentSession();
+      const currentWindowIndex = panelManager.getCurrentWindowIndex();
+
+      // 通知をクリア
+      deleteNotification(session, window)
+        .then(() => listNotifications())
+        .then((notifications) => {
+          if (drawer && notifications) {
+            drawer.setNotifications(notifications);
+          }
+        })
+        .catch(() => {});
+
+      // ヘッダータイトルを更新
+      const headerTitleEl = document.getElementById('header-title');
+      if (headerTitleEl) {
+        headerTitleEl.textContent = `${currentSession}:${currentWindowIndex}`;
+      }
+
+      if (drawer) {
+        drawer.setCurrent(currentSession, currentWindowIndex, { sessionChanged: true });
+      }
+    },
+    onNotificationUpdate: (notifications) => {
+      if (drawer) {
+        drawer.setNotifications(notifications);
+      }
+    },
+    onConnectionStateChange: (state) => {
+      updateConnectionUI(state);
+    },
+    onFocusChange: (panel) => {
+      // フォーカス変更時にヘッダーを更新
+      if (panel.session !== null && panel.windowIndex !== null) {
+        const headerTitleEl = document.getElementById('header-title');
+        if (headerTitleEl) {
+          headerTitleEl.textContent = `${panel.session}:${panel.windowIndex}`;
+        }
+
+        // シングルモードのヘッダータブを更新
+        if (!panelManager.isSplit) {
+          _updateHeaderTabs(panel.viewMode);
+        }
+
+        if (drawer) {
+          drawer.setCurrent(panel.session, panel.windowIndex);
+        }
+      }
+
+      // Drawer パネルターゲットを更新
+      _updateDrawerPanelTarget();
+    },
+  });
+
   // Drawer 初期化
   drawer = new Drawer({
     claudePath,
     onSelectWindow: (session, windowIndex) => {
-      // 同一セッション内のウィンドウ切り替え
       switchWindow(session, windowIndex);
     },
     onSelectSession: (sessionName, windowIndex) => {
-      // 別セッションへの切り替え（再接続）
       switchSession(sessionName, windowIndex);
     },
     onCreateSession: (sessionName) => {
-      // 新セッション作成後、最初のウィンドウ（index 0）に自動接続
       connectToWindow(sessionName, 0);
     },
     onDeleteSession: () => {
-      // セッションが0件になった場合にセッション一覧画面に戻る
       showSessionList({ replace: true });
     },
     onCreateWindow: (session, windowIndex) => {
-      // ウィンドウ作成後、ヘッダータイトルを更新
       const headerTitleEl = document.getElementById('header-title');
+      const currentSession = panelManager ? panelManager.getCurrentSession() : null;
       if (headerTitleEl && session === currentSession) {
         headerTitleEl.textContent = `${session}:${windowIndex}`;
       }
     },
     onDeleteWindow: () => {
-      // ウィンドウ削除後、ヘッダータイトルを更新
       const headerTitleEl = document.getElementById('header-title');
-      if (headerTitleEl && currentSession !== null && drawer) {
-        // drawer の現在ウィンドウインデックスを反映
+      const currentSession = panelManager ? panelManager.getCurrentSession() : null;
+      const currentWindowIndex = panelManager ? panelManager.getCurrentWindowIndex() : null;
+      if (headerTitleEl && currentSession !== null) {
         headerTitleEl.textContent = `${currentSession}:${currentWindowIndex}`;
       }
     },
     onRenameWindow: (session, windowIndex, newName) => {
-      // ウィンドウリネーム後、現在表示中のウィンドウならヘッダータイトルを更新
+      const currentSession = panelManager ? panelManager.getCurrentSession() : null;
+      const currentWindowIndex = panelManager ? panelManager.getCurrentWindowIndex() : null;
       if (session === currentSession && windowIndex === currentWindowIndex) {
         const headerTitleEl = document.getElementById('header-title');
         if (headerTitleEl) {
@@ -1019,9 +784,13 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     },
     onClose: () => {
-      // Drawer が閉じた後、ターミナルにフォーカスを戻す
-      if (terminal && currentViewMode === 'terminal') {
-        terminal.focus();
+      // Drawer が閉じた後、フォーカスパネルのターミナルにフォーカスを戻す
+      if (panelManager) {
+        const panel = panelManager.getFocusedPanel();
+        const terminal = panel.getTerminal();
+        if (terminal && panel.viewMode === 'terminal') {
+          terminal.focus();
+        }
       }
     },
   });
@@ -1038,16 +807,46 @@ document.addEventListener('DOMContentLoaded', () => {
   // ツールバートグルボタンのイベント
   if (toolbarToggleBtnEl) {
     toolbarToggleBtnEl.addEventListener('click', () => {
-      if (toolbar) {
-        toolbar.toggleVisibility();
-        globalUIState.toolbarVisible = toolbar.visible;
-        // ツールバー表示/非表示でターミナルを再フィット
-        if (terminal) {
-          // 少し待ってからフィット（DOM 更新後）
-          requestAnimationFrame(() => {
-            terminal.fit();
-          });
+      if (panelManager) {
+        panelManager.getFocusedPanel().toggleToolbar();
+      }
+    });
+  }
+
+  // Split toggle ボタンのイベント
+  if (splitToggleBtnEl) {
+    splitToggleBtnEl.addEventListener('click', () => {
+      if (panelManager) {
+        panelManager.toggleSplit();
+
+        // ヘッダータブの表示を切り替え
+        const headerTabsEl = document.getElementById('header-tabs');
+        if (headerTabsEl) {
+          if (panelManager.isSplit) {
+            // 分割モード: ヘッダータブは非表示（パネルヘッダーにタブがある）
+            headerTabsEl.classList.add('hidden');
+          } else {
+            // シングルモード: ヘッダータブを表示
+            headerTabsEl.classList.remove('hidden');
+            _updateHeaderTabs(panelManager.getCurrentViewMode());
+          }
         }
+
+        // ツールバートグルの表示を更新
+        if (toolbarToggleBtnEl) {
+          const viewMode = panelManager.getCurrentViewMode();
+          if (viewMode === 'terminal') {
+            toolbarToggleBtnEl.classList.remove('hidden');
+          } else {
+            toolbarToggleBtnEl.classList.add('hidden');
+          }
+        }
+
+        // Split toggle ボタンのアクティブ状態
+        splitToggleBtnEl.classList.toggle('split-toggle-btn--active', panelManager.isSplit);
+
+        // Drawer パネルターゲットを更新
+        _updateDrawerPanelTarget();
       }
     });
   }
@@ -1056,70 +855,69 @@ document.addEventListener('DOMContentLoaded', () => {
   const connectionStatusEl = document.getElementById('connection-status');
   if (connectionStatusEl) {
     connectionStatusEl.addEventListener('click', () => {
-      if (connectionManager && connectionManager.state !== 'connected') {
-        connectionManager.reconnectNow();
+      if (panelManager) {
+        panelManager.getFocusedPanel().reconnectNow();
       }
     });
   }
 
-  // ヘッダータブのイベント
+  // ヘッダータブのイベント（シングルモード時のみ有効）
   const headerTabTerminal = document.getElementById('header-tab-terminal');
   const headerTabFiles = document.getElementById('header-tab-files');
   const headerTabGit = document.getElementById('header-tab-git');
 
   if (headerTabTerminal) {
     headerTabTerminal.addEventListener('click', () => {
-      if (currentViewMode !== 'terminal' && currentSession !== null) {
-        showTerminalView();
+      if (panelManager && !panelManager.isSplit) {
+        const currentSession = panelManager.getCurrentSession();
+        if (panelManager.getCurrentViewMode() !== 'terminal' && currentSession !== null) {
+          showTerminalView();
+        }
       }
     });
   }
 
   if (headerTabFiles) {
     headerTabFiles.addEventListener('click', () => {
-      if (currentViewMode !== 'filebrowser' && currentSession !== null) {
-        showFileBrowser(currentSession);
+      if (panelManager && !panelManager.isSplit) {
+        const currentSession = panelManager.getCurrentSession();
+        if (panelManager.getCurrentViewMode() !== 'filebrowser' && currentSession !== null) {
+          showFileBrowser(currentSession);
+        }
       }
     });
   }
 
   if (headerTabGit) {
     headerTabGit.addEventListener('click', () => {
-      if (currentViewMode !== 'gitbrowser' && currentSession !== null) {
-        showGitBrowser(currentSession);
+      if (panelManager && !panelManager.isSplit) {
+        const currentSession = panelManager.getCurrentSession();
+        if (panelManager.getCurrentViewMode() !== 'gitbrowser' && currentSession !== null) {
+          showGitBrowser(currentSession);
+        }
       }
     });
   }
 
-  // フォントサイズボタンのイベント（ターミナル / ファイルブラウザ / Git ブラウザ 対応）
+  // フォントサイズボタンのイベント
   const fontDecreaseBtn = document.getElementById('font-decrease-btn');
   const fontIncreaseBtn = document.getElementById('font-increase-btn');
   if (fontDecreaseBtn) {
     fontDecreaseBtn.addEventListener('click', () => {
-      if (currentViewMode === 'filebrowser' && currentSession && fileBrowsers.has(currentSession)) {
-        fileBrowsers.get(currentSession).browser.decreaseFontSize();
-      } else if (currentViewMode === 'gitbrowser' && currentSession && gitBrowsers.has(currentSession)) {
-        gitBrowsers.get(currentSession).browser.decreaseFontSize();
-      } else if (terminal) {
-        terminal.decreaseFontSize();
+      if (panelManager) {
+        panelManager.getFocusedPanel().decreaseFontSize();
       }
     });
   }
   if (fontIncreaseBtn) {
     fontIncreaseBtn.addEventListener('click', () => {
-      if (currentViewMode === 'filebrowser' && currentSession && fileBrowsers.has(currentSession)) {
-        fileBrowsers.get(currentSession).browser.increaseFontSize();
-      } else if (currentViewMode === 'gitbrowser' && currentSession && gitBrowsers.has(currentSession)) {
-        gitBrowsers.get(currentSession).browser.increaseFontSize();
-      } else if (terminal) {
-        terminal.increaseFontSize();
+      if (panelManager) {
+        panelManager.getFocusedPanel().increaseFontSize();
       }
     });
   }
 
   // Visual Viewport API: ソフトキーボード表示時にビューポートを追従
-  // #app の高さを可視領域に合わせる。ターミナルの再フィットは
-  // terminal.js の ResizeObserver がコンテナサイズ変更を検知して自動実行する。
   const appEl = document.getElementById('app');
   if (window.visualViewport && appEl) {
     const updateViewport = () => {
@@ -1133,10 +931,41 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('popstate', async (event) => {
     const s = event.state;
     if (!s) {
-      // 履歴の最初のエントリまで戻った場合
       await showSessionList({ push: false });
       return;
     }
+
+    /**
+     * popstate で右パネルの状態を復元する。
+     */
+    const restoreRightPanelFromState = () => {
+      if (!panelManager) return;
+
+      // 分割状態の同期
+      if (s.split && !panelManager.isSplit && window.innerWidth >= 900) {
+        panelManager.toggleSplit({ skipAutoConnect: !!s.rightPanel });
+      } else if (!s.split && panelManager.isSplit) {
+        panelManager.toggleSplit();
+      }
+
+      // 右パネルの状態を復元
+      if (s.rightPanel && panelManager.isSplit) {
+        const rp = s.rightPanel;
+        const rightPanel = panelManager.getRightPanel();
+        if (rightPanel && rp.session) {
+          rightPanel.connectToWindow(rp.session, rp.window);
+          switch (rp.view) {
+            case 'files':
+              rightPanel.showFileBrowser(rp.session, { path: rp.path || '.' });
+              break;
+            case 'git':
+              rightPanel.showGitBrowser(rp.session);
+              break;
+          }
+        }
+      }
+    };
+
     switch (s.view) {
       case 'sessions':
         await showSessionList({ push: false });
@@ -1145,26 +974,36 @@ document.addEventListener('DOMContentLoaded', () => {
         _switchToSessionListView();
         await showWindowList(s.session, { push: false });
         break;
-      case 'terminal':
-        // すでに同じセッション/ウィンドウに接続中なら再接続せずビューだけ切り替える
+      case 'terminal': {
+        const currentSession = panelManager ? panelManager.getCurrentSession() : null;
+        const currentWindowIndex = panelManager ? panelManager.getCurrentWindowIndex() : null;
+        const terminal = panelManager ? panelManager.getTerminal() : null;
         if (currentSession === s.session && currentWindowIndex === s.window && terminal !== null) {
           showTerminalView({ push: false });
         } else {
           connectToWindow(s.session, s.window, { push: false });
         }
+        restoreRightPanelFromState();
         break;
+      }
       case 'files': {
-        // すでに同じセッション/ウィンドウに接続中なら再接続せずビューだけ切り替える
         const filePath = s.path || '.';
+        const currentSession = panelManager ? panelManager.getCurrentSession() : null;
+        const currentWindowIndex = panelManager ? panelManager.getCurrentWindowIndex() : null;
+        const terminal = panelManager ? panelManager.getTerminal() : null;
         if (currentSession === s.session && currentWindowIndex === s.window && terminal !== null) {
           showFileBrowser(s.session, { push: false, path: filePath });
         } else {
           connectToWindow(s.session, s.window, { push: false });
           showFileBrowser(s.session, { push: false, path: filePath });
         }
+        restoreRightPanelFromState();
         break;
       }
       case 'git': {
+        const currentSession = panelManager ? panelManager.getCurrentSession() : null;
+        const currentWindowIndex = panelManager ? panelManager.getCurrentWindowIndex() : null;
+        const terminal = panelManager ? panelManager.getTerminal() : null;
         if (currentSession === s.session && currentWindowIndex === s.window && terminal !== null) {
           showGitBrowser(s.session, { push: false });
         } else {
@@ -1172,9 +1011,13 @@ document.addEventListener('DOMContentLoaded', () => {
           showGitBrowser(s.session, { push: false });
         }
         // git 内部状態（コミット選択、diff 表示など）を復元
-        if (s.gitState && gitBrowsers.has(s.session)) {
-          gitBrowsers.get(s.session).browser.restoreState(s.gitState);
+        if (s.gitState && panelManager) {
+          const gitBrowsers = panelManager.getGitBrowsers();
+          if (gitBrowsers.has(s.session)) {
+            gitBrowsers.get(s.session).browser.restoreState(s.gitState);
+          }
         }
+        restoreRightPanelFromState();
         break;
       }
     }
@@ -1201,8 +1044,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 /**
- * 最後のセッション（Activity が最も新しいセッション）のアクティブウィンドウに自動接続する。
- * セッションが存在しない場合やエラー時はセッション一覧を表示する。
+ * 最後のセッションのアクティブウィンドウに自動接続する。
  */
 async function autoConnect() {
   try {
@@ -1221,7 +1063,6 @@ async function autoConnect() {
       }
     }
 
-    // そのセッションのウィンドウ一覧を取得し、アクティブウィンドウに接続
     const windows = await listWindows(latest.name);
 
     if (!windows || windows.length === 0) {
@@ -1229,7 +1070,6 @@ async function autoConnect() {
       return;
     }
 
-    // アクティブウィンドウを探す。なければ最初のウィンドウ
     const activeWindow = windows.find((w) => w.active) || windows[0];
     connectToWindow(latest.name, activeWindow.index, { replace: true });
   } catch (err) {

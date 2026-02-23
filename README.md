@@ -125,11 +125,15 @@ set -g mouse on
 # クリップボード同期（OSC 52 経由でブラウザのクリップボードと連携）
 set -g set-clipboard on
 set -as terminal-features 'xterm-256color:clipboard'
+
+# Palmux 内部セッションを choose-tree (Ctrl-b s) で非表示にする
+bind-key s choose-tree -Zs -f '#{?#{m:_palmux_*,#{session_name}},0,1}'
 ```
 
 - `set -g mouse on` — スマートフォンでのタッチスクロール・マウス選択でのコピーに必要
 - `set -g set-clipboard on` — tmux がコピー時に OSC 52 エスケープシーケンスを発行し、ブラウザのクリップボードに反映する
 - `set -as terminal-features ...` — tmux に外側ターミナル（Palmux）の OSC 52 サポートを認識させる
+- `bind-key s ...` — Palmux の分割画面機能が内部的に作成する `_palmux_*` セッションを `Ctrl-b s` のセッション一覧から除外する
 
 クリップボード同期は HTTPS 接続時のみ動作する（`navigator.clipboard` API の要件）。localhost では HTTP でも動作する。
 

@@ -22,6 +22,8 @@ type TmuxManager interface {
 	KillWindow(session string, index int) error
 	RenameWindow(session string, index int, name string) error
 	Attach(session string, windowIndex int) (*os.File, *exec.Cmd, error)
+	CreateGroupedSession(target string) (string, error)
+	DestroyGroupedSession(name string) error
 	GetSessionCwd(session string) (string, error)
 	GetSessionProjectDir(session string) (string, error)
 	GetClientSessionWindow(tty string) (string, int, error)

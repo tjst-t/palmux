@@ -1191,29 +1191,36 @@ func TestManager_GetClientSessionWindow(t *testing.T) {
 	}{
 		{
 			name:        "正常系: セッション名とウィンドウインデックスを返す",
-			output:      []byte("main\t2\n"),
+			output:      []byte("main\t2\t\n"),
 			wantSession: "main",
 			wantWindow:  2,
-			wantArgs:    []string{"display-message", "-p", "-t", "/dev/pts/5", "#{session_name}\t#{window_index}"},
+			wantArgs:    []string{"display-message", "-p", "-t", "/dev/pts/5", "#{session_name}\t#{window_index}\t#{session_group}"},
 		},
 		{
 			name:        "正常系: 別セッション",
-			output:      []byte("dev\t0\n"),
+			output:      []byte("dev\t0\t\n"),
 			wantSession: "dev",
 			wantWindow:  0,
-			wantArgs:    []string{"display-message", "-p", "-t", "/dev/pts/5", "#{session_name}\t#{window_index}"},
+			wantArgs:    []string{"display-message", "-p", "-t", "/dev/pts/5", "#{session_name}\t#{window_index}\t#{session_group}"},
+		},
+		{
+			name:        "正常系: グループセッション（元のセッション名を返す）",
+			output:      []byte("_palmux_abc123\t3\tmain\n"),
+			wantSession: "main",
+			wantWindow:  3,
+			wantArgs:    []string{"display-message", "-p", "-t", "/dev/pts/5", "#{session_name}\t#{window_index}\t#{session_group}"},
 		},
 		{
 			name:     "エラー系: tmux エラー",
 			err:      fmt.Errorf("no client on /dev/pts/5"),
 			wantErr:  true,
-			wantArgs: []string{"display-message", "-p", "-t", "/dev/pts/5", "#{session_name}\t#{window_index}"},
+			wantArgs: []string{"display-message", "-p", "-t", "/dev/pts/5", "#{session_name}\t#{window_index}\t#{session_group}"},
 		},
 		{
 			name:     "エラー系: 不正な出力",
 			output:   []byte("onlyone\n"),
 			wantErr:  true,
-			wantArgs: []string{"display-message", "-p", "-t", "/dev/pts/5", "#{session_name}\t#{window_index}"},
+			wantArgs: []string{"display-message", "-p", "-t", "/dev/pts/5", "#{session_name}\t#{window_index}\t#{session_group}"},
 		},
 	}
 

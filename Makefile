@@ -13,6 +13,7 @@ frontend:
 	cp frontend/css/style.css frontend/build/
 	cp frontend/css/filebrowser.css frontend/build/
 	cp frontend/css/gitbrowser.css frontend/build/
+	cp frontend/css/split.css frontend/build/
 	cp frontend/node_modules/highlight.js/styles/github-dark.css frontend/build/hljs-theme.css
 	cp frontend/node_modules/@xterm/xterm/css/xterm.css frontend/build/
 	cp frontend/manifest.json frontend/build/

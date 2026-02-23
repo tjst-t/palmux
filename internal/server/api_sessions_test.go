@@ -102,6 +102,12 @@ func (m *configurableMock) Attach(session string, windowIndex int) (*os.File, *e
 	return nil, nil, nil
 }
 
+func (m *configurableMock) CreateGroupedSession(target string) (string, error) {
+	return "", fmt.Errorf("not implemented")
+}
+
+func (m *configurableMock) DestroyGroupedSession(name string) error { return nil }
+
 func (m *configurableMock) GetSessionCwd(session string) (string, error) {
 	m.calledGetCwd = session
 	return m.cwd, m.cwdErr

@@ -132,6 +132,8 @@ type wsOutputMessage struct {
 // handleAttach は WebSocket pty ブリッジのハンドラ。
 // WebSocket 接続を受け付け、tmux attach-session の pty と双方向にデータを中継する。
 // 接続数が maxPerSession を超える場合は 429 Too Many Requests を返す。
+// 同一セッションの複数接続で独立したウィンドウ選択を可能にするため、
+// tmux セッショングループを使用する。
 func (s *Server) handleAttach() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		session := r.PathValue("session")
@@ -160,11 +162,21 @@ func (s *Server) handleAttach() http.Handler {
 		}
 		defer conn.Close(websocket.StatusInternalError, "internal error")
 
+		// グループセッションを作成（独立したウィンドウ選択のため）
+		groupedSession, groupErr := s.tmux.CreateGroupedSession(session)
+		attachTarget := session
+		if groupErr == nil {
+			attachTarget = groupedSession
+		}
+
 		// tmux attach（ウィンドウインデックス指定付き）
-		ptmx, cmd, err := s.tmux.Attach(session, windowIndex)
+		ptmx, cmd, err := s.tmux.Attach(attachTarget, windowIndex)
 		if err != nil {
 			log.Printf("attach error: %v", err)
 			s.connTracker.remove(connID)
+			if groupErr == nil {
+				s.tmux.DestroyGroupedSession(groupedSession)
+			}
 			conn.Close(websocket.StatusInternalError, "attach failed: "+err.Error())
 			return
 		}
@@ -196,6 +208,10 @@ func (s *Server) handleAttach() http.Handler {
 					}
 				}
 				ptmx.Close()
+				// グループセッションをクリーンアップ
+				if groupErr == nil {
+					s.tmux.DestroyGroupedSession(groupedSession)
+				}
 			})
 		}
 		defer cleanup()
