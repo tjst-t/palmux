@@ -2,7 +2,7 @@
 // ハンバーガーメニューからスライドインし、セッション/ウィンドウの切り替えを行う
 // セッション作成・削除機能を含む
 
-import { listSessions, listWindows, createSession, deleteSession, createWindow, deleteWindow, renameWindow, listGhqRepos } from './api.js';
+import { listSessions, listWindows, createSession, deleteSession, createWindow, deleteWindow, renameWindow, listGhqRepos, cloneGhqRepo, deleteGhqRepo } from './api.js';
 
 /**
  * Drawer はセッション/ウィンドウ切り替え用のスライドインパネル。
@@ -735,6 +735,15 @@ export class Drawer {
       }
     });
 
+    // Clone new repo ボタン
+    const cloneBtn = document.createElement('div');
+    cloneBtn.className = 'drawer-project-picker-clone';
+    cloneBtn.textContent = 'Clone new repo...';
+    cloneBtn.addEventListener('click', () => {
+      this._showCloneRepoInput(picker, availableRepos, container, btn);
+    });
+    picker.appendChild(cloneBtn);
+
     // Custom name ボタン
     const customBtn = document.createElement('div');
     customBtn.className = 'drawer-project-picker-custom';
@@ -778,7 +787,62 @@ export class Drawer {
     item.appendChild(nameEl);
     item.appendChild(pathEl);
 
+    // 長押しで削除確認モーダル
+    let longPressTimer = null;
+    let longPressDetected = false;
+    let startX = 0;
+    let startY = 0;
+
+    const showDelete = () => {
+      this._showRepoDeleteConfirmation(repo, picker, container, btn);
+    };
+
+    item.addEventListener('touchstart', (e) => {
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      longPressDetected = false;
+      longPressTimer = window.setTimeout(() => {
+        longPressDetected = true;
+        showDelete();
+      }, 600);
+    }, { passive: true });
+
+    item.addEventListener('touchmove', (e) => {
+      if (longPressTimer !== null) {
+        const moveX = e.touches[0].clientX;
+        const moveY = e.touches[0].clientY;
+        if (Math.abs(moveX - startX) > 10 || Math.abs(moveY - startY) > 10) {
+          window.clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+      }
+    }, { passive: true });
+
+    item.addEventListener('touchend', () => {
+      if (longPressTimer !== null) {
+        window.clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+    }, { passive: true });
+
+    item.addEventListener('touchcancel', () => {
+      if (longPressTimer !== null) {
+        window.clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+    }, { passive: true });
+
+    // デスクトップ: 右クリックで削除オプション
+    item.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showDelete();
+    });
+
     item.addEventListener('click', () => {
+      if (longPressDetected) {
+        longPressDetected = false;
+        return;
+      }
       this._handleCreateSessionFromPicker(repo.name, item, container, btn, picker);
     });
 
@@ -839,6 +903,200 @@ export class Drawer {
   _hideProjectPicker(container, btn, picker) {
     picker.remove();
     btn.style.display = '';
+  }
+
+  /**
+   * リポジトリ削除確認モーダルを表示する。
+   * @param {Object} repo - リポジトリ情報 {name, path, full_path}
+   * @param {HTMLElement} picker - ピッカーコンテナ
+   * @param {HTMLElement} container - 親コンテナ
+   * @param {HTMLElement} btn - トグルボタン
+   */
+  _showRepoDeleteConfirmation(repo, picker, container, btn) {
+    // 既にモーダルが表示中なら除去
+    const existing = document.querySelector('.drawer-delete-modal-overlay');
+    if (existing) {
+      existing.remove();
+    }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'drawer-delete-modal-overlay';
+
+    const modal = document.createElement('div');
+    modal.className = 'drawer-delete-modal';
+
+    const message = document.createElement('div');
+    message.className = 'drawer-delete-modal-message';
+    message.textContent = `Delete repository "${repo.name}"?`;
+
+    const pathEl = document.createElement('div');
+    pathEl.className = 'drawer-delete-modal-path';
+    pathEl.textContent = repo.full_path;
+
+    const actions = document.createElement('div');
+    actions.className = 'drawer-delete-modal-actions';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'drawer-delete-modal-cancel';
+    cancelBtn.textContent = 'Cancel';
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'drawer-delete-modal-delete';
+    deleteBtn.textContent = 'Delete';
+
+    actions.appendChild(cancelBtn);
+    actions.appendChild(deleteBtn);
+    modal.appendChild(message);
+    modal.appendChild(pathEl);
+    modal.appendChild(actions);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    requestAnimationFrame(() => {
+      overlay.classList.add('drawer-delete-modal-overlay--visible');
+    });
+
+    const closeModal = () => {
+      overlay.classList.remove('drawer-delete-modal-overlay--visible');
+      setTimeout(() => {
+        overlay.remove();
+      }, 200);
+    };
+
+    cancelBtn.addEventListener('click', closeModal);
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        closeModal();
+      }
+    });
+
+    deleteBtn.addEventListener('click', async () => {
+      deleteBtn.disabled = true;
+      deleteBtn.textContent = 'Deleting...';
+
+      try {
+        await deleteGhqRepo(repo.full_path);
+        closeModal();
+
+        // リスト再取得して再描画
+        let repos = [];
+        try {
+          repos = await listGhqRepos() || [];
+        } catch (err) {
+          console.error('Failed to reload repos:', err);
+        }
+
+        const existingNames = new Set(this._sessions.map((s) => s.name));
+        const newAvailableRepos = repos.filter((r) => !existingNames.has(r.name));
+
+        this._renderProjectPickerContent(picker, newAvailableRepos, container, btn);
+      } catch (err) {
+        console.error('Failed to delete repo:', err);
+        closeModal();
+        this._showDeleteError(`Failed to delete repo: ${err.message}`);
+      }
+    });
+  }
+
+  /**
+   * Clone リポジトリ入力 UI を表示する。
+   * ピッカーの内容を Clone 入力 UI に差し替える。
+   * @param {HTMLElement} picker - ピッカーコンテナ
+   * @param {Array} availableRepos - 利用可能なリポジトリ
+   * @param {HTMLElement} container - 親コンテナ
+   * @param {HTMLElement} btn - トグルボタン
+   */
+  _showCloneRepoInput(picker, availableRepos, container, btn) {
+    picker.innerHTML = '';
+
+    const title = document.createElement('div');
+    title.className = 'drawer-project-picker-clone-title';
+    title.textContent = 'Clone Repository';
+    picker.appendChild(title);
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'drawer-project-picker-filter';
+    input.placeholder = 'https://github.com/owner/repo';
+    input.autocomplete = 'off';
+    input.autocapitalize = 'off';
+    input.spellcheck = false;
+    picker.appendChild(input);
+
+    const actions = document.createElement('div');
+    actions.className = 'drawer-project-picker-clone-actions';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'drawer-new-session-cancel';
+    cancelBtn.textContent = 'Cancel';
+
+    const cloneBtn = document.createElement('button');
+    cloneBtn.className = 'drawer-new-session-create';
+    cloneBtn.textContent = 'Clone';
+
+    actions.appendChild(cancelBtn);
+    actions.appendChild(cloneBtn);
+    picker.appendChild(actions);
+
+    const statusEl = document.createElement('div');
+    statusEl.className = 'drawer-project-picker-clone-status';
+    statusEl.style.display = 'none';
+    picker.appendChild(statusEl);
+
+    input.focus();
+
+    const doClone = async () => {
+      const url = input.value.trim();
+      if (!url) return;
+
+      input.disabled = true;
+      cloneBtn.disabled = true;
+      cancelBtn.disabled = true;
+      statusEl.textContent = 'Cloning...';
+      statusEl.style.display = 'block';
+
+      try {
+        await cloneGhqRepo(url);
+        statusEl.textContent = 'Clone successful!';
+
+        // リスト再取得して再描画
+        let repos = [];
+        try {
+          repos = await listGhqRepos() || [];
+        } catch (err) {
+          console.error('Failed to reload repos:', err);
+        }
+
+        const existingNames = new Set(this._sessions.map((s) => s.name));
+        const newAvailableRepos = repos.filter((r) => !existingNames.has(r.name));
+
+        this._renderProjectPickerContent(picker, newAvailableRepos, container, btn);
+      } catch (err) {
+        console.error('Failed to clone repo:', err);
+        statusEl.textContent = '';
+        statusEl.style.display = 'none';
+        input.disabled = false;
+        cloneBtn.disabled = false;
+        cancelBtn.disabled = false;
+        this._showDeleteError(`Failed to clone: ${err.message}`);
+      }
+    };
+
+    cloneBtn.addEventListener('click', doClone);
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        doClone();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        this._renderProjectPickerContent(picker, availableRepos, container, btn);
+      }
+    });
+
+    cancelBtn.addEventListener('click', () => {
+      this._renderProjectPickerContent(picker, availableRepos, container, btn);
+    });
   }
 
   /**

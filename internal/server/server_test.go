@@ -42,6 +42,10 @@ func (m *mockTmuxManager) GetSessionProjectDir(session string) (string, error) {
 	return "", nil
 }
 func (m *mockTmuxManager) ListGhqRepos() ([]tmux.GhqRepo, error) { return nil, nil }
+func (m *mockTmuxManager) CloneGhqRepo(url string) (*tmux.GhqRepo, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *mockTmuxManager) DeleteGhqRepo(fullPath string) error { return nil }
 func (m *mockTmuxManager) GetClientSessionWindow(tty string) (string, int, error) {
 	return "", -1, fmt.Errorf("not implemented")
 }

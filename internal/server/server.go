@@ -28,6 +28,8 @@ type TmuxManager interface {
 	GetSessionProjectDir(session string) (string, error)
 	GetClientSessionWindow(tty string) (string, int, error)
 	ListGhqRepos() ([]tmux.GhqRepo, error)
+	CloneGhqRepo(url string) (*tmux.GhqRepo, error)
+	DeleteGhqRepo(fullPath string) error
 }
 
 // Server は Palmux の HTTP サーバーを表す。
@@ -97,6 +99,8 @@ func NewServer(opts Options) *Server {
 	mux.Handle("PUT /api/sessions/{session}/files", auth(s.handlePutFile()))
 	mux.Handle("GET /api/connections", auth(s.handleListConnections()))
 	mux.Handle("GET /api/ghq/repos", auth(s.handleListGhqRepos()))
+	mux.Handle("POST /api/ghq/repos", auth(s.handleCloneGhqRepo()))
+	mux.Handle("DELETE /api/ghq/repos", auth(s.handleDeleteGhqRepo()))
 	mux.Handle("GET /api/sessions/{session}/git/status", auth(s.handleGitStatus()))
 	mux.Handle("GET /api/sessions/{session}/git/log", auth(s.handleGitLog()))
 	mux.Handle("GET /api/sessions/{session}/git/diff", auth(s.handleGitDiff()))

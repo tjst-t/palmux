@@ -233,6 +233,29 @@ export async function listGhqRepos() {
   return fetchAPI('api/ghq/repos');
 }
 
+/**
+ * ghq リポジトリをクローンする。
+ * @param {string} url - クローン対象の URL
+ * @returns {Promise<{name: string, path: string, full_path: string}>}
+ */
+export async function cloneGhqRepo(url) {
+  return fetchAPI('api/ghq/repos', {
+    method: 'POST',
+    body: JSON.stringify({ url }),
+  });
+}
+
+/**
+ * ghq リポジトリを削除する。
+ * @param {string} fullPath - リポジトリのフルパス
+ * @returns {Promise<null>}
+ */
+export async function deleteGhqRepo(fullPath) {
+  return fetchAPI(`api/ghq/repos?path=${encodeURIComponent(fullPath)}`, {
+    method: 'DELETE',
+  });
+}
+
 // --- Git API ---
 
 /**

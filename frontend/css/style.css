@@ -1068,6 +1068,61 @@ html, body {
   color: #6a6a8a;
 }
 
+.drawer-project-picker-clone {
+  padding: 10px 12px;
+  margin-top: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+  border: 1px dashed rgba(100, 180, 130, 0.5);
+  border-radius: 6px;
+  color: #7ab896;
+  font-size: 13px;
+  text-align: center;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.drawer-project-picker-clone:hover {
+  background: rgba(100, 180, 130, 0.1);
+  color: #a0dbb8;
+}
+
+.drawer-project-picker-clone:active {
+  background: rgba(100, 180, 130, 0.15);
+}
+
+.drawer-project-picker-clone-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e0e0e0;
+  padding: 4px 0 8px;
+}
+
+.drawer-project-picker-clone-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.drawer-project-picker-clone-actions button {
+  flex: 1;
+}
+
+.drawer-project-picker-clone-status {
+  font-size: 12px;
+  color: #7ab896;
+  padding: 8px 0 0;
+  text-align: center;
+}
+
+.drawer-delete-modal-path {
+  font-size: 11px;
+  color: #8888aa;
+  word-break: break-all;
+  padding: 4px 0 8px;
+  font-family: monospace;
+}
+
 .drawer-project-picker-custom {
   padding: 10px 12px;
   margin-top: 8px;
