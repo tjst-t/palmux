@@ -38,6 +38,45 @@ export class PalmuxTerminal {
     this._boundGlobalKeyHandler = null;
     /** @type {function|null} document レベルの paste ハンドラー参照 */
     this._boundPasteHandler = null;
+    /** @type {boolean} fit() の実行を許可するかどうか（非表示時に無効化） */
+    this._fitEnabled = true;
+  }
+
+  /**
+   * グローバルキーハンドラ（document レベルの keydown/paste）の有効/無効を切り替える。
+   * Split-screen 時にフォーカス中のパネルだけがグローバルキーハンドラを持つように制御する。
+   * @param {boolean} enabled - true でハンドラを登録、false で解除
+   */
+  setGlobalKeyHandlerEnabled(enabled) {
+    if (enabled) {
+      if (!this._boundGlobalKeyHandler && this._term && this._ws) {
+        this._boundGlobalKeyHandler = this._globalKeyHandler.bind(this);
+        document.addEventListener('keydown', this._boundGlobalKeyHandler);
+      }
+      if (!this._boundPasteHandler && this._term && this._ws) {
+        this._boundPasteHandler = this._handlePaste.bind(this);
+        document.addEventListener('paste', this._boundPasteHandler, true);
+      }
+    } else {
+      if (this._boundGlobalKeyHandler) {
+        document.removeEventListener('keydown', this._boundGlobalKeyHandler);
+        this._boundGlobalKeyHandler = null;
+      }
+      if (this._boundPasteHandler) {
+        document.removeEventListener('paste', this._boundPasteHandler, true);
+        this._boundPasteHandler = null;
+      }
+    }
+  }
+
+  /**
+   * fit() の有効/無効を切り替える。
+   * ターミナルが非表示の状態（ファイルブラウザ/Git ブラウザ表示中）で
+   * ResizeObserver が fit() を呼ぶのを防止し、ターミナルが 0 サイズにリサイズされるのを防ぐ。
+   * @param {boolean} enabled - true で fit() を許可、false で抑止
+   */
+  setFitEnabled(enabled) {
+    this._fitEnabled = enabled;
   }
 
   /**
@@ -97,13 +136,13 @@ export class PalmuxTerminal {
       return true;
     });
 
-    // ブラウザショートカット（Ctrl+N, Ctrl+T 等）を抑止し、ターミナルに送信する。
-    // document レベルで捕捉することで、xterm にフォーカスがない場合でも動作する。
+    // グローバルキーハンドラは自動登録しない。
+    // Panel が setGlobalKeyHandlerEnabled() を通じてフォーカス中のパネルのみ登録する。
+    // 既存のハンドラがあればクリーンアップする。
     if (this._boundGlobalKeyHandler) {
       document.removeEventListener('keydown', this._boundGlobalKeyHandler);
+      this._boundGlobalKeyHandler = null;
     }
-    this._boundGlobalKeyHandler = this._globalKeyHandler.bind(this);
-    document.addEventListener('keydown', this._boundGlobalKeyHandler);
 
     // デフォルトは 'none' モード（ソフトキーボード非表示）
     // ツールバーのキーボードモード切替で 'direct'/'ime' に変更可能
@@ -120,13 +159,12 @@ export class PalmuxTerminal {
     });
     this._resizeObserver.observe(this._container);
 
-    // クリップボードから画像をペースト → アップロード → パスをターミナルに入力
-    // xterm.js が paste イベントの伝播を止めるため、キャプチャフェーズで先に捕捉する
+    // ペーストハンドラも自動登録しない。
+    // Panel が setGlobalKeyHandlerEnabled() を通じてフォーカス中のパネルのみ登録する。
     if (this._boundPasteHandler) {
       document.removeEventListener('paste', this._boundPasteHandler, true);
+      this._boundPasteHandler = null;
     }
-    this._boundPasteHandler = this._handlePaste.bind(this);
-    document.addEventListener('paste', this._boundPasteHandler, true);
 
     // 修飾キー有効時の即時送信: IME の composing を待たずに制御文字を送信
     if (helperTextarea) {
@@ -315,8 +353,10 @@ export class PalmuxTerminal {
 
   /**
    * ターミナルをコンテナサイズにフィットさせ、リサイズ情報をサーバーに送信する。
+   * _fitEnabled が false の場合は何もしない（非表示時のリサイズ防止）。
    */
   fit() {
+    if (!this._fitEnabled) return;
     if (this._fitAddon && this._term) {
       try {
         this._fitAddon.fit();

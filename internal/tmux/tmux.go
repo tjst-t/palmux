@@ -1,6 +1,8 @@
 package tmux
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +12,11 @@ import (
 
 	"github.com/creack/pty"
 )
+
+// GroupedSessionPrefix は Palmux が作成するグループセッションの名前プレフィクス。
+// 同一セッションに複数クライアントが接続する際、各クライアントに独立した
+// ウィンドウ選択を提供するために tmux セッショングループを使用する。
+const GroupedSessionPrefix = "_palmux_"
 
 // Manager は tmux の操作を管理する。
 // Executor を通じて tmux コマンドを実行し、結果をパースして返す。
@@ -51,6 +58,7 @@ func isSessionNotFoundError(err error) bool {
 
 // ListSessions は tmux のセッション一覧を返す。
 // tmux サーバーが起動していない場合は空のスライスを返す。
+// Palmux が内部的に作成したグループセッション（_palmux_ プレフィクス）は除外する。
 func (m *Manager) ListSessions() ([]Session, error) {
 	out, err := m.Exec.Run("list-sessions", "-F", sessionFormat)
 	if err != nil {
@@ -65,7 +73,15 @@ func (m *Manager) ListSessions() ([]Session, error) {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
 
-	return sessions, nil
+	// グループセッション（_palmux_ プレフィクス）を除外
+	filtered := make([]Session, 0, len(sessions))
+	for _, s := range sessions {
+		if !strings.HasPrefix(s.Name, GroupedSessionPrefix) {
+			filtered = append(filtered, s)
+		}
+	}
+
+	return filtered, nil
 }
 
 // ListWindows は指定セッションのウィンドウ一覧を返す。
@@ -204,21 +220,29 @@ func (m *Manager) GetSessionCwd(session string) (string, error) {
 // GetClientSessionWindow は指定した tty のクライアントが現在表示している
 // セッション名とウィンドウインデックスを返す。
 // tty には pts のデバイスパス（例: /dev/pts/5）を渡す。
+// グループセッション内のクライアントの場合、グループ名（元のセッション名）を返す。
 func (m *Manager) GetClientSessionWindow(tty string) (string, int, error) {
-	out, err := m.Exec.Run("display-message", "-p", "-t", tty, "#{session_name}\t#{window_index}")
+	out, err := m.Exec.Run("display-message", "-p", "-t", tty, "#{session_name}\t#{window_index}\t#{session_group}")
 	if err != nil {
 		return "", -1, fmt.Errorf("get client session window: %w", err)
 	}
 	line := strings.TrimSpace(string(out))
-	parts := strings.SplitN(line, "\t", 2)
-	if len(parts) != 2 {
+	parts := strings.SplitN(line, "\t", 3)
+	if len(parts) < 2 {
 		return "", -1, fmt.Errorf("get client session window: unexpected output %q", out)
 	}
 	winIndex, err := strconv.Atoi(parts[1])
 	if err != nil {
 		return "", -1, fmt.Errorf("get client session window: invalid window index %q: %w", parts[1], err)
 	}
-	return parts[0], winIndex, nil
+
+	sessionName := parts[0]
+	// グループセッションの場合、グループ名（元のセッション名）を返す
+	if len(parts) == 3 && parts[2] != "" {
+		sessionName = parts[2]
+	}
+
+	return sessionName, winIndex, nil
 }
 
 // GetSessionProjectDir はセッションの ghq プロジェクトディレクトリを返す。
@@ -232,6 +256,56 @@ func (m *Manager) GetSessionProjectDir(session string) (string, error) {
 		}
 	}
 	return m.GetSessionCwd(session)
+}
+
+// CreateGroupedSession は対象セッションにリンクしたグループセッションを作成する。
+// 各グループセッションは独立したウィンドウ選択を持つ。
+// 返されるグループセッション名は _palmux_ プレフィクス付きのランダムな名前。
+func (m *Manager) CreateGroupedSession(target string) (string, error) {
+	name := GroupedSessionPrefix + randomHex(8)
+	_, err := m.Exec.Run("new-session", "-d", "-t", target, "-s", name)
+	if err != nil {
+		return "", fmt.Errorf("create grouped session for %q: %w", target, err)
+	}
+	return name, nil
+}
+
+// DestroyGroupedSession はグループセッションを破棄する。
+// セッションが既に存在しない場合でもエラーは無視される。
+func (m *Manager) DestroyGroupedSession(name string) error {
+	_, err := m.Exec.Run("kill-session", "-t", name)
+	if err != nil {
+		return fmt.Errorf("destroy grouped session %q: %w", name, err)
+	}
+	return nil
+}
+
+// CleanupGroupedSessions は残存する全ての _palmux_ プレフィクス付きセッションを破棄する。
+// サーバー起動時に呼び出し、前回のクラッシュ等で残ったグループセッションを掃除する。
+func (m *Manager) CleanupGroupedSessions() int {
+	out, err := m.Exec.Run("list-sessions", "-F", "#{session_name}")
+	if err != nil {
+		return 0
+	}
+	cleaned := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		name := strings.TrimSpace(line)
+		if name != "" && strings.HasPrefix(name, GroupedSessionPrefix) {
+			if _, err := m.Exec.Run("kill-session", "-t", name); err == nil {
+				cleaned++
+			}
+		}
+	}
+	return cleaned
+}
+
+// randomHex は指定バイト数のランダムな16進文字列を返す。
+func randomHex(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("%d", b) // フォールバック
+	}
+	return hex.EncodeToString(b)
 }
 
 // Attach は tmux attach-session を pty 内で実行し、pty のマスター側ファイルと exec.Cmd を返す。

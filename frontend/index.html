@@ -20,6 +20,7 @@
   <link rel="stylesheet" href="filebrowser.css">
   <link rel="stylesheet" href="gitbrowser.css">
   <link rel="stylesheet" href="hljs-theme.css">
+  <link rel="stylesheet" href="split.css">
 </head>
 <body>
   <!-- Drawer Overlay -->
@@ -29,6 +30,7 @@
   <div id="drawer" class="drawer">
     <div class="drawer-header">
       <span class="drawer-header-title">Sessions</span>
+      <span id="drawer-panel-target" class="drawer-panel-target"></span>
       <label class="drawer-sort-toggle" aria-label="Sort order">
         <span class="drawer-sort-label drawer-sort-label--active" data-sort="activity">Recent</span>
         <div class="drawer-sort-switch">
@@ -78,6 +80,7 @@
           </svg>
         </button>
       </div>
+      <button id="split-toggle-btn" aria-label="Toggle split screen">&#x2AFF;</button>
       <div id="connection-status" class="connection-status hidden">
         <span class="connection-dot"></span>
         <span class="connection-text"></span>
@@ -96,27 +99,8 @@
         <div id="session-items"></div>
       </div>
 
-      <!-- Terminal View -->
-      <div id="terminal-view" class="hidden">
-        <div id="terminal-wrapper">
-          <div id="terminal-container"></div>
-          <div id="reconnect-overlay" class="reconnect-overlay hidden">
-            <span class="reconnect-overlay-text">Reconnecting...</span>
-          </div>
-        </div>
-        <div id="ime-container"></div>
-        <div id="toolbar-container"></div>
-      </div>
-
-      <!-- File Browser View -->
-      <div id="filebrowser-view" class="hidden">
-        <div id="filebrowser-container"></div>
-      </div>
-
-      <!-- Git Browser View -->
-      <div id="gitbrowser-view" class="hidden">
-        <div id="gitbrowser-container"></div>
-      </div>
+      <!-- Panel Container (panels are created dynamically by PanelManager) -->
+      <div id="panel-container" class="hidden"></div>
     </div>
   </div>
 

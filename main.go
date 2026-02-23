@@ -82,6 +82,11 @@ func main() {
 		},
 	}
 
+	// 起動時に残存グループセッションをクリーンアップ
+	if cleaned := mgr.CleanupGroupedSessions(); cleaned > 0 {
+		log.Printf("Cleaned up %d stale grouped session(s)", cleaned)
+	}
+
 	// サーバーを生成
 	normalizedBasePath := server.NormalizeBasePath(*basePath)
 	srv := server.NewServer(server.Options{

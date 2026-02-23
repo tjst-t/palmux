@@ -1,0 +1,304 @@
+/* split.css - Split-screen layout, panel headers, divider, focus indicator */
+
+/* ============================================================
+   Panel Container
+   ============================================================ */
+#panel-container {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+#panel-container.hidden {
+  display: none;
+}
+
+/* ============================================================
+   Individual Panel
+   ============================================================ */
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+  min-width: 0;
+}
+
+/* Single panel mode: panel takes full width */
+.panel--single {
+  flex: 1;
+}
+
+/* Split mode panels */
+.panel--left {
+  /* width set by JS via CSS variable */
+  width: var(--panel-left-width, 50%);
+  flex-shrink: 0;
+}
+
+.panel--right {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Focus indicator */
+.panel--focused {
+  outline: 2px solid #7ec8e3;
+  outline-offset: -2px;
+  z-index: 1;
+}
+
+/* ============================================================
+   Panel Header (visible in split mode only)
+   ============================================================ */
+.panel-header {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 8px;
+  background: #12192e;
+  border-bottom: 1px solid #2a2a4a;
+  user-select: none;
+  -webkit-user-select: none;
+  flex-shrink: 0;
+  gap: 4px;
+}
+
+.panel-header-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: #8888aa;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-right: auto;
+}
+
+/* Panel view tabs [T] [F] [G] */
+.panel-tab-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #6a6a8a;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  padding: 0;
+}
+
+.panel-tab-btn:hover {
+  background: rgba(126, 200, 227, 0.1);
+  color: #7ec8e3;
+}
+
+.panel-tab-btn:active {
+  background: rgba(126, 200, 227, 0.2);
+}
+
+.panel-tab-btn--active {
+  color: #7ec8e3;
+  border-color: rgba(126, 200, 227, 0.3);
+  background: rgba(126, 200, 227, 0.08);
+}
+
+.panel-tab-icon {
+  width: 12px;
+  height: 12px;
+}
+
+/* ============================================================
+   Panel Content Areas
+   ============================================================ */
+.panel-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-terminal-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-terminal-view.hidden {
+  display: none;
+}
+
+.panel-terminal-wrapper {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.panel-terminal-container {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.panel-terminal-container .xterm {
+  height: 100%;
+}
+
+.panel-reconnect-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.panel-reconnect-overlay.hidden {
+  display: none;
+}
+
+.panel-filebrowser-view,
+.panel-gitbrowser-view {
+  height: 100%;
+}
+
+.panel-filebrowser-view.hidden,
+.panel-gitbrowser-view.hidden {
+  display: none;
+}
+
+/* ============================================================
+   Divider
+   ============================================================ */
+.split-divider {
+  width: 6px;
+  background: #1a1a2e;
+  cursor: col-resize;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-left: 1px solid #2a2a4a;
+  border-right: 1px solid #2a2a4a;
+  transition: background 0.15s;
+}
+
+.split-divider:hover,
+.split-divider--active {
+  background: rgba(126, 200, 227, 0.15);
+}
+
+/* Grip dots */
+.split-divider::before {
+  content: '';
+  width: 2px;
+  height: 24px;
+  border-radius: 1px;
+  background: #4a4a6a;
+  transition: background 0.15s;
+}
+
+.split-divider:hover::before,
+.split-divider--active::before {
+  background: #7ec8e3;
+}
+
+/* ============================================================
+   Split Toggle Button (in main header)
+   ============================================================ */
+#split-toggle-btn {
+  display: none;
+}
+
+@media (min-width: 900px) {
+  #split-toggle-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 36px;
+    min-height: 36px;
+    margin-left: 4px;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: #7ec8e3;
+    font-size: 16px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    padding: 0;
+  }
+
+  #split-toggle-btn:hover {
+    background: rgba(126, 200, 227, 0.15);
+  }
+
+  #split-toggle-btn:active {
+    background: rgba(126, 200, 227, 0.25);
+  }
+
+  #split-toggle-btn--active {
+    border-color: rgba(126, 200, 227, 0.3);
+    background: rgba(126, 200, 227, 0.08);
+  }
+}
+
+/* ============================================================
+   Responsive: auto-collapse split under 900px
+   ============================================================ */
+@media (max-width: 899px) {
+  /* Force single panel mode */
+  .panel--left,
+  .panel--right {
+    width: 100% !important;
+    flex: 1;
+  }
+
+  .split-divider {
+    display: none !important;
+  }
+
+  .panel-header {
+    display: none !important;
+  }
+
+  /* Hide right panel in auto-collapsed mode */
+  .panel--collapsed {
+    display: none !important;
+  }
+}
+
+/* ============================================================
+   Drawer panel target indicator (split mode)
+   ============================================================ */
+.drawer-panel-target {
+  display: none;
+  font-size: 11px;
+  color: #7ec8e3;
+  padding: 2px 8px;
+  margin-left: 8px;
+  background: rgba(126, 200, 227, 0.1);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.drawer-panel-target--visible {
+  display: inline-block;
+}

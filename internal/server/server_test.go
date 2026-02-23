@@ -33,6 +33,10 @@ func (m *mockTmuxManager) RenameWindow(session string, index int, name string) e
 func (m *mockTmuxManager) Attach(session string, windowIndex int) (*os.File, *exec.Cmd, error) {
 	return nil, nil, nil
 }
+func (m *mockTmuxManager) CreateGroupedSession(target string) (string, error) {
+	return "", fmt.Errorf("not implemented")
+}
+func (m *mockTmuxManager) DestroyGroupedSession(name string) error { return nil }
 func (m *mockTmuxManager) GetSessionCwd(session string) (string, error) { return "", nil }
 func (m *mockTmuxManager) GetSessionProjectDir(session string) (string, error) {
 	return "", nil
