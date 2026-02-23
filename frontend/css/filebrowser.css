@@ -709,6 +709,21 @@
   background: rgba(79, 195, 247, 0.06);
 }
 
+/* --- HTML Preview --- */
+.fp-html {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.fp-html-iframe {
+  flex: 1;
+  width: 100%;
+  min-height: 400px;
+  border: none;
+  background: #fff;
+}
+
 /* --- Unknown File Type --- */
 .fp-unknown {
   padding: 40px 16px;
