@@ -151,6 +151,44 @@ func (s *Server) handlePutFile() http.Handler {
 	})
 }
 
+// handleSearchFiles は GET /api/sessions/{session}/files/search のハンドラ。
+// クエリパラメータ q で検索文字列、path で検索起点ディレクトリを指定する。
+// カレントディレクトリ以下のファイル名を再帰的に検索し、マッチしたエントリを返す。
+func (s *Server) handleSearchFiles() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		session := r.PathValue("session")
+
+		cwd, err := s.tmux.GetSessionProjectDir(session)
+		if err != nil {
+			if errors.Is(err, tmux.ErrSessionNotFound) {
+				writeError(w, http.StatusNotFound, "session not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		fs := &fileserver.FileServer{RootDir: cwd}
+
+		query := r.URL.Query().Get("q")
+		basePath := r.URL.Query().Get("path")
+		if basePath == "" {
+			basePath = "."
+		}
+
+		results, err := fs.Search(query, basePath)
+		if err != nil {
+			writeFilesError(w, err, basePath)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"query":   query,
+			"results": results,
+		})
+	})
+}
+
 // writeFilesError はファイル操作のエラーを適切な HTTP ステータスコードで返す。
 func writeFilesError(w http.ResponseWriter, err error, path string) {
 	// パストラバーサル系エラー

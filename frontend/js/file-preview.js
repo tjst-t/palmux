@@ -146,6 +146,122 @@ function escapeHTML(str) {
 }
 
 /**
+ * Escape special RegExp characters in a string.
+ * @param {string} str
+ * @returns {string}
+ */
+function escapeRegExp(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * EditHistory manages undo/redo stacks for textarea editing.
+ */
+class EditHistory {
+  constructor() {
+    this._undoStack = [];
+    this._redoStack = [];
+    this._lastContent = '';
+    this._debounceTimer = null;
+  }
+
+  /**
+   * Initialize with the starting content.
+   * @param {string} content
+   */
+  init(content) {
+    this._undoStack = [];
+    this._redoStack = [];
+    this._lastContent = content;
+    clearTimeout(this._debounceTimer);
+  }
+
+  /**
+   * Record a content change (debounced snapshot every 400ms).
+   * @param {string} content
+   * @param {number} cursor
+   */
+  record(content, cursor) {
+    clearTimeout(this._debounceTimer);
+    this._debounceTimer = setTimeout(() => {
+      if (content !== this._lastContent) {
+        this._undoStack.push({ content: this._lastContent, cursor });
+        if (this._undoStack.length > 200) this._undoStack.shift();
+        this._lastContent = content;
+        this._redoStack = [];
+      }
+    }, 400);
+  }
+
+  /**
+   * Immediately snapshot current state (e.g., before paste/cut).
+   * @param {string} content
+   * @param {number} cursor
+   */
+  snapshot(content, cursor) {
+    clearTimeout(this._debounceTimer);
+    if (content !== this._lastContent) {
+      this._undoStack.push({ content: this._lastContent, cursor });
+      if (this._undoStack.length > 200) this._undoStack.shift();
+      this._lastContent = content;
+      this._redoStack = [];
+    }
+  }
+
+  /**
+   * Flush pending debounced snapshot.
+   * @param {string} content
+   * @param {number} cursor
+   */
+  flush(content, cursor) {
+    clearTimeout(this._debounceTimer);
+    if (content !== this._lastContent) {
+      this._undoStack.push({ content: this._lastContent, cursor });
+      if (this._undoStack.length > 200) this._undoStack.shift();
+      this._lastContent = content;
+      this._redoStack = [];
+    }
+  }
+
+  /**
+   * Undo: returns previous state or null.
+   * @param {string} currentContent
+   * @param {number} currentCursor
+   * @returns {{content: string, cursor: number}|null}
+   */
+  undo(currentContent, currentCursor) {
+    this.flush(currentContent, currentCursor);
+    if (this._undoStack.length === 0) return null;
+    const prev = this._undoStack.pop();
+    this._redoStack.push({ content: currentContent, cursor: currentCursor });
+    this._lastContent = prev.content;
+    return prev;
+  }
+
+  /**
+   * Redo: returns next state or null.
+   * @param {string} currentContent
+   * @param {number} currentCursor
+   * @returns {{content: string, cursor: number}|null}
+   */
+  redo(currentContent, currentCursor) {
+    if (this._redoStack.length === 0) return null;
+    clearTimeout(this._debounceTimer);
+    const next = this._redoStack.pop();
+    this._undoStack.push({ content: currentContent, cursor: currentCursor });
+    this._lastContent = next.content;
+    return next;
+  }
+
+  canUndo() { return this._undoStack.length > 0; }
+  canRedo() { return this._redoStack.length > 0; }
+
+  dispose() {
+    clearTimeout(this._debounceTimer);
+  }
+}
+
+/**
  * FilePreview renders a file preview panel within a container.
  *
  * Supports:
@@ -194,6 +310,20 @@ export class FilePreview {
     this._saveBarEl = null;
     this._saveBtnEl = null;
     this._saveStatusEl = null;
+
+    // Undo/Redo history
+    this._history = new EditHistory();
+    this._undoBtnEl = null;
+    this._redoBtnEl = null;
+    this._editToolbarEl = null;
+
+    // Search state
+    this._searchBarEl = null;
+    this._searchInputEl = null;
+    this._replaceInputEl = null;
+    this._searchQuery = '';
+    /** @type {number} 最後にマッチした末尾位置（検索ボックスフォーカス中の連続検索用） */
+    this._searchMatchEnd = 0;
 
     this._render();
     this._loadContent();
@@ -308,9 +438,127 @@ export class FilePreview {
     if (editMode) {
       this._renderEditMode();
     } else {
+      // Remove edit toolbar if present
+      if (this._editToolbarEl) {
+        this._editToolbarEl.remove();
+        this._editToolbarEl = null;
+      }
+      this._history.dispose();
       // Switch back to preview - re-render the content
       this._renderPreviewContent();
     }
+  }
+
+  /**
+   * Render the edit mode toolbar (undo/redo + search bar) into the header.
+   */
+  _renderEditToolbar() {
+    // Remove old toolbar if present
+    if (this._editToolbarEl) {
+      this._editToolbarEl.remove();
+      this._editToolbarEl = null;
+    }
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'fp-edit-toolbar';
+    this._editToolbarEl = toolbar;
+
+    // Undo button
+    const undoBtn = document.createElement('button');
+    undoBtn.className = 'fp-edit-tool-btn';
+    undoBtn.title = 'Undo (Ctrl+Z)';
+    undoBtn.textContent = '↩';
+    undoBtn.disabled = !this._history.canUndo();
+    undoBtn.addEventListener('click', () => this._handleUndo());
+    this._undoBtnEl = undoBtn;
+    toolbar.appendChild(undoBtn);
+
+    // Redo button
+    const redoBtn = document.createElement('button');
+    redoBtn.className = 'fp-edit-tool-btn';
+    redoBtn.title = 'Redo (Ctrl+Y)';
+    redoBtn.textContent = '↪';
+    redoBtn.disabled = !this._history.canRedo();
+    redoBtn.addEventListener('click', () => this._handleRedo());
+    this._redoBtnEl = redoBtn;
+    toolbar.appendChild(redoBtn);
+
+    // Separator
+    const sep = document.createElement('span');
+    sep.className = 'fp-edit-toolbar-sep';
+    toolbar.appendChild(sep);
+
+    // Search input
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.className = 'fp-edit-search-input';
+    searchInput.placeholder = '検索...';
+    searchInput.setAttribute('aria-label', '検索');
+    searchInput.value = this._searchQuery;
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        this._searchQuery = searchInput.value;
+        this._searchNext();
+      }
+      if (e.key === 'Escape') {
+        searchInput.value = '';
+        this._searchQuery = '';
+        if (this._textareaEl) this._textareaEl.focus();
+      }
+    });
+    searchInput.addEventListener('input', () => {
+      this._searchQuery = searchInput.value;
+      this._searchMatchEnd = 0; // クエリ変更時はマッチ位置をリセット
+    });
+    this._searchInputEl = searchInput;
+    toolbar.appendChild(searchInput);
+
+    // Search button
+    const searchBtn = document.createElement('button');
+    searchBtn.className = 'fp-edit-tool-btn';
+    searchBtn.title = '次を検索';
+    searchBtn.textContent = '▶';
+    searchBtn.addEventListener('click', () => {
+      this._searchQuery = searchInput.value;
+      this._searchNext();
+      searchInput.focus();
+    });
+    toolbar.appendChild(searchBtn);
+
+    // Replace input
+    const replaceInput = document.createElement('input');
+    replaceInput.type = 'text';
+    replaceInput.className = 'fp-edit-replace-input';
+    replaceInput.placeholder = '置換...';
+    replaceInput.setAttribute('aria-label', '置換');
+    replaceInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        this._handleReplace(replaceInput.value);
+      }
+    });
+    this._replaceInputEl = replaceInput;
+    toolbar.appendChild(replaceInput);
+
+    // Replace button
+    const replaceBtn = document.createElement('button');
+    replaceBtn.className = 'fp-edit-tool-btn fp-edit-replace-btn';
+    replaceBtn.title = '置換';
+    replaceBtn.textContent = '↓';
+    replaceBtn.addEventListener('click', () => this._handleReplace(replaceInput.value));
+    toolbar.appendChild(replaceBtn);
+
+    // Replace All button
+    const replaceAllBtn = document.createElement('button');
+    replaceAllBtn.className = 'fp-edit-tool-btn fp-edit-replace-btn';
+    replaceAllBtn.title = '全て置換';
+    replaceAllBtn.textContent = '↓↓';
+    replaceAllBtn.addEventListener('click', () => this._handleReplaceAll(replaceInput.value));
+    toolbar.appendChild(replaceAllBtn);
+
+    // Insert after header
+    this._wrapper.insertBefore(toolbar, this._contentEl);
   }
 
   /**
@@ -320,17 +568,57 @@ export class FilePreview {
     this._contentEl.innerHTML = '';
     this._contentEl.classList.add('fp-content--edit');
 
+    const initialContent = this._dirty
+      ? (this._textareaEl ? this._textareaEl.value : this._originalContent)
+      : this._originalContent;
+
     const textarea = document.createElement('textarea');
     textarea.className = 'fp-edit-textarea';
-    textarea.value = this._dirty ? (this._textareaEl ? this._textareaEl.value : this._originalContent) : this._originalContent;
+    textarea.value = initialContent;
     textarea.spellcheck = false;
+
     textarea.addEventListener('input', () => {
       const isDirty = textarea.value !== this._originalContent;
       this._dirty = isDirty;
       this._updateSaveBar();
+      this._history.record(textarea.value, textarea.selectionStart);
+      this._updateUndoRedoBtns();
     });
+
+    textarea.addEventListener('paste', () => {
+      // Snapshot before paste content arrives (on next tick)
+      setTimeout(() => {
+        this._history.snapshot(textarea.value, textarea.selectionStart);
+        this._updateUndoRedoBtns();
+      }, 0);
+    });
+
+    textarea.addEventListener('cut', () => {
+      setTimeout(() => {
+        this._history.snapshot(textarea.value, textarea.selectionStart);
+        this._updateUndoRedoBtns();
+      }, 0);
+    });
+
+    // Ctrl-Z / Ctrl-Y keyboard shortcuts
+    textarea.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && !e.shiftKey && e.key === 'z') {
+        e.preventDefault();
+        this._handleUndo();
+      } else if (e.ctrlKey && e.key === 'y') {
+        e.preventDefault();
+        this._handleRedo();
+      } else if (e.ctrlKey && e.key === 'f') {
+        e.preventDefault();
+        this._focusSearchInput();
+      }
+    });
+
     this._textareaEl = textarea;
     this._contentEl.appendChild(textarea);
+
+    // Initialize history with current content
+    this._history.init(initialContent);
 
     // Save bar
     const saveBar = document.createElement('div');
@@ -352,6 +640,169 @@ export class FilePreview {
     this._saveBarEl = saveBar;
     this._contentEl.appendChild(saveBar);
     this._updateSaveBar();
+
+    // Render edit toolbar (undo/redo + search)
+    this._renderEditToolbar();
+    this._updateUndoRedoBtns();
+  }
+
+  /**
+   * Update undo/redo button states.
+   */
+  _updateUndoRedoBtns() {
+    if (this._undoBtnEl) this._undoBtnEl.disabled = !this._history.canUndo();
+    if (this._redoBtnEl) this._redoBtnEl.disabled = !this._history.canRedo();
+  }
+
+  /**
+   * Handle undo action.
+   */
+  _handleUndo() {
+    if (!this._textareaEl) return;
+    const state = this._history.undo(this._textareaEl.value, this._textareaEl.selectionStart);
+    if (!state) return;
+    this._textareaEl.value = state.content;
+    const pos = Math.min(state.cursor, state.content.length);
+    this._textareaEl.setSelectionRange(pos, pos);
+    this._dirty = state.content !== this._originalContent;
+    this._updateSaveBar();
+    this._updateUndoRedoBtns();
+    this._textareaEl.focus();
+  }
+
+  /**
+   * Handle redo action.
+   */
+  _handleRedo() {
+    if (!this._textareaEl) return;
+    const state = this._history.redo(this._textareaEl.value, this._textareaEl.selectionStart);
+    if (!state) return;
+    this._textareaEl.value = state.content;
+    const pos = Math.min(state.cursor, state.content.length);
+    this._textareaEl.setSelectionRange(pos, pos);
+    this._dirty = state.content !== this._originalContent;
+    this._updateSaveBar();
+    this._updateUndoRedoBtns();
+    this._textareaEl.focus();
+  }
+
+  /**
+   * Focus the search input field.
+   */
+  _focusSearchInput() {
+    if (this._searchInputEl) {
+      this._searchInputEl.focus();
+      this._searchInputEl.select();
+    }
+  }
+
+  /**
+   * Search next match from current cursor position (wrap-around).
+   * 検索ボックスがフォーカス中の場合はフォーカスを奪わず、連続Enter検索を維持する。
+   */
+  _searchNext() {
+    if (!this._searchQuery || !this._textareaEl) return;
+
+    const text = this._textareaEl.value;
+    const queryLower = this._searchQuery.toLowerCase();
+    const textLower = text.toLowerCase();
+
+    // 検索ボックスがフォーカス中なら _searchMatchEnd から、そうでなければカーソル位置から検索
+    const searchFromSearchBox = document.activeElement === this._searchInputEl;
+    const cursor = searchFromSearchBox
+      ? this._searchMatchEnd
+      : this._textareaEl.selectionEnd;
+
+    // Search from cursor to end
+    let idx = textLower.indexOf(queryLower, cursor);
+
+    if (idx === -1) {
+      // Wrap: search from beginning up to (but not including) cursor
+      const wrapIdx = textLower.indexOf(queryLower, 0);
+      if (wrapIdx === -1 || wrapIdx >= cursor) {
+        // Not found anywhere (or only at/after cursor)
+        return;
+      }
+      idx = wrapIdx;
+    }
+
+    // マッチ末尾を記録（次回の連続検索のスタート地点）
+    this._searchMatchEnd = idx + this._searchQuery.length;
+
+    this._textareaEl.setSelectionRange(idx, idx + this._searchQuery.length);
+    this._scrollTextareaToSelection();
+
+    // 検索ボックスがフォーカス中でない場合だけ textarea にフォーカスを移す
+    if (!searchFromSearchBox) {
+      this._textareaEl.focus();
+    }
+  }
+
+  /**
+   * Scroll textarea so the current selection is visible.
+   */
+  _scrollTextareaToSelection() {
+    const ta = this._textareaEl;
+    if (!ta) return;
+    const text = ta.value.substring(0, ta.selectionStart);
+    const lines = text.split('\n');
+    const style = getComputedStyle(ta);
+    const lineHeight = parseFloat(style.lineHeight) || 20;
+    const paddingTop = parseFloat(style.paddingTop) || 0;
+    const targetScroll = (lines.length - 1) * lineHeight + paddingTop - ta.clientHeight / 2;
+    ta.scrollTop = Math.max(0, targetScroll);
+  }
+
+  /**
+   * Replace the currently selected text (if it matches search query) with replace string.
+   * Then jump to next match.
+   * @param {string} replaceStr
+   */
+  _handleReplace(replaceStr) {
+    if (!this._searchQuery || !this._textareaEl) return;
+
+    const ta = this._textareaEl;
+    const selected = ta.value.substring(ta.selectionStart, ta.selectionEnd);
+
+    if (selected.toLowerCase() === this._searchQuery.toLowerCase()) {
+      // Snapshot before modification
+      this._history.snapshot(ta.value, ta.selectionStart);
+
+      const start = ta.selectionStart;
+      const before = ta.value.substring(0, start);
+      const after = ta.value.substring(ta.selectionEnd);
+      ta.value = before + replaceStr + after;
+      ta.setSelectionRange(start + replaceStr.length, start + replaceStr.length);
+
+      this._dirty = ta.value !== this._originalContent;
+      this._updateSaveBar();
+      this._history.record(ta.value, ta.selectionStart);
+      this._updateUndoRedoBtns();
+    }
+
+    // Jump to next match
+    this._searchNext();
+  }
+
+  /**
+   * Replace all occurrences of search query with replace string.
+   * @param {string} replaceStr
+   */
+  _handleReplaceAll(replaceStr) {
+    if (!this._searchQuery || !this._textareaEl) return;
+
+    const ta = this._textareaEl;
+    this._history.snapshot(ta.value, ta.selectionStart);
+
+    const regex = new RegExp(escapeRegExp(this._searchQuery), 'gi');
+    const newValue = ta.value.replace(regex, replaceStr);
+    if (newValue === ta.value) return;
+
+    ta.value = newValue;
+    this._dirty = ta.value !== this._originalContent;
+    this._updateSaveBar();
+    this._history.record(ta.value, ta.selectionStart);
+    this._updateUndoRedoBtns();
   }
 
   /**
@@ -538,9 +989,32 @@ export class FilePreview {
           }
           break;
         }
-        default:
-          this._renderUnknown();
+        default: {
+          // 拡張子で不明なファイルでも、バックエンドで text と判定されたものはテキスト表示
+          let renderedAsText = false;
+          if (this._fetchFile) {
+            try {
+              const data = await this._fetchFileContent();
+              if (!this._disposed && data && data.content_type === 'text') {
+                this._originalContent = data.content || '';
+                this._isTruncated = !!data.truncated;
+                this._isEditable = !data.truncated && !!this._saveFile;
+                this._previewType = 'plaintext';
+                this._renderPlaintext(data.content || '', data.truncated);
+                if (this._isEditable) {
+                  this._addEditToggle();
+                }
+                renderedAsText = true;
+              }
+            } catch (_) {
+              // fall through to unknown
+            }
+          }
+          if (!renderedAsText && !this._disposed) {
+            this._renderUnknown();
+          }
           break;
+        }
       }
     } catch (err) {
       if (this._disposed) return;
@@ -853,6 +1327,7 @@ export class FilePreview {
    */
   dispose() {
     this._disposed = true;
+    this._history.dispose();
     this._container.innerHTML = '';
     this._wrapper = null;
     this._contentEl = null;
@@ -862,5 +1337,10 @@ export class FilePreview {
     this._saveBarEl = null;
     this._saveBtnEl = null;
     this._saveStatusEl = null;
+    this._editToolbarEl = null;
+    this._undoBtnEl = null;
+    this._redoBtnEl = null;
+    this._searchInputEl = null;
+    this._replaceInputEl = null;
   }
 }

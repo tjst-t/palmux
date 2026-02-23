@@ -1,7 +1,7 @@
 // filebrowser.js - ファイルブラウザ UI
 // セッションの CWD をルートとしてディレクトリを閲覧する
 
-import { getSessionCwd, listFiles, getFileContent, getFileRawURL, saveFile } from './api.js';
+import { getSessionCwd, listFiles, searchFiles, getFileContent, getFileRawURL, saveFile } from './api.js';
 import { FilePreview } from './file-preview.js';
 
 /**
@@ -125,6 +125,18 @@ export class FileBrowser {
     /** @type {number} フォントサイズ（px） */
     const savedSize = parseInt(localStorage.getItem('palmux-fb-font-size'), 10);
     this._fontSize = (savedSize >= 8 && savedSize <= 24) ? savedSize : 14;
+
+    /** @type {boolean} dispose済みフラグ */
+    this._disposed = false;
+
+    /** @type {boolean} 検索モードフラグ */
+    this._searchMode = false;
+
+    /** @type {string} 現在の検索クエリ */
+    this._searchQuery = '';
+
+    /** @type {HTMLInputElement|null} 検索入力要素 */
+    this._searchInputEl = null;
 
     this._render();
     this._applyFontSize();
@@ -351,12 +363,29 @@ export class FileBrowser {
   }
 
   /**
-   * パンくずリストを作成する。
+   * パンくずリストを作成する（右側に検索ボックス付き）。
    * @returns {HTMLElement}
    */
   _createBreadcrumb() {
     const nav = document.createElement('nav');
     nav.className = 'fb-breadcrumb';
+
+    // 検索モード中は「戻る」ボタンのみ表示
+    if (this._searchMode) {
+      const backBtn = document.createElement('button');
+      backBtn.className = 'fb-breadcrumb-back';
+      backBtn.textContent = '\u2190';
+      backBtn.setAttribute('aria-label', 'Back to file list');
+      backBtn.addEventListener('click', () => this._exitSearchMode());
+      nav.appendChild(backBtn);
+
+      const label = document.createElement('span');
+      label.className = 'fb-search-result-label';
+      label.textContent = `"${this._searchQuery}" の検索結果`;
+      nav.appendChild(label);
+
+      return nav;
+    }
 
     // 戻るボタン（ルート以外のとき）
     if (this._pathSegments.length > 0) {
@@ -404,7 +433,145 @@ export class FileBrowser {
     }
 
     nav.appendChild(crumbs);
+
+    // 検索ボックス
+    const searchBox = document.createElement('div');
+    searchBox.className = 'fb-search-box';
+
+    const searchInput = document.createElement('input');
+    searchInput.type = 'search';
+    searchInput.className = 'fb-search-input';
+    searchInput.placeholder = '🔍';
+    searchInput.value = this._searchQuery;
+    searchInput.setAttribute('aria-label', 'ファイル検索');
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const q = searchInput.value.trim();
+        if (q) {
+          this._searchQuery = q;
+          this._handleSearch(q);
+        }
+      }
+      if (e.key === 'Escape') {
+        searchInput.value = '';
+        this._searchQuery = '';
+        searchInput.blur();
+      }
+    });
+    this._searchInputEl = searchInput;
+
+    searchBox.appendChild(searchInput);
+    nav.appendChild(searchBox);
+
     return nav;
+  }
+
+  /**
+   * 検索を実行する。
+   * @param {string} query - 検索クエリ
+   */
+  async _handleSearch(query) {
+    if (!this._session || !query) return;
+
+    this._searchMode = true;
+    this._searchQuery = query;
+
+    this._showLoading();
+
+    try {
+      const result = await searchFiles(this._session, query, this._currentPath);
+      if (this._disposed) return;
+      this._renderSearchResults(result.results || []);
+    } catch (err) {
+      console.error('Search failed:', err);
+      this._searchMode = false;
+      this._showError(`Search failed: ${err.message}`);
+    }
+  }
+
+  /**
+   * 検索モードを終了してディレクトリ一覧に戻る。
+   */
+  _exitSearchMode() {
+    this._searchMode = false;
+    this._searchQuery = '';
+    this._loadDirectory(this._currentPath, { silent: true });
+  }
+
+  /**
+   * 検索結果をレンダリングする。
+   * @param {Array} results - 検索結果エントリ配列
+   */
+  _renderSearchResults(results) {
+    if (!this._wrapper) this._render();
+    this._wrapper.innerHTML = '';
+
+    this._wrapper.appendChild(this._createBreadcrumb());
+
+    const list = document.createElement('div');
+    list.className = 'fb-list';
+
+    if (results.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'fb-empty';
+      empty.textContent = 'ファイルが見つかりませんでした';
+      list.appendChild(empty);
+    } else {
+      for (const entry of results) {
+        const el = document.createElement('div');
+        el.className = 'fb-entry fb-search-result-entry';
+        if (entry.is_dir) el.classList.add('fb-entry--dir');
+
+        const icon = document.createElement('span');
+        icon.className = 'fb-entry-icon';
+        icon.textContent = entry.is_dir ? '\uD83D\uDCC1' : '\uD83D\uDCC4';
+
+        const nameCol = document.createElement('div');
+        nameCol.className = 'fb-search-result-names';
+
+        const name = document.createElement('span');
+        name.className = 'fb-entry-name';
+        name.textContent = entry.name;
+
+        const pathEl = document.createElement('span');
+        pathEl.className = 'fb-search-result-path';
+        pathEl.textContent = entry.path;
+
+        nameCol.appendChild(name);
+        nameCol.appendChild(pathEl);
+
+        const meta = document.createElement('span');
+        meta.className = 'fb-entry-meta';
+        if (!entry.is_dir) {
+          const size = document.createElement('span');
+          size.className = 'fb-entry-size';
+          size.textContent = formatFileSize(entry.size || 0);
+          meta.appendChild(size);
+        }
+
+        el.appendChild(icon);
+        el.appendChild(nameCol);
+        el.appendChild(meta);
+
+        el.addEventListener('click', () => {
+          if (entry.is_dir) {
+            this._searchMode = false;
+            this._searchQuery = '';
+            this._loadDirectory(entry.path);
+          } else {
+            this.showPreview(this._session, entry.path, entry);
+            if (this._onFileSelect) {
+              this._onFileSelect(this._session, entry.path, entry);
+            }
+          }
+        });
+
+        list.appendChild(el);
+      }
+    }
+
+    this._wrapper.appendChild(list);
   }
 
   /**
@@ -546,5 +713,9 @@ export class FileBrowser {
     this._currentPath = '.';
     this._pathSegments = [];
     this._wrapper = null;
+    this._searchMode = false;
+    this._searchQuery = '';
+    this._searchInputEl = null;
+    this._disposed = true;
   }
 }
