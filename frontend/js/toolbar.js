@@ -194,23 +194,33 @@ export class Toolbar {
     this._container.appendChild(row);
     this._row = row;
 
-    // > ボタン（次のモードへ切り替え、右端に絶対配置）
+    // > ボタン（右端に絶対配置）
+    // normal → shortcut / commands → normal
     this._switchFwdBtn = document.createElement('button');
     this._switchFwdBtn.className = 'toolbar-switch-btn toolbar-switch-btn--fwd';
     this._switchFwdBtn.textContent = '>';
     this._addButtonHandler(this._switchFwdBtn, (e) => {
       e.preventDefault();
-      this._advanceMode();
+      if (this._mode === 'normal') {
+        this._setMode('shortcut');
+      } else if (this._mode === 'commands') {
+        this._setMode('normal');
+      }
     });
     this._container.appendChild(this._switchFwdBtn);
 
-    // < ボタン（通常モードへ戻す、左端に絶対配置、初期非表示）
+    // < ボタン（左端に絶対配置）
+    // normal → commands / shortcut → normal
     this._switchBackBtn = document.createElement('button');
     this._switchBackBtn.className = 'toolbar-switch-btn toolbar-switch-btn--back';
     this._switchBackBtn.textContent = '<';
     this._addButtonHandler(this._switchBackBtn, (e) => {
       e.preventDefault();
-      this._setMode('normal');
+      if (this._mode === 'normal') {
+        this._setMode('commands');
+      } else {
+        this._setMode('normal');
+      }
     });
     this._container.appendChild(this._switchBackBtn);
 
@@ -235,6 +245,8 @@ export class Toolbar {
     this._container.appendChild(this._commandsRow);
 
     this._updateButtonStates();
+    // 通常モードでは < ボタンも表示（commands へのアクセス用）
+    this._switchBackBtn.style.display = 'flex';
   }
 
   /**
@@ -475,25 +487,18 @@ export class Toolbar {
   }
 
   /**
-   * モードを次に進める。
-   * normal → shortcut → commands → (ループせず commands で止まる)
-   */
-  _advanceMode() {
-    if (this._mode === 'normal') {
-      this._setMode('shortcut');
-    } else if (this._mode === 'shortcut') {
-      this._setMode('commands');
-    }
-  }
-
-  /**
    * ツールバーのモードを設定する。
+   *
+   * モード遷移:
+   *   < ボタン: normal → commands（左側）、shortcut → normal
+   *   > ボタン: normal → shortcut（右側）、commands → normal
+   *
    * @param {'normal' | 'shortcut' | 'commands'} mode
    */
   _setMode(mode) {
     this._mode = mode;
 
-    // 全行を非表示にしてからアクティブなモードだけ表示
+    // 全行・ボタンを一旦非表示
     this._row.style.display = 'none';
     this._shortcutRow.style.display = 'none';
     this._commandsRow.style.display = 'none';
@@ -501,15 +506,18 @@ export class Toolbar {
     this._switchBackBtn.style.display = 'none';
 
     if (mode === 'normal') {
+      // 通常: メイン行 + 両方のモード切替ボタンを表示
       this._row.style.display = '';
-      this._switchFwdBtn.style.display = '';
+      this._switchFwdBtn.style.display = '';   // > → shortcut
+      this._switchBackBtn.style.display = 'flex'; // < → commands
     } else if (mode === 'shortcut') {
+      // ショートカット: ショートカット行 + < (戻る) のみ
       this._shortcutRow.style.display = 'flex';
-      this._switchFwdBtn.style.display = '';
-      this._switchBackBtn.style.display = 'flex';
+      this._switchBackBtn.style.display = 'flex'; // < → normal
     } else if (mode === 'commands') {
+      // コマンド: コマンド行 + > (戻る) のみ
       this._commandsRow.style.display = 'flex';
-      this._switchBackBtn.style.display = 'flex';
+      this._switchFwdBtn.style.display = '';   // > → normal
       this._loadCommands();
     }
   }
