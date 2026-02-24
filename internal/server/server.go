@@ -94,6 +94,7 @@ func NewServer(opts Options) *Server {
 	mux.Handle("PATCH /api/sessions/{session}/windows/{index}", auth(s.handleRenameWindow()))
 	mux.Handle("GET /api/sessions/{session}/windows/{index}/attach", auth(s.handleAttach()))
 	mux.Handle("GET /api/sessions/{session}/cwd", auth(s.handleGetCwd()))
+	mux.Handle("GET /api/sessions/{session}/commands", auth(s.handleGetCommands()))
 	mux.Handle("GET /api/sessions/{session}/files", auth(s.handleGetFiles()))
 	mux.Handle("GET /api/sessions/{session}/files/search", auth(s.handleSearchFiles()))
 	mux.Handle("PUT /api/sessions/{session}/files", auth(s.handlePutFile()))
