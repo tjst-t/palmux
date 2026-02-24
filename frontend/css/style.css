@@ -551,6 +551,54 @@ html, body {
   color: #80DEEA;
 }
 
+/* Toolbar commands row (3rd mode) */
+.toolbar-commands-row {
+  display: none;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 4px;
+  padding: 2px 30px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  align-items: center;
+}
+
+.toolbar-commands-row::-webkit-scrollbar {
+  display: none;
+}
+
+/* Command buttons */
+.toolbar-command-btn {
+  flex-shrink: 0;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px 12px;
+  background: #0d2818;
+  border: 1px solid #1a5c2e;
+  border-radius: 6px;
+  color: #7ee8a0;
+  font-size: 12px;
+  font-family: monospace;
+  cursor: pointer;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.toolbar-command-btn:active {
+  background: #1a5c2e;
+  color: #b5f5c8;
+}
+
+/* Command loading/empty states */
+.toolbar-commands-empty,
+.toolbar-commands-loading {
+  color: #666;
+  font-size: 12px;
+  padding: 8px 4px;
+  white-space: nowrap;
+}
+
 /* Drawer Overlay */
 .drawer-overlay {
   position: fixed;

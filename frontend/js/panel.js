@@ -2,7 +2,7 @@
 // 1つのパネル（左/右）の状態と DOM をカプセル化する。
 // Terminal, FileBrowser, GitBrowser, Toolbar, IME, Touch, Connection を保持。
 
-import { getWebSocketURL, listNotifications, deleteNotification } from './api.js';
+import { getWebSocketURL, getCommands, listNotifications, deleteNotification } from './api.js';
 import { PalmuxTerminal } from './terminal.js';
 import { Toolbar } from './toolbar.js';
 import { IMEInput } from './ime-input.js';
@@ -284,6 +284,7 @@ export class Panel {
     // Toolbar
     this._toolbar = new Toolbar(this._toolbarContainerEl, {
       onSendKey: (key) => this._terminal.sendInput(key),
+      onFetchCommands: (session) => getCommands(session),
       onKeyboardMode: (mode) => {
         this._terminal.setKeyboardMode(mode);
         if (mode === 'ime') {
@@ -296,6 +297,7 @@ export class Panel {
     });
     this._terminal.setToolbar(this._toolbar);
     this._imeInput.setToolbar(this._toolbar);
+    this._toolbar.setCurrentSession(sessionName);
     this._toolbar.restoreState(this._globalUIState);
 
     // Toolbar visibility
