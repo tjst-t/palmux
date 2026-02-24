@@ -44,6 +44,24 @@ const RIGHT_BUTTON_DEFS = [
 ];
 
 /**
+ * ショートカットキーの定義
+ * @type {Array<{label: string, key: string}>}
+ */
+const SHORTCUT_DEFS = [
+  { label: '^C', key: '\x03' },
+  { label: '^Z', key: '\x1a' },
+  { label: '^D', key: '\x04' },
+  { label: '^O', key: '\x0f' },
+  { label: '^L', key: '\x0c' },
+  { label: '^R', key: '\x12' },
+  { label: '^A', key: '\x01' },
+  { label: '^E', key: '\x05' },
+  { label: '^W', key: '\x17' },
+  { label: '^U', key: '\x15' },
+  { label: '^K', key: '\x0b' },
+];
+
+/**
  * Toolbar は修飾キーツールバーコンポーネント。
  * ワンショット（タップ）とロック（長押し）の2モードに対応する（Termux スタイル）。
  */
@@ -72,6 +90,9 @@ export class Toolbar {
 
     /** @type {boolean} */
     this._visible = true;
+
+    /** @type {boolean} ショートカットモード中かどうか */
+    this._inShortcutMode = false;
 
     /** @type {Object<string, HTMLButtonElement>} */
     this._buttons = {};
@@ -160,6 +181,43 @@ export class Toolbar {
     row.appendChild(leftGroup);
     row.appendChild(rightGroup);
     this._container.appendChild(row);
+    this._row = row;
+
+    // > ボタン（ショートカットモードへ切り替え、右端に絶対配置）
+    this._switchFwdBtn = document.createElement('button');
+    this._switchFwdBtn.className = 'toolbar-switch-btn toolbar-switch-btn--fwd';
+    this._switchFwdBtn.textContent = '>';
+    this._addButtonHandler(this._switchFwdBtn, (e) => {
+      e.preventDefault();
+      this._enterShortcutMode();
+    });
+    this._container.appendChild(this._switchFwdBtn);
+
+    // < ボタン（通常モードへ戻す、左端に絶対配置、初期非表示）
+    this._switchBackBtn = document.createElement('button');
+    this._switchBackBtn.className = 'toolbar-switch-btn toolbar-switch-btn--back';
+    this._switchBackBtn.textContent = '<';
+    this._addButtonHandler(this._switchBackBtn, (e) => {
+      e.preventDefault();
+      this._exitShortcutMode();
+    });
+    this._container.appendChild(this._switchBackBtn);
+
+    // ショートカット行（初期非表示）
+    this._shortcutRow = document.createElement('div');
+    this._shortcutRow.className = 'toolbar-shortcut-row';
+    for (const def of SHORTCUT_DEFS) {
+      const btn = document.createElement('button');
+      btn.className = 'toolbar-shortcut-btn';
+      btn.textContent = def.label;
+      this._addButtonHandler(btn, (e) => {
+        e.preventDefault();
+        this._onSendKey(def.key);
+      });
+      this._shortcutRow.appendChild(btn);
+    }
+    this._container.appendChild(this._shortcutRow);
+
     this._updateButtonStates();
   }
 
@@ -398,6 +456,29 @@ export class Toolbar {
       e.preventDefault();
       this._handleInstantKey(key);
     });
+  }
+
+  /**
+   * ショートカットモードに切り替える。
+   * 通常のツールバー行を非表示にし、ショートカット行を表示する。
+   */
+  _enterShortcutMode() {
+    this._inShortcutMode = true;
+    this._row.style.display = 'none';
+    this._switchFwdBtn.style.display = 'none';
+    this._shortcutRow.style.display = 'flex';
+    this._switchBackBtn.style.display = 'flex';
+  }
+
+  /**
+   * ショートカットモードから通常モードに戻す。
+   */
+  _exitShortcutMode() {
+    this._inShortcutMode = false;
+    this._shortcutRow.style.display = 'none';
+    this._switchBackBtn.style.display = 'none';
+    this._row.style.display = '';
+    this._switchFwdBtn.style.display = '';
   }
 
   /**
@@ -641,6 +722,10 @@ export class Toolbar {
   dispose() {
     this._container.innerHTML = '';
     this._buttons = {};
+    this._row = null;
+    this._switchFwdBtn = null;
+    this._switchBackBtn = null;
+    this._shortcutRow = null;
     if (this._longPressTimer !== null) {
       clearTimeout(this._longPressTimer);
       this._longPressTimer = null;
