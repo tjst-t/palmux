@@ -569,12 +569,51 @@ export class Toolbar {
       btn.className = 'toolbar-command-btn';
       btn.textContent = cmd.label;
       btn.title = cmd.command.replace('\r', '');
-      this._addButtonHandler(btn, (e) => {
+      this._addTapButtonHandler(btn, (e) => {
         e.preventDefault();
         this._onSendKey(cmd.command);
       });
       this._commandsRow.appendChild(btn);
     }
+  }
+
+  /**
+   * スワイプと区別するタップ専用ハンドラ。
+   * touchstart で位置を記録し、touchend で移動量が閾値を超えていれば無視する。
+   * これにより横スクロール中にボタンが誤発火しない。
+   * @param {HTMLButtonElement} btn
+   * @param {function(Event): void} handler
+   */
+  _addTapButtonHandler(btn, handler) {
+    const TAP_THRESHOLD = 8;
+    let startX = 0;
+    let startY = 0;
+    let touchHandled = false;
+
+    btn.addEventListener('touchstart', (e) => {
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      touchHandled = false;
+    }, { passive: true });
+
+    btn.addEventListener('touchend', (e) => {
+      const dx = Math.abs(e.changedTouches[0].clientX - startX);
+      const dy = Math.abs(e.changedTouches[0].clientY - startY);
+      touchHandled = true;
+      if (dx > TAP_THRESHOLD || dy > TAP_THRESHOLD) {
+        // スワイプ操作 → コマンド実行しない
+        return;
+      }
+      handler(e);
+    });
+
+    btn.addEventListener('click', (e) => {
+      if (touchHandled) {
+        touchHandled = false;
+        return;
+      }
+      handler(e);
+    });
   }
 
   /**
