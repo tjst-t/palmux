@@ -256,6 +256,15 @@ export async function deleteGhqRepo(fullPath) {
   });
 }
 
+/**
+ * セッションのプロジェクトコマンドを検出して返す。
+ * @param {string} session - セッション名
+ * @returns {Promise<{commands: Array<{label: string, command: string, source: string}>}>}
+ */
+export async function getCommands(session) {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/commands`);
+}
+
 // --- Git API ---
 
 /**

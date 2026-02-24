@@ -71,11 +71,13 @@ export class Toolbar {
    * @param {Object} options
    * @param {function(string): void} options.onSendKey - キーシーケンスを送信するコールバック
    * @param {function(string): void} [options.onKeyboardMode] - キーボードモード変更時のコールバック（mode: 'none' | 'direct' | 'ime'）
+   * @param {function(string): Promise<{commands: Array}>} [options.onFetchCommands] - コマンド取得コールバック
    */
   constructor(container, options) {
     this._container = container;
     this._onSendKey = options.onSendKey;
     this._onKeyboardMode = options.onKeyboardMode || null;
+    this._onFetchCommands = options.onFetchCommands || null;
 
     /** @type {'none' | 'direct' | 'ime'} キーボードモード */
     this._keyboardMode = 'none';
@@ -91,8 +93,17 @@ export class Toolbar {
     /** @type {boolean} */
     this._visible = true;
 
-    /** @type {boolean} ショートカットモード中かどうか */
-    this._inShortcutMode = false;
+    /** @type {'normal' | 'shortcut' | 'commands'} ツールバーモード */
+    this._mode = 'normal';
+
+    /** @type {string|null} 現在のセッション名 */
+    this._currentSession = null;
+
+    /** @type {{session: string, commands: Array, timestamp: number}|null} コマンドキャッシュ */
+    this._commandsCache = null;
+
+    /** @type {number} キャッシュ有効期間（ミリ秒） */
+    this._commandsCacheTTL = 30000;
 
     /** @type {Object<string, HTMLButtonElement>} */
     this._buttons = {};
@@ -183,13 +194,13 @@ export class Toolbar {
     this._container.appendChild(row);
     this._row = row;
 
-    // > ボタン（ショートカットモードへ切り替え、右端に絶対配置）
+    // > ボタン（次のモードへ切り替え、右端に絶対配置）
     this._switchFwdBtn = document.createElement('button');
     this._switchFwdBtn.className = 'toolbar-switch-btn toolbar-switch-btn--fwd';
     this._switchFwdBtn.textContent = '>';
     this._addButtonHandler(this._switchFwdBtn, (e) => {
       e.preventDefault();
-      this._enterShortcutMode();
+      this._advanceMode();
     });
     this._container.appendChild(this._switchFwdBtn);
 
@@ -199,7 +210,7 @@ export class Toolbar {
     this._switchBackBtn.textContent = '<';
     this._addButtonHandler(this._switchBackBtn, (e) => {
       e.preventDefault();
-      this._exitShortcutMode();
+      this._setMode('normal');
     });
     this._container.appendChild(this._switchBackBtn);
 
@@ -217,6 +228,11 @@ export class Toolbar {
       this._shortcutRow.appendChild(btn);
     }
     this._container.appendChild(this._shortcutRow);
+
+    // コマンド行（初期非表示）
+    this._commandsRow = document.createElement('div');
+    this._commandsRow.className = 'toolbar-commands-row';
+    this._container.appendChild(this._commandsRow);
 
     this._updateButtonStates();
   }
@@ -459,26 +475,118 @@ export class Toolbar {
   }
 
   /**
-   * ショートカットモードに切り替える。
-   * 通常のツールバー行を非表示にし、ショートカット行を表示する。
+   * モードを次に進める。
+   * normal → shortcut → commands → (ループせず commands で止まる)
    */
-  _enterShortcutMode() {
-    this._inShortcutMode = true;
-    this._row.style.display = 'none';
-    this._switchFwdBtn.style.display = 'none';
-    this._shortcutRow.style.display = 'flex';
-    this._switchBackBtn.style.display = 'flex';
+  _advanceMode() {
+    if (this._mode === 'normal') {
+      this._setMode('shortcut');
+    } else if (this._mode === 'shortcut') {
+      this._setMode('commands');
+    }
   }
 
   /**
-   * ショートカットモードから通常モードに戻す。
+   * ツールバーのモードを設定する。
+   * @param {'normal' | 'shortcut' | 'commands'} mode
    */
-  _exitShortcutMode() {
-    this._inShortcutMode = false;
+  _setMode(mode) {
+    this._mode = mode;
+
+    // 全行を非表示にしてからアクティブなモードだけ表示
+    this._row.style.display = 'none';
     this._shortcutRow.style.display = 'none';
+    this._commandsRow.style.display = 'none';
+    this._switchFwdBtn.style.display = 'none';
     this._switchBackBtn.style.display = 'none';
-    this._row.style.display = '';
-    this._switchFwdBtn.style.display = '';
+
+    if (mode === 'normal') {
+      this._row.style.display = '';
+      this._switchFwdBtn.style.display = '';
+    } else if (mode === 'shortcut') {
+      this._shortcutRow.style.display = 'flex';
+      this._switchFwdBtn.style.display = '';
+      this._switchBackBtn.style.display = 'flex';
+    } else if (mode === 'commands') {
+      this._commandsRow.style.display = 'flex';
+      this._switchBackBtn.style.display = 'flex';
+      this._loadCommands();
+    }
+  }
+
+  /**
+   * コマンドを読み込んでボタンを動的生成する。
+   */
+  _loadCommands() {
+    if (!this._onFetchCommands || !this._currentSession) {
+      this._commandsRow.innerHTML = '<span class="toolbar-commands-empty">No session</span>';
+      return;
+    }
+
+    // キャッシュが有効ならそれを使う
+    if (this._commandsCache &&
+        this._commandsCache.session === this._currentSession &&
+        Date.now() - this._commandsCache.timestamp < this._commandsCacheTTL) {
+      this._renderCommandButtons(this._commandsCache.commands);
+      return;
+    }
+
+    this._commandsRow.innerHTML = '<span class="toolbar-commands-loading">Loading...</span>';
+
+    this._onFetchCommands(this._currentSession)
+      .then((result) => {
+        const commands = result.commands || [];
+        this._commandsCache = {
+          session: this._currentSession,
+          commands,
+          timestamp: Date.now(),
+        };
+        // まだ commands モードなら描画
+        if (this._mode === 'commands') {
+          this._renderCommandButtons(commands);
+        }
+      })
+      .catch(() => {
+        if (this._mode === 'commands') {
+          this._commandsRow.innerHTML = '<span class="toolbar-commands-empty">Error loading commands</span>';
+        }
+      });
+  }
+
+  /**
+   * コマンドボタンを描画する。
+   * @param {Array<{label: string, command: string, source: string}>} commands
+   */
+  _renderCommandButtons(commands) {
+    this._commandsRow.innerHTML = '';
+    if (commands.length === 0) {
+      this._commandsRow.innerHTML = '<span class="toolbar-commands-empty">No commands found</span>';
+      return;
+    }
+
+    for (const cmd of commands) {
+      const btn = document.createElement('button');
+      btn.className = 'toolbar-command-btn';
+      btn.textContent = cmd.label;
+      btn.title = cmd.command.replace('\r', '');
+      this._addButtonHandler(btn, (e) => {
+        e.preventDefault();
+        this._onSendKey(cmd.command);
+      });
+      this._commandsRow.appendChild(btn);
+    }
+  }
+
+  /**
+   * 現在のセッション名を設定する。
+   * セッションが変わった場合キャッシュをクリアする。
+   * @param {string} session
+   */
+  setCurrentSession(session) {
+    if (this._currentSession !== session) {
+      this._currentSession = session;
+      this._commandsCache = null;
+    }
   }
 
   /**
@@ -726,6 +834,8 @@ export class Toolbar {
     this._switchFwdBtn = null;
     this._switchBackBtn = null;
     this._shortcutRow = null;
+    this._commandsRow = null;
+    this._commandsCache = null;
     if (this._longPressTimer !== null) {
       clearTimeout(this._longPressTimer);
       this._longPressTimer = null;
