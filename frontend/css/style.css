@@ -377,9 +377,11 @@ html, body {
   flex-shrink: 0;
   background: #16213e;
   border-top: 1px solid #2a2a4a;
-  padding: 6px 4px;
+  /* 右端の > ボタン分を右パディングで確保: 22px(ボタン) + 4px(gap) + 4px(元padding) */
+  padding: 6px 30px 6px 4px;
   user-select: none;
   -webkit-user-select: none;
+  position: relative;
 }
 
 .toolbar--hidden {
@@ -472,6 +474,81 @@ html, body {
 
 .toolbar-btn-popup--visible {
   display: block;
+}
+
+/* Toolbar mode-switch button (> and <), absolutely positioned */
+.toolbar-switch-btn {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 26px;
+  padding: 0;
+  background: #12192e;
+  border: none;
+  color: #7ec8e3;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  z-index: 5;
+}
+
+.toolbar-switch-btn--fwd {
+  right: 0;
+  border-left: 1px solid #2a2a4a;
+}
+
+.toolbar-switch-btn--back {
+  left: 0;
+  border-right: 1px solid #2a2a4a;
+  display: none;
+}
+
+.toolbar-switch-btn:active {
+  background: #1e3a5f;
+  color: #fff;
+}
+
+/* Toolbar shortcut row (replaces toolbar-row when active) */
+.toolbar-shortcut-row {
+  display: none;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 4px;
+  padding: 2px 0 2px 30px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.toolbar-shortcut-row::-webkit-scrollbar {
+  display: none;
+}
+
+/* Shortcut key buttons */
+.toolbar-shortcut-btn {
+  flex-shrink: 0;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px 10px;
+  background: #1a1a2e;
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  color: #e0e0e0;
+  font-size: 12px;
+  font-family: monospace;
+  cursor: pointer;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.toolbar-shortcut-btn:active {
+  background: #2a2a4a;
+  color: #80DEEA;
 }
 
 /* Drawer Overlay */
@@ -1540,7 +1617,8 @@ html, body {
   }
 
   .toolbar {
-    padding: 4px 2px;
+    /* 右端の > ボタン分を右パディングで確保 */
+    padding: 4px 30px 4px 2px;
   }
 
   .toolbar-row {
@@ -1571,6 +1649,13 @@ html, body {
   .ime-send-btn {
     padding: 6px 12px;
     font-size: 13px;
+  }
+
+  .toolbar-shortcut-btn {
+    min-width: 40px;
+    min-height: 40px;
+    font-size: 11px;
+    padding: 6px 8px;
   }
 
   .drawer {
