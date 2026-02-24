@@ -514,18 +514,14 @@ html, body {
 }
 
 /* Toolbar shortcut row (replaces toolbar-row when active) */
+/* 収まらない場合は最大2段に折り返す */
 .toolbar-shortcut-row {
   display: none;
-  flex-wrap: nowrap;
-  overflow-x: auto;
+  flex-wrap: wrap;
+  overflow: hidden;
+  max-height: 96px;
   gap: 4px;
   padding: 2px 0 2px 30px;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-}
-
-.toolbar-shortcut-row::-webkit-scrollbar {
-  display: none;
 }
 
 /* Shortcut key buttons */
@@ -551,20 +547,16 @@ html, body {
   color: #80DEEA;
 }
 
-/* Toolbar commands row (3rd mode) */
+/* Toolbar commands row (左側モード) */
+/* 収まらない場合は最大2段に折り返す。左端から始まり、右端に > ボタン分の余白 */
 .toolbar-commands-row {
   display: none;
-  flex-wrap: nowrap;
-  overflow-x: auto;
+  flex-wrap: wrap;
+  overflow: hidden;
+  max-height: 96px;
   gap: 4px;
-  padding: 2px 30px;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-  align-items: center;
-}
-
-.toolbar-commands-row::-webkit-scrollbar {
-  display: none;
+  padding: 2px 30px 2px 0;
+  align-items: flex-start;
 }
 
 /* Command buttons */
