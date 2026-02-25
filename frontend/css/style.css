@@ -1657,8 +1657,8 @@ html, body {
   }
 
   .toolbar {
-    /* 右端の > ボタン分を右パディングで確保 */
-    padding: 4px 30px 4px 2px;
+    /* 両端の < > ボタン分（各 26px）をパディングで確保 */
+    padding: 4px 30px;
   }
 
   .toolbar-row {
