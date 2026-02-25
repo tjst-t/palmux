@@ -283,6 +283,19 @@ export class PalmuxTerminal {
 
     this._onDisconnect = onDisconnect || null;
 
+    // スクロールバックとターミナル状態をリセットし、
+    // attach-session の全バッファ再送出による二重表示を防止する
+    this._term.clear();
+    this._term.reset();
+
+    // 再接続時の出力バッファリング:
+    // tmux attach-session の初期バッファ送出をまとめて受け取り、
+    // 一括で xterm.js に書き込むことでスクロールのちらつきを防止する。
+    // バッファリング中はターミナルを非表示にし、描画のちらつきを完全に隠す。
+    this._reconnectBuffer = [];
+    this._reconnectBufferTimer = null;
+    this._container.style.visibility = 'hidden';
+
     this._ws = new WebSocket(wsUrl);
 
     this._ws.onopen = () => {
@@ -296,7 +309,16 @@ export class PalmuxTerminal {
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === 'output' && msg.data) {
-          this._term.write(msg.data);
+          if (this._reconnectBuffer) {
+            // バッファリング中: データを溜めてデバウンスタイマーをリセット
+            this._reconnectBuffer.push(msg.data);
+            clearTimeout(this._reconnectBufferTimer);
+            this._reconnectBufferTimer = setTimeout(() => {
+              this._flushReconnectBuffer();
+            }, 80);
+          } else {
+            this._term.write(msg.data);
+          }
         } else if (msg.type === 'ping') {
           this._ws.send(JSON.stringify({ type: 'pong' }));
         } else if (msg.type === 'client_status') {
@@ -336,6 +358,12 @@ export class PalmuxTerminal {
       document.removeEventListener('paste', this._boundPasteHandler, true);
       this._boundPasteHandler = null;
     }
+    if (this._reconnectBufferTimer) {
+      clearTimeout(this._reconnectBufferTimer);
+      this._reconnectBufferTimer = null;
+    }
+    this._reconnectBuffer = null;
+    this._container.style.visibility = '';
     if (this._ws) {
       this._ws.close();
       this._ws = null;
@@ -349,6 +377,26 @@ export class PalmuxTerminal {
       this._term = null;
     }
     this._fitAddon = null;
+  }
+
+  /**
+   * 再接続時のバッファリングされた出力を一括で xterm.js に書き込む。
+   * デバウンスタイマーから呼ばれ、tmux の初期バッファ送出完了後に実行される。
+   * @private
+   */
+  _flushReconnectBuffer() {
+    if (!this._reconnectBuffer || !this._term) return;
+    const data = this._reconnectBuffer.join('');
+    this._reconnectBuffer = null;
+    this._reconnectBufferTimer = null;
+    if (data) {
+      // write() のコールバックでレンダリング完了を待ってから表示する
+      this._term.write(data, () => {
+        this._container.style.visibility = '';
+      });
+    } else {
+      this._container.style.visibility = '';
+    }
   }
 
   /**
