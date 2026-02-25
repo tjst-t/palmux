@@ -564,12 +564,12 @@ html, body {
   flex-shrink: 0;
   min-width: 44px;
   min-height: 44px;
-  padding: 8px 12px;
+  padding: 8px 10px;
   background: #0d2818;
   border: 1px solid #1a5c2e;
   border-radius: 6px;
   color: #7ee8a0;
-  font-size: 12px;
+  font-size: 14px;
   font-family: monospace;
   cursor: pointer;
   white-space: nowrap;
@@ -1696,6 +1696,13 @@ html, body {
     min-height: 40px;
     font-size: 11px;
     padding: 6px 8px;
+  }
+
+  .toolbar-command-btn {
+    min-width: 40px;
+    min-height: 40px;
+    padding: 6px 8px;
+    font-size: 13px;
   }
 
   .drawer {

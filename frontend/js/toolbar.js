@@ -59,6 +59,7 @@ const SHORTCUT_DEFS = [
   { label: '^W', key: '\x17' },
   { label: '^U', key: '\x15' },
   { label: '^K', key: '\x0b' },
+  { label: '^Y', key: '\x19' },
 ];
 
 /**
@@ -128,6 +129,19 @@ export class Toolbar {
 
     /** @type {number} キーリピートの間隔（ミリ秒） */
     this._repeatIntervalMs = 80;
+
+    /** @type {boolean} 横スワイプジェスチャ検出中かどうか */
+    this._swipeDetected = false;
+
+    /** @type {'left' | 'right' | null} 検出したスワイプ方向 */
+    this._swipeDirection = null;
+
+    /**
+     * スワイプ検出時に呼ぶキャンセルコールバック。
+     * リピートボタンの touchstart で登録し、touchend/cancel でクリアする。
+     * @type {function|null}
+     */
+    this._cancelRepeatTouch = null;
 
     this._render();
   }
@@ -247,6 +261,8 @@ export class Toolbar {
     this._updateButtonStates();
     // 通常モードでは < ボタンも表示（commands へのアクセス用）
     this._switchBackBtn.style.display = 'flex';
+
+    this._addSwipeGesture();
   }
 
   /**
@@ -259,6 +275,7 @@ export class Toolbar {
     let touchHandled = false;
     btn.addEventListener('touchend', (e) => {
       touchHandled = true;
+      if (this._swipeDetected) return;
       handler(e);
     });
     btn.addEventListener('click', (e) => {
@@ -295,6 +312,10 @@ export class Toolbar {
       if (this._longPressTimer !== null) {
         clearTimeout(this._longPressTimer);
         this._longPressTimer = null;
+      }
+      if (this._swipeDetected) {
+        this._longPressTriggered = false;
+        return;
       }
       if (!this._longPressTriggered) {
         // 短いタップ: off <-> oneshot トグル
@@ -347,21 +368,25 @@ export class Toolbar {
 
   /**
    * キーリピート対応ボタン（矢印キー、Backspace）のイベントハンドラを登録する。
-   * 押下: 即座に1回発火 -> 400ms後から80msごとにリピート
+   *
+   * タッチ: touchstart から 50ms 遅延して初回発火 → 400ms 後からリピート。
+   *   50ms 以内にスワイプ検出された場合は発火をキャンセルする。
+   *   50ms 以内に離した場合（クイックタップ）は touchend 時に補完発火する。
+   * マウス: 即座に1回発火 → 400ms 後からリピート（変更なし）。
+   *
    * @param {HTMLButtonElement} btn
    * @param {string} key - 送信するキーシーケンス
    */
   _addRepeatableButtonHandler(btn, key) {
     let touchHandled = false;
+    /** @type {number|null} タッチ用: 初回発火の遅延タイマー */
+    let initialFireTimer = null;
+    /** 初回キーが発火済みかどうか */
+    let hasFired = false;
 
-    const startRepeat = () => {
-      // 前回のリピートタイマーをクリア（二重起動防止）
-      this._clearRepeat();
-      // 即座に1回発火
+    const fireAndScheduleRepeat = () => {
+      hasFired = true;
       this._handleInstantKey(key);
-      btn.classList.add('toolbar-btn--pressed');
-
-      // 初回遅延後にリピート開始
       this._repeatTimer = setTimeout(() => {
         this._repeatInterval = setInterval(() => {
           this._handleInstantKey(key);
@@ -369,24 +394,63 @@ export class Toolbar {
       }, this._repeatInitialDelay);
     };
 
-    const stopRepeat = () => {
+    /**
+     * タッチ用: 50ms 後に初回発火。スワイプ検出猶予を確保する。
+     */
+    const startRepeatTouch = () => {
+      this._clearRepeat();
+      hasFired = false;
+      btn.classList.add('toolbar-btn--pressed');
+      initialFireTimer = setTimeout(() => {
+        initialFireTimer = null;
+        fireAndScheduleRepeat();
+      }, 50);
+    };
+
+    /**
+     * マウス用: 即座に初回発火（遅延なし）。
+     */
+    const startRepeatMouse = () => {
+      this._clearRepeat();
+      hasFired = false;
+      btn.classList.add('toolbar-btn--pressed');
+      fireAndScheduleRepeat();
+    };
+
+    /**
+     * @param {boolean} wasSwiping - スワイプ検出済みなら true。クイックタップ補完を抑制する。
+     */
+    const stopRepeat = (wasSwiping = false) => {
+      if (initialFireTimer !== null) {
+        clearTimeout(initialFireTimer);
+        initialFireTimer = null;
+        // クイックタップ（50ms 未満で離し、スワイプでもない）: touchend で補完発火
+        if (!wasSwiping && !hasFired) {
+          this._handleInstantKey(key);
+        }
+      }
       this._clearRepeat();
       btn.classList.remove('toolbar-btn--pressed');
+      hasFired = false;
     };
 
     btn.addEventListener('touchstart', (e) => {
       e.preventDefault();
       touchHandled = true;
-      startRepeat();
+      startRepeatTouch();
+      // スワイプ検出時に呼ばれるキャンセルコールバックを登録する
+      this._cancelRepeatTouch = () => stopRepeat(true);
     }, { passive: false });
 
     btn.addEventListener('touchend', (e) => {
       e.preventDefault();
-      stopRepeat();
+      this._cancelRepeatTouch = null;
+      stopRepeat(this._swipeDetected);
     });
 
     btn.addEventListener('touchcancel', () => {
-      stopRepeat();
+      this._cancelRepeatTouch = null;
+      stopRepeat(true); // キャンセルはスワイプと同様: キー発火しない
     });
 
     btn.addEventListener('mousedown', (e) => {
@@ -395,21 +459,21 @@ export class Toolbar {
         return;
       }
       e.preventDefault();
-      startRepeat();
+      startRepeatMouse();
     });
 
     btn.addEventListener('mouseup', () => {
       if (touchHandled) {
         return;
       }
-      stopRepeat();
+      stopRepeat(false);
     });
 
     btn.addEventListener('mouseleave', () => {
       if (touchHandled) {
         return;
       }
-      stopRepeat();
+      stopRepeat(false);
     });
   }
 
@@ -461,6 +525,11 @@ export class Toolbar {
 
     btn.addEventListener('touchend', (e) => {
       e.preventDefault();
+      if (this._swipeDetected) {
+        popupEl.classList.remove('toolbar-btn-popup--visible');
+        popupVisible = false;
+        return;
+      }
       if (popupVisible) {
         popupEl.classList.remove('toolbar-btn-popup--visible');
         popupVisible = false;
@@ -484,6 +553,192 @@ export class Toolbar {
       e.preventDefault();
       this._handleInstantKey(key);
     });
+  }
+
+  /**
+   * ツールバー全体に横スワイプジェスチャを登録する。
+   * - 左スワイプ: normal → shortcut / commands → normal
+   * - 右スワイプ: normal → commands / shortcut → normal
+   *
+   * touchmove で `_swipeDetected` フラグを立て、各ボタンハンドラが
+   * スワイプ中に誤発火しないよう制御する。
+   */
+  _addSwipeGesture() {
+    let startX = 0;
+    let startY = 0;
+    /** @type {boolean|null} 最初の動きで水平/垂直を確定するフラグ */
+    let isHorizontal = null;
+
+    const SWIPE_THRESHOLD = 50;
+    const DIRECTION_RATIO = 1.5;
+    /** ゴムバンド効果が始まる水平移動量（px） */
+    const SOFT_LIMIT = 40;
+    /** 追従の最大移動量（px） */
+    const MAX_DRAG = 80;
+
+    /** 現在表示中のコンテンツ行を返す */
+    const getActiveRow = () => {
+      if (this._mode === 'normal') return this._row;
+      if (this._mode === 'shortcut') return this._shortcutRow;
+      return this._commandsRow;
+    };
+
+    /** 現在のモードで左スワイプが有効か */
+    const canSwipeLeft = () => this._mode === 'normal' || this._mode === 'commands';
+    /** 現在のモードで右スワイプが有効か */
+    const canSwipeRight = () => this._mode === 'normal' || this._mode === 'shortcut';
+
+    /**
+     * ドラッグ中、指に追従して行を動かす。
+     * SOFT_LIMIT を超えた分は 30% の摩擦を加えたゴムバンド効果にする。
+     * 有効なスワイプ方向がないときは移動量をゼロにする。
+     */
+    const applyDrag = (el, dx) => {
+      let limited = dx;
+      if (dx < 0 && !canSwipeLeft()) limited = 0;
+      if (dx > 0 && !canSwipeRight()) limited = 0;
+      if (Math.abs(limited) > SOFT_LIMIT) {
+        const excess = Math.abs(limited) - SOFT_LIMIT;
+        limited = Math.sign(limited) * (SOFT_LIMIT + excess * 0.3);
+      }
+      limited = Math.max(-MAX_DRAG, Math.min(MAX_DRAG, limited));
+      const opacity = Math.max(0.5, 1 - Math.abs(limited) / (MAX_DRAG * 1.5));
+      el.style.transition = 'none';
+      el.style.transform = `translateX(${limited}px)`;
+      el.style.opacity = String(opacity);
+    };
+
+    /**
+     * スワイプ未達のとき、ばね感のあるカーブで元の位置に戻す。
+     */
+    const snapBack = (el) => {
+      el.style.transition = 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.2s ease';
+      el.style.transform = '';
+      el.style.opacity = '';
+      el.addEventListener('transitionend', () => {
+        el.style.transition = '';
+      }, { once: true });
+    };
+
+    /**
+     * しきい値超え時: 現在の行をスワイプ方向へスライドアウトし、callback を呼ぶ。
+     * @param {HTMLElement} el
+     * @param {'left' | 'right'} direction
+     * @param {function} callback
+     */
+    const slideOut = (el, direction, callback) => {
+      const toX = direction === 'left' ? -(SOFT_LIMIT * 2) : (SOFT_LIMIT * 2);
+      el.style.transition = 'transform 0.15s ease-in, opacity 0.15s ease-in';
+      el.style.transform = `translateX(${toX}px)`;
+      el.style.opacity = '0';
+      setTimeout(() => {
+        el.style.transition = '';
+        el.style.transform = '';
+        el.style.opacity = '';
+        callback();
+      }, 160);
+    };
+
+    /**
+     * モード切替後: 新しい行を反対側からスライドインさせる。
+     * @param {HTMLElement} el
+     * @param {'left' | 'right'} fromSide - 新コンテンツが出てくる側
+     */
+    const slideIn = (el, fromSide) => {
+      const fromX = fromSide === 'right' ? 40 : -40;
+      el.style.transition = 'none';
+      el.style.transform = `translateX(${fromX}px)`;
+      el.style.opacity = '0';
+      void el.offsetWidth; // reflow して transition を有効化
+      el.style.transition = 'transform 0.22s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.2s ease-out';
+      el.style.transform = '';
+      el.style.opacity = '';
+      el.addEventListener('transitionend', () => {
+        el.style.transition = '';
+      }, { once: true });
+    };
+
+    this._container.addEventListener('touchstart', (e) => {
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      this._swipeDetected = false;
+      this._swipeDirection = null;
+      isHorizontal = null;
+    }, { passive: true });
+
+    this._container.addEventListener('touchmove', (e) => {
+      const dx = e.touches[0].clientX - startX;
+      const dy = e.touches[0].clientY - startY;
+
+      // 最初の動きで水平/垂直スワイプかを確定する
+      if (isHorizontal === null) {
+        if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
+          isHorizontal = Math.abs(dx) >= Math.abs(dy);
+          // 水平スワイプと確定した瞬間にリピートタイマーをキャンセルする。
+          // 50px の _swipeDetected 判定より早く（約 20ms）キャンセルできるため
+          // タイマー（50ms）が発火する前に抑止できる。
+          if (isHorizontal && this._cancelRepeatTouch) {
+            this._cancelRepeatTouch();
+            this._cancelRepeatTouch = null;
+          }
+        }
+        return;
+      }
+      if (!isHorizontal) return;
+
+      applyDrag(getActiveRow(), dx);
+
+      if (!this._swipeDetected && Math.abs(dx) >= SWIPE_THRESHOLD && Math.abs(dx) >= Math.abs(dy) * DIRECTION_RATIO) {
+        this._swipeDetected = true;
+        this._swipeDirection = dx < 0 ? 'left' : 'right';
+        // リピートボタン上でスワイプが確定したら即座にタイマーをキャンセルする
+        if (this._cancelRepeatTouch) {
+          this._cancelRepeatTouch();
+          this._cancelRepeatTouch = null;
+        }
+      }
+    }, { passive: true });
+
+    this._container.addEventListener('touchend', () => {
+      const activeRow = getActiveRow();
+
+      if (!this._swipeDetected) {
+        snapBack(activeRow);
+        this._swipeDirection = null;
+        return;
+      }
+
+      const dir = this._swipeDirection;
+      this._swipeDetected = false;
+      this._swipeDirection = null;
+
+      let targetMode = null;
+      if (dir === 'left') {
+        if (this._mode === 'normal') targetMode = 'shortcut';
+        else if (this._mode === 'commands') targetMode = 'normal';
+      } else {
+        if (this._mode === 'normal') targetMode = 'commands';
+        else if (this._mode === 'shortcut') targetMode = 'normal';
+      }
+
+      if (!targetMode) {
+        snapBack(activeRow);
+        return;
+      }
+
+      slideOut(activeRow, dir, () => {
+        this._setMode(targetMode);
+        // 新コンテンツは現在の行（_setMode 後に getActiveRow() が返す）
+        slideIn(getActiveRow(), dir === 'left' ? 'right' : 'left');
+      });
+    }, { passive: true });
+
+    this._container.addEventListener('touchcancel', () => {
+      snapBack(getActiveRow());
+      this._swipeDetected = false;
+      this._swipeDirection = null;
+      isHorizontal = null;
+    }, { passive: true });
   }
 
   /**
@@ -886,6 +1141,10 @@ export class Toolbar {
     if (this._longPressTimer !== null) {
       clearTimeout(this._longPressTimer);
       this._longPressTimer = null;
+    }
+    if (this._cancelRepeatTouch) {
+      this._cancelRepeatTouch();
+      this._cancelRepeatTouch = null;
     }
     this._clearRepeat();
   }
