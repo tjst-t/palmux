@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/tjst-t/palmux/internal/git"
 )
 
 // CommandRunner は外部コマンドの実行を抽象化する。
@@ -26,6 +28,7 @@ func (r *RealCommandRunner) RunCommand(name string, args ...string) ([]byte, err
 // セッション名に対応する ghq リポジトリが存在する場合、そのパスを返す。
 type GhqResolver struct {
 	Cmd     CommandRunner
+	GitCmd  git.CommandRunner // worktree 解決用（nil なら skip）
 	HomeDir string
 }
 
@@ -58,20 +61,31 @@ func (g *GhqResolver) ghqRepoLines() (string, []string) {
 	return root, strings.Split(trimmed, "\n")
 }
 
-// Resolve はセッション名に対応する ghq リポジトリのパスを返す。
-// 対応するリポジトリが見つからない場合、または ghq が利用できない場合は HomeDir を返す。
-//
-// マッチングの優先順位:
-//  1. basename の完全一致（最初にマッチしたものを使用）
-//  2. org-basename 形式のマッチ（例: "alice-utils" → parent="alice", basename="utils"）
-func (g *GhqResolver) Resolve(sessionName string) string {
+// ParseSessionName はセッション名を repo 名とブランチ名に分解する。
+// "palmux@feature-x" → ("palmux", "feature-x")
+// "palmux" → ("palmux", "")
+// "" → ("", "")
+func ParseSessionName(sessionName string) (repo, branch string) {
 	if sessionName == "" {
-		return g.HomeDir
+		return "", ""
+	}
+	idx := strings.Index(sessionName, "@")
+	if idx < 0 {
+		return sessionName, ""
+	}
+	return sessionName[:idx], sessionName[idx+1:]
+}
+
+// ResolveRepo はリポジトリ名に対応する ghq リポジトリのフルパスを返す。
+// 対応するリポジトリが見つからない場合は空文字列を返す。
+func (g *GhqResolver) ResolveRepo(repoName string) string {
+	if repoName == "" {
+		return ""
 	}
 
 	root, lines := g.ghqRepoLines()
 	if lines == nil {
-		return g.HomeDir
+		return ""
 	}
 
 	// First pass: exact basename match
@@ -79,15 +93,13 @@ func (g *GhqResolver) Resolve(sessionName string) string {
 		if line == "" {
 			continue
 		}
-		repoName := filepath.Base(line)
-		if repoName == sessionName {
+		name := filepath.Base(line)
+		if name == repoName {
 			return filepath.Join(root, line)
 		}
 	}
 
 	// Second pass: org-basename match
-	// sessionName が "org-basename" 形式の場合、parent(line) の Base が org、
-	// filepath.Base(line) が basename に一致するかチェック
 	for _, line := range lines {
 		if line == "" {
 			continue
@@ -95,12 +107,52 @@ func (g *GhqResolver) Resolve(sessionName string) string {
 		repoBase := filepath.Base(line)
 		repoParent := filepath.Base(filepath.Dir(line))
 		orgBasename := repoParent + "-" + repoBase
-		if orgBasename == sessionName {
+		if orgBasename == repoName {
 			return filepath.Join(root, line)
 		}
 	}
 
-	return g.HomeDir
+	return ""
+}
+
+// Resolve はセッション名に対応する ghq リポジトリのパスを返す。
+// 対応するリポジトリが見つからない場合、または ghq が利用できない場合は HomeDir を返す。
+//
+// セッション名が "repo@branch" 形式の場合、リポジトリを解決してから
+// git worktree list で branch に一致する worktree パスを探す。
+//
+// マッチングの優先順位:
+//  1. basename の完全一致（最初にマッチしたものを使用）
+//  2. org-basename 形式のマッチ（例: "alice-utils" → parent="alice", basename="utils"）
+func (g *GhqResolver) Resolve(sessionName string) string {
+	repo, branch := ParseSessionName(sessionName)
+	if repo == "" {
+		return g.HomeDir
+	}
+
+	repoPath := g.ResolveRepo(repo)
+	if repoPath == "" {
+		return g.HomeDir
+	}
+
+	if branch == "" {
+		return repoPath
+	}
+
+	// worktree 解決
+	if g.GitCmd != nil {
+		gitOps := &git.Git{Cmd: g.GitCmd}
+		worktrees, err := gitOps.ListWorktrees(repoPath)
+		if err == nil {
+			for _, wt := range worktrees {
+				if wt.Branch == branch {
+					return wt.Path
+				}
+			}
+		}
+	}
+
+	return repoPath // fallback
 }
 
 // ListRepos は ghq リポジトリ一覧を返す。
