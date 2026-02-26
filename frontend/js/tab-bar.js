@@ -10,7 +10,7 @@
  * DOM structure:
  *   <div class="tab-bar">          (container, provided)
  *     <div class="tab-bar-scroll">
- *       <button class="tab" data-type="terminal" data-window="0">
+ *       <button class="tab" data-type="terminal" data-window="0" data-window-name="zsh">
  *         <span class="tab-label">0:zsh</span>
  *       </button>
  *       ...
@@ -20,18 +20,29 @@
  *       <button class="tab" data-type="git">
  *         <span class="tab-icon">...</span><span class="tab-label">Git</span>
  *       </button>
+ *       <button class="tab tab-add" data-type="add">+</button>
  *     </div>
  *   </div>
+ *
+ * Tab ordering (Claude Code mode):
+ *   Claude windows -> Files -> Git -> non-Claude terminals -> + button
+ *
+ * Tab ordering (non-Claude Code mode):
+ *   Files -> Git -> terminals -> + button
  */
 export class TabBar {
   /**
    * @param {Object} options
    * @param {HTMLElement} options.container - Root element for the tab bar
    * @param {function({type: string, windowIndex?: number}): void} options.onTabSelect - Callback when a tab is clicked
+   * @param {function(): void} [options.onCreateWindow] - Callback when + button is clicked
+   * @param {function(Object): void} [options.onContextAction] - Callback for context menu actions
    */
-  constructor({ container, onTabSelect }) {
+  constructor({ container, onTabSelect, onCreateWindow, onContextAction }) {
     this._container = container;
     this._onTabSelect = onTabSelect;
+    this._onCreateWindow = onCreateWindow;
+    this._onContextAction = onContextAction;
 
     /** @type {HTMLElement|null} */
     this._scrollEl = null;
@@ -39,18 +50,31 @@ export class TabBar {
     /** @type {string|null} current session name for notification matching */
     this._sessionName = null;
 
+    /** @type {boolean} whether the session is in Claude Code mode */
+    this._isClaudeCodeMode = false;
+
+    /** @type {Array<{index: number, name: string, active: boolean}>} current windows */
+    this._windows = [];
+
     /** @type {function} bound click handler for cleanup */
     this._handleClick = this._onClick.bind(this);
   }
 
   /**
    * Render tabs for the given windows array.
+   *
+   * Tab ordering:
+   * - Claude Code mode: Claude windows -> Files -> Git -> non-Claude terminals -> + button
+   * - Non-Claude mode: Files -> Git -> terminals -> + button
+   *
    * @param {string} sessionName - Current session name
    * @param {Array<{index: number, name: string, active: boolean}>} windows
    * @param {boolean} isClaudeCodeMode - Whether the session is in Claude Code mode
    */
   setWindows(sessionName, windows, isClaudeCodeMode) {
     this._sessionName = sessionName;
+    this._isClaudeCodeMode = isClaudeCodeMode;
+    this._windows = windows;
 
     // Clear previous content and remove old listener
     if (this._scrollEl) {
@@ -63,56 +87,35 @@ export class TabBar {
     scrollEl.className = 'tab-bar-scroll';
     this._scrollEl = scrollEl;
 
-    // Terminal tabs
+    // Separate claude and non-claude windows
+    const claudeWindows = [];
+    const nonClaudeWindows = [];
     for (const win of windows) {
-      const btn = document.createElement('button');
-      btn.className = 'tab';
-      btn.dataset.type = 'terminal';
-      btn.dataset.window = String(win.index);
-
-      // Claude Code mode: add sparkle icon for claude windows
       if (isClaudeCodeMode && win.name === 'claude') {
-        const icon = document.createElement('span');
-        icon.className = 'tab-icon';
-        icon.textContent = '\u2726'; // ✦
-        btn.appendChild(icon);
+        claudeWindows.push(win);
+      } else {
+        nonClaudeWindows.push(win);
       }
-
-      const label = document.createElement('span');
-      label.className = 'tab-label';
-      label.textContent = `${win.index}:${win.name}`;
-      btn.appendChild(label);
-
-      scrollEl.appendChild(btn);
     }
 
-    // Files tab
-    const filesBtn = document.createElement('button');
-    filesBtn.className = 'tab';
-    filesBtn.dataset.type = 'files';
-    const filesIcon = document.createElement('span');
-    filesIcon.className = 'tab-icon';
-    filesIcon.textContent = '\uD83D\uDCC1'; // folder emoji
-    filesBtn.appendChild(filesIcon);
-    const filesLabel = document.createElement('span');
-    filesLabel.className = 'tab-label';
-    filesLabel.textContent = 'Files';
-    filesBtn.appendChild(filesLabel);
-    scrollEl.appendChild(filesBtn);
+    // 1. Claude windows (only in Claude Code mode)
+    for (const win of claudeWindows) {
+      scrollEl.appendChild(this._createTerminalTab(win, isClaudeCodeMode));
+    }
 
-    // Git tab
-    const gitBtn = document.createElement('button');
-    gitBtn.className = 'tab';
-    gitBtn.dataset.type = 'git';
-    const gitIcon = document.createElement('span');
-    gitIcon.className = 'tab-icon';
-    gitIcon.textContent = '\u2442'; // ⑂ branch symbol
-    gitBtn.appendChild(gitIcon);
-    const gitLabel = document.createElement('span');
-    gitLabel.className = 'tab-label';
-    gitLabel.textContent = 'Git';
-    gitBtn.appendChild(gitLabel);
-    scrollEl.appendChild(gitBtn);
+    // 2. Files tab
+    scrollEl.appendChild(this._createFilesTab());
+
+    // 3. Git tab
+    scrollEl.appendChild(this._createGitTab());
+
+    // 4. Non-claude terminal windows
+    for (const win of nonClaudeWindows) {
+      scrollEl.appendChild(this._createTerminalTab(win, isClaudeCodeMode));
+    }
+
+    // 5. + button
+    scrollEl.appendChild(this._createAddButton());
 
     // Attach click handler via event delegation
     scrollEl.addEventListener('click', this._handleClick);
@@ -215,6 +218,106 @@ export class TabBar {
   // --- private ---
 
   /**
+   * Create a terminal tab button element.
+   * @param {{index: number, name: string, active: boolean}} win
+   * @param {boolean} isClaudeCodeMode
+   * @returns {HTMLButtonElement}
+   * @private
+   */
+  _createTerminalTab(win, isClaudeCodeMode) {
+    const btn = document.createElement('button');
+    btn.className = 'tab';
+    btn.dataset.type = 'terminal';
+    btn.dataset.window = String(win.index);
+    btn.dataset.windowName = win.name;
+
+    // Claude Code mode: add sparkle icon for claude windows
+    if (isClaudeCodeMode && win.name === 'claude') {
+      const icon = document.createElement('span');
+      icon.className = 'tab-icon';
+      icon.textContent = '\u2726'; // ✦
+      btn.appendChild(icon);
+    }
+
+    const label = document.createElement('span');
+    label.className = 'tab-label';
+    label.textContent = `${win.index}:${win.name}`;
+    btn.appendChild(label);
+
+    return btn;
+  }
+
+  /**
+   * Create the Files tab button element.
+   * @returns {HTMLButtonElement}
+   * @private
+   */
+  _createFilesTab() {
+    const btn = document.createElement('button');
+    btn.className = 'tab';
+    btn.dataset.type = 'files';
+    const icon = document.createElement('span');
+    icon.className = 'tab-icon';
+    icon.textContent = '\uD83D\uDCC1'; // folder emoji
+    btn.appendChild(icon);
+    const label = document.createElement('span');
+    label.className = 'tab-label';
+    label.textContent = 'Files';
+    btn.appendChild(label);
+    return btn;
+  }
+
+  /**
+   * Create the Git tab button element.
+   * @returns {HTMLButtonElement}
+   * @private
+   */
+  _createGitTab() {
+    const btn = document.createElement('button');
+    btn.className = 'tab';
+    btn.dataset.type = 'git';
+    const icon = document.createElement('span');
+    icon.className = 'tab-icon';
+    icon.textContent = '\u2442'; // ⑂ branch symbol
+    btn.appendChild(icon);
+    const label = document.createElement('span');
+    label.className = 'tab-label';
+    label.textContent = 'Git';
+    btn.appendChild(label);
+    return btn;
+  }
+
+  /**
+   * Create the + (add window) button element.
+   * @returns {HTMLButtonElement}
+   * @private
+   */
+  _createAddButton() {
+    const btn = document.createElement('button');
+    btn.className = 'tab tab-add';
+    btn.dataset.type = 'add';
+    btn.textContent = '+';
+    return btn;
+  }
+
+  /**
+   * Extract tab info from a tab element.
+   * @param {HTMLElement} tab
+   * @returns {{type: string, windowIndex?: number, windowName?: string}}
+   */
+  _getTabInfo(tab) {
+    const type = tab.dataset.type;
+    if (type === 'terminal') {
+      return {
+        type: 'terminal',
+        windowIndex: parseInt(tab.dataset.window, 10),
+        windowName: tab.dataset.windowName || '',
+      };
+    }
+    return { type, windowIndex: undefined, windowName: undefined };
+  }
+
+  /**
    * Click event handler using delegation on the scroll container.
    * @param {MouseEvent} e
    * @private
@@ -222,6 +325,11 @@ export class TabBar {
   _onClick(e) {
     const tab = e.target.closest('.tab');
     if (!tab) return;
+
+    if (tab.dataset.type === 'add') {
+      if (this._onCreateWindow) this._onCreateWindow();
+      return;
+    }
 
     const type = tab.dataset.type;
     if (type === 'terminal') {

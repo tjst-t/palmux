@@ -37,23 +37,27 @@ describe('TabBar', () => {
       ], false);
 
       const tabs = container.querySelectorAll('.tab');
-      // 3 terminal tabs + Files + Git = 5
-      expect(tabs.length).toBe(5);
+      // 3 terminal tabs + Files + Git + add button = 6
+      expect(tabs.length).toBe(6);
     });
 
-    it('always adds Files and Git tabs at the end', () => {
+    it('renders tabs in correct order: Files -> Git -> terminals -> + (non-Claude mode)', () => {
       const bar = new TabBar({ container, onTabSelect });
       bar.setWindows('main', [
         makeWindow(0, 'zsh'),
+        makeWindow(1, 'vim'),
       ], false);
 
       const tabs = container.querySelectorAll('.tab');
-      const lastTwo = [tabs[tabs.length - 2], tabs[tabs.length - 1]];
-
-      expect(lastTwo[0].dataset.type).toBe('files');
-      expect(lastTwo[0].querySelector('.tab-label').textContent).toBe('Files');
-      expect(lastTwo[1].dataset.type).toBe('git');
-      expect(lastTwo[1].querySelector('.tab-label').textContent).toBe('Git');
+      // Expected order: Files, Git, zsh, vim, +
+      expect(tabs[0].dataset.type).toBe('files');
+      expect(tabs[1].dataset.type).toBe('git');
+      expect(tabs[2].dataset.type).toBe('terminal');
+      expect(tabs[2].dataset.window).toBe('0');
+      expect(tabs[3].dataset.type).toBe('terminal');
+      expect(tabs[3].dataset.window).toBe('1');
+      expect(tabs[4].dataset.type).toBe('add');
+      expect(tabs[4].textContent).toBe('+');
     });
 
     it('terminal tabs have correct data attributes', () => {
@@ -67,6 +71,18 @@ describe('TabBar', () => {
       expect(termTabs.length).toBe(2);
       expect(termTabs[0].dataset.window).toBe('0');
       expect(termTabs[1].dataset.window).toBe('1');
+    });
+
+    it('terminal tabs have data-window-name attribute', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [
+        makeWindow(0, 'zsh'),
+        makeWindow(1, 'vim'),
+      ], false);
+
+      const termTabs = container.querySelectorAll('.tab[data-type="terminal"]');
+      expect(termTabs[0].dataset.windowName).toBe('zsh');
+      expect(termTabs[1].dataset.windowName).toBe('vim');
     });
 
     it('terminal tab labels show index:name', () => {
@@ -84,13 +100,198 @@ describe('TabBar', () => {
     it('replaces tabs when called again', () => {
       const bar = new TabBar({ container, onTabSelect });
       bar.setWindows('main', [makeWindow(0, 'zsh')], false);
-      expect(container.querySelectorAll('.tab').length).toBe(3); // 1 + Files + Git
+      // 1 terminal + Files + Git + add = 4
+      expect(container.querySelectorAll('.tab').length).toBe(4);
 
       bar.setWindows('main', [
         makeWindow(0, 'zsh'),
         makeWindow(1, 'vim'),
       ], false);
-      expect(container.querySelectorAll('.tab').length).toBe(4); // 2 + Files + Git
+      // 2 terminals + Files + Git + add = 5
+      expect(container.querySelectorAll('.tab').length).toBe(5);
+    });
+
+    it('stores _isClaudeCodeMode and _windows on instance', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      const windows = [makeWindow(0, 'zsh'), makeWindow(1, 'claude')];
+      bar.setWindows('main', windows, true);
+
+      expect(bar._isClaudeCodeMode).toBe(true);
+      expect(bar._windows).toEqual(windows);
+    });
+  });
+
+  describe('tab ordering', () => {
+    it('orders tabs: Claude -> Files -> Git -> non-Claude terminals -> + (Claude Code mode)', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [
+        makeWindow(0, 'zsh'),
+        makeWindow(1, 'claude'),
+      ], true);
+
+      const tabs = container.querySelectorAll('.tab');
+      // Expected order: claude tab, Files, Git, zsh tab, + button
+      expect(tabs.length).toBe(5);
+      expect(tabs[0].dataset.type).toBe('terminal');
+      expect(tabs[0].dataset.window).toBe('1');  // claude window
+      expect(tabs[0].dataset.windowName).toBe('claude');
+      expect(tabs[1].dataset.type).toBe('files');
+      expect(tabs[2].dataset.type).toBe('git');
+      expect(tabs[3].dataset.type).toBe('terminal');
+      expect(tabs[3].dataset.window).toBe('0');  // zsh window
+      expect(tabs[3].dataset.windowName).toBe('zsh');
+      expect(tabs[4].dataset.type).toBe('add');
+    });
+
+    it('orders tabs without Claude windows: Files -> Git -> terminals -> + (non-Claude mode)', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [
+        makeWindow(0, 'zsh'),
+        makeWindow(1, 'vim'),
+      ], false);
+
+      const tabs = container.querySelectorAll('.tab');
+      // Expected: Files, Git, zsh, vim, +
+      expect(tabs.length).toBe(5);
+      expect(tabs[0].dataset.type).toBe('files');
+      expect(tabs[1].dataset.type).toBe('git');
+      expect(tabs[2].dataset.type).toBe('terminal');
+      expect(tabs[2].dataset.window).toBe('0');
+      expect(tabs[3].dataset.type).toBe('terminal');
+      expect(tabs[3].dataset.window).toBe('1');
+      expect(tabs[4].dataset.type).toBe('add');
+    });
+
+    it('orders multiple claude windows before Files/Git', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [
+        makeWindow(0, 'bash'),
+        makeWindow(1, 'claude'),
+        makeWindow(2, 'vim'),
+        makeWindow(3, 'claude'),
+      ], true);
+
+      const tabs = container.querySelectorAll('.tab');
+      // Expected: claude(1), claude(3), Files, Git, bash(0), vim(2), +
+      expect(tabs.length).toBe(7);
+      expect(tabs[0].dataset.type).toBe('terminal');
+      expect(tabs[0].dataset.window).toBe('1');
+      expect(tabs[1].dataset.type).toBe('terminal');
+      expect(tabs[1].dataset.window).toBe('3');
+      expect(tabs[2].dataset.type).toBe('files');
+      expect(tabs[3].dataset.type).toBe('git');
+      expect(tabs[4].dataset.type).toBe('terminal');
+      expect(tabs[4].dataset.window).toBe('0');
+      expect(tabs[5].dataset.type).toBe('terminal');
+      expect(tabs[5].dataset.window).toBe('2');
+      expect(tabs[6].dataset.type).toBe('add');
+    });
+
+    it('places + button as last element', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [
+        makeWindow(0, 'zsh'),
+        makeWindow(1, 'vim'),
+        makeWindow(2, 'htop'),
+      ], false);
+
+      const tabs = container.querySelectorAll('.tab');
+      const lastTab = tabs[tabs.length - 1];
+      expect(lastTab.dataset.type).toBe('add');
+      expect(lastTab.textContent).toBe('+');
+      expect(lastTab.classList.contains('tab-add')).toBe(true);
+    });
+
+    it('does not show claude windows at top when not in Claude Code mode', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [
+        makeWindow(0, 'zsh'),
+        makeWindow(1, 'claude'),
+      ], false);
+
+      const tabs = container.querySelectorAll('.tab');
+      // When not in Claude Code mode, no special ordering for claude windows
+      // Expected: Files, Git, zsh, claude, +
+      expect(tabs[0].dataset.type).toBe('files');
+      expect(tabs[1].dataset.type).toBe('git');
+      expect(tabs[2].dataset.type).toBe('terminal');
+      expect(tabs[2].dataset.window).toBe('0');
+      expect(tabs[3].dataset.type).toBe('terminal');
+      expect(tabs[3].dataset.window).toBe('1');
+      expect(tabs[4].dataset.type).toBe('add');
+    });
+  });
+
+  describe('add button', () => {
+    it('calls onCreateWindow when + button is clicked', () => {
+      const onCreateWindow = vi.fn();
+      const bar = new TabBar({ container, onTabSelect, onCreateWindow });
+      bar.setWindows('main', [makeWindow(0, 'zsh')], false);
+
+      const addBtn = container.querySelector('.tab[data-type="add"]');
+      addBtn.click();
+
+      expect(onCreateWindow).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not call onTabSelect when + button is clicked', () => {
+      const onCreateWindow = vi.fn();
+      const bar = new TabBar({ container, onTabSelect, onCreateWindow });
+      bar.setWindows('main', [makeWindow(0, 'zsh')], false);
+
+      const addBtn = container.querySelector('.tab[data-type="add"]');
+      addBtn.click();
+
+      expect(onTabSelect).not.toHaveBeenCalled();
+    });
+
+    it('does not throw if onCreateWindow is not provided', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [makeWindow(0, 'zsh')], false);
+
+      const addBtn = container.querySelector('.tab[data-type="add"]');
+      expect(() => addBtn.click()).not.toThrow();
+    });
+  });
+
+  describe('_getTabInfo', () => {
+    it('returns terminal info with windowIndex and windowName', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [makeWindow(0, 'zsh'), makeWindow(1, 'vim')], false);
+
+      const termTab = container.querySelector('.tab[data-type="terminal"]');
+      const info = bar._getTabInfo(termTab);
+      expect(info).toEqual({
+        type: 'terminal',
+        windowIndex: 0,
+        windowName: 'zsh',
+      });
+    });
+
+    it('returns files info', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [makeWindow(0, 'zsh')], false);
+
+      const filesTab = container.querySelector('.tab[data-type="files"]');
+      const info = bar._getTabInfo(filesTab);
+      expect(info).toEqual({
+        type: 'files',
+        windowIndex: undefined,
+        windowName: undefined,
+      });
+    });
+
+    it('returns add info', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [makeWindow(0, 'zsh')], false);
+
+      const addTab = container.querySelector('.tab[data-type="add"]');
+      const info = bar._getTabInfo(addTab);
+      expect(info).toEqual({
+        type: 'add',
+        windowIndex: undefined,
+        windowName: undefined,
+      });
     });
   });
 
@@ -104,11 +305,14 @@ describe('TabBar', () => {
 
       bar.setActiveTab({ type: 'terminal', windowIndex: 1 });
 
-      const tabs = container.querySelectorAll('.tab');
-      expect(tabs[0].classList.contains('tab--active')).toBe(false);
-      expect(tabs[1].classList.contains('tab--active')).toBe(true);
-      expect(tabs[2].classList.contains('tab--active')).toBe(false); // Files
-      expect(tabs[3].classList.contains('tab--active')).toBe(false); // Git
+      const termTabs = container.querySelectorAll('.tab[data-type="terminal"]');
+      expect(termTabs[0].classList.contains('tab--active')).toBe(false);
+      expect(termTabs[1].classList.contains('tab--active')).toBe(true);
+
+      const filesTab = container.querySelector('.tab[data-type="files"]');
+      expect(filesTab.classList.contains('tab--active')).toBe(false);
+      const gitTab = container.querySelector('.tab[data-type="git"]');
+      expect(gitTab.classList.contains('tab--active')).toBe(false);
     });
 
     it('adds tab--active class to Files tab', () => {
@@ -298,13 +502,16 @@ describe('TabBar', () => {
       ], true);
 
       const termTabs = container.querySelectorAll('.tab[data-type="terminal"]');
-      // Normal window should not have an icon
-      expect(termTabs[0].querySelector('.tab-icon')).toBeNull();
-
-      // Claude window should have a sparkle icon
-      const claudeIcon = termTabs[1].querySelector('.tab-icon');
+      // In Claude Code mode, claude tab is first (reordered)
+      // Claude tab (index 1) should have sparkle icon
+      const claudeTab = container.querySelector('.tab[data-type="terminal"][data-window="1"]');
+      const claudeIcon = claudeTab.querySelector('.tab-icon');
       expect(claudeIcon).not.toBeNull();
-      expect(claudeIcon.textContent).toContain('\u2726'); // ✦
+      expect(claudeIcon.textContent).toContain('\u2726'); // sparkle
+
+      // Normal window should not have an icon
+      const zshTab = container.querySelector('.tab[data-type="terminal"][data-window="0"]');
+      expect(zshTab.querySelector('.tab-icon')).toBeNull();
     });
 
     it('does not show sparkle icon when not in Claude Code mode', () => {
@@ -315,6 +522,7 @@ describe('TabBar', () => {
       ], false);
 
       const termTabs = container.querySelectorAll('.tab[data-type="terminal"]');
+      expect(termTabs[0].querySelector('.tab-icon')).toBeNull();
       expect(termTabs[1].querySelector('.tab-icon')).toBeNull();
     });
 
