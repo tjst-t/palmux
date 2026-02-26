@@ -1332,6 +1332,76 @@ html, body {
   width: 100%;
 }
 
+/* --- Drawer: Project/Branch structure --- */
+
+.drawer-project {
+  /* Same as .drawer-session wrapper - no special styles needed */
+}
+
+.drawer-branch-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px 6px 28px;
+  cursor: pointer;
+  color: #ccc;
+  font-size: 13px;
+  gap: 6px;
+  transition: background-color 0.15s;
+}
+
+.drawer-branch-item:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.drawer-branch-item:active {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.drawer-branch-item--current {
+  color: #fff;
+}
+
+.drawer-open-branch-btn {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px 6px 28px;
+  cursor: pointer;
+  color: #888;
+  font-size: 12px;
+  font-style: italic;
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.drawer-open-branch-btn:hover {
+  color: #aaa;
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.drawer-branch-picker {
+  padding: 4px 0;
+}
+
+.drawer-branch-remote-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 4px;
+  font-size: 10px;
+  color: #888;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+.drawer-other-sessions {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+.drawer-other-sessions-header {
+  color: #888;
+}
+
 /* Delete Confirmation Modal */
 .drawer-delete-modal-overlay {
   position: fixed;
