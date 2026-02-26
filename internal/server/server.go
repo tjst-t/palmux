@@ -34,6 +34,11 @@ type TmuxManager interface {
 	IsGhqSession(session string) bool
 	EnsureClaudeWindow(session, claudePath string) (*tmux.Window, error)
 	ReplaceClaudeWindow(session, name, command string) (*tmux.Window, error)
+	ListProjectWorktrees(project string) ([]tmux.ProjectWorktree, error)
+	NewWorktreeSession(project, branch string, createBranch bool) (*tmux.Session, error)
+	DeleteWorktreeSession(sessionName string, removeWorktree bool) error
+	GetProjectBranches(project string) ([]git.Branch, error)
+	ResolveProject(project string) string
 }
 
 // Server は Palmux の HTTP サーバーを表す。
@@ -106,6 +111,10 @@ func NewServer(opts Options) *Server {
 	mux.Handle("GET /api/ghq/repos", auth(s.handleListGhqRepos()))
 	mux.Handle("POST /api/ghq/repos", auth(s.handleCloneGhqRepo()))
 	mux.Handle("DELETE /api/ghq/repos", auth(s.handleDeleteGhqRepo()))
+	mux.Handle("GET /api/projects/{project}/worktrees", auth(s.handleListProjectWorktrees()))
+	mux.Handle("POST /api/projects/{project}/worktrees", auth(s.handleCreateProjectWorktree()))
+	mux.Handle("DELETE /api/projects/{project}/worktrees/{branch...}", auth(s.handleDeleteProjectWorktree()))
+	mux.Handle("GET /api/projects/{project}/branches", auth(s.handleListProjectBranches()))
 	mux.Handle("GET /api/sessions/{session}/mode", auth(s.handleGetSessionMode()))
 	mux.Handle("POST /api/sessions/{session}/claude/restart", auth(s.handleRestartClaudeWindow()))
 	mux.Handle("GET /api/sessions/{session}/git/status", auth(s.handleGitStatus()))
