@@ -597,6 +597,28 @@ export class GitBrowser {
 
     el.appendChild(hash);
     el.appendChild(subject);
+
+    // refs（ブランチ・タグ）バッジ — subject と date の間に右寄せ表示
+    if (entry.refs && entry.refs.length > 0) {
+      const refsContainer = document.createElement('span');
+      refsContainer.className = 'gb-log-refs';
+      for (const ref of entry.refs) {
+        const badge = document.createElement('span');
+        if (ref.startsWith('tag: ')) {
+          badge.className = 'gb-log-ref gb-log-ref--tag';
+          badge.textContent = ref.substring(5);
+        } else if (ref.includes('/')) {
+          badge.className = 'gb-log-ref gb-log-ref--remote';
+          badge.textContent = ref;
+        } else {
+          badge.className = 'gb-log-ref gb-log-ref--branch';
+          badge.textContent = ref;
+        }
+        refsContainer.appendChild(badge);
+      }
+      el.appendChild(refsContainer);
+    }
+
     el.appendChild(date);
 
     el.addEventListener('click', () => this._selectCommit(entry.hash, { push: true }));

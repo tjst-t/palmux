@@ -136,10 +136,11 @@ func TestParseLog_EntryDetails(t *testing.T) {
 	input := readTestdata(t, "log_output.txt")
 	entries := ParseLog(input)
 
-	if len(entries) < 1 {
-		t.Fatal("expected at least 1 entry")
+	if len(entries) < 3 {
+		t.Fatal("expected at least 3 entries")
 	}
 
+	// 1件目: HEAD -> main, origin/main
 	first := entries[0]
 	if first.Hash != "abc1234" {
 		t.Errorf("Hash = %q, want %q", first.Hash, "abc1234")
@@ -152,6 +153,80 @@ func TestParseLog_EntryDetails(t *testing.T) {
 	}
 	if first.Subject != "Fix login bug" {
 		t.Errorf("Subject = %q, want %q", first.Subject, "Fix login bug")
+	}
+	if len(first.Refs) != 2 {
+		t.Errorf("len(Refs) = %d, want 2", len(first.Refs))
+	} else {
+		if first.Refs[0] != "main" {
+			t.Errorf("Refs[0] = %q, want %q", first.Refs[0], "main")
+		}
+		if first.Refs[1] != "origin/main" {
+			t.Errorf("Refs[1] = %q, want %q", first.Refs[1], "origin/main")
+		}
+	}
+
+	// 2件目: tag: v1.0
+	second := entries[1]
+	if len(second.Refs) != 1 {
+		t.Errorf("len(Refs) = %d, want 1", len(second.Refs))
+	} else {
+		if second.Refs[0] != "tag: v1.0" {
+			t.Errorf("Refs[0] = %q, want %q", second.Refs[0], "tag: v1.0")
+		}
+	}
+
+	// 3件目: refs なし
+	third := entries[2]
+	if len(third.Refs) != 0 {
+		t.Errorf("len(Refs) = %d, want 0", len(third.Refs))
+	}
+}
+
+func TestParseRefs(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantRefs []string
+	}{
+		{
+			name:     "HEAD -> ブランチとリモート",
+			input:    "HEAD -> main, origin/main",
+			wantRefs: []string{"main", "origin/main"},
+		},
+		{
+			name:     "タグのみ",
+			input:    "tag: v1.0",
+			wantRefs: []string{"tag: v1.0"},
+		},
+		{
+			name:     "複数のタグとブランチ",
+			input:    "HEAD -> develop, tag: v2.0, origin/develop",
+			wantRefs: []string{"develop", "tag: v2.0", "origin/develop"},
+		},
+		{
+			name:     "HEAD のみ（detached HEAD）",
+			input:    "HEAD",
+			wantRefs: []string{},
+		},
+		{
+			name:     "空文字列",
+			input:    "",
+			wantRefs: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			refs := parseRefs(tt.input)
+			if len(refs) != len(tt.wantRefs) {
+				t.Fatalf("len(refs) = %d, want %d; refs = %v", len(refs), len(tt.wantRefs), refs)
+			}
+			for i, want := range tt.wantRefs {
+				if refs[i] != want {
+					t.Errorf("refs[%d] = %q, want %q", i, refs[i], want)
+				}
+			}
+		})
 	}
 }
 

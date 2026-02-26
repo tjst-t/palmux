@@ -88,7 +88,7 @@ func ParseStatus(output string) *StatusResult {
 	return result
 }
 
-// ParseLog は git log --pretty=format:%h\t%an\t%aI\t%s の出力をパースする。
+// ParseLog は git log --pretty=format:%h\t%an\t%aI\t%s\t%D の出力をパースする。
 func ParseLog(output string) []LogEntry {
 	entries := []LogEntry{}
 	if output == "" {
@@ -100,19 +100,43 @@ func ParseLog(output string) []LogEntry {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 4)
+		parts := strings.SplitN(line, "\t", 5)
 		if len(parts) < 4 {
 			continue
 		}
-		entries = append(entries, LogEntry{
+		entry := LogEntry{
 			Hash:       parts[0],
 			AuthorName: parts[1],
 			Date:       parts[2],
 			Subject:    parts[3],
-		})
+		}
+		if len(parts) >= 5 && parts[4] != "" {
+			entry.Refs = parseRefs(parts[4])
+		}
+		entries = append(entries, entry)
 	}
 
 	return entries
+}
+
+// parseRefs は git log の %D 出力（例: "HEAD -> main, origin/main, tag: v1.0"）をパースする。
+func parseRefs(raw string) []string {
+	parts := strings.Split(raw, ", ")
+	refs := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		// "HEAD -> main" → "main" は含めず、HEAD だけ除去して branch 名を残す
+		if strings.HasPrefix(p, "HEAD -> ") {
+			p = strings.TrimPrefix(p, "HEAD -> ")
+		} else if p == "HEAD" {
+			continue
+		}
+		refs = append(refs, p)
+	}
+	return refs
 }
 
 // ParseDiffTree は git diff-tree --no-commit-id -r --name-status の出力をパースする。
