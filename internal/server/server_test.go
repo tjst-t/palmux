@@ -11,6 +11,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/tjst-t/palmux/internal/git"
 	"github.com/tjst-t/palmux/internal/tmux"
 )
 
@@ -59,6 +60,19 @@ func (m *mockTmuxManager) EnsureClaudeWindow(session, claudePath string) (*tmux.
 func (m *mockTmuxManager) ReplaceClaudeWindow(session, name, command string) (*tmux.Window, error) {
 	return nil, fmt.Errorf("not implemented")
 }
+func (m *mockTmuxManager) ListProjectWorktrees(project string) ([]tmux.ProjectWorktree, error) {
+	return nil, nil
+}
+func (m *mockTmuxManager) NewWorktreeSession(project, branch string, createBranch bool) (*tmux.Session, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *mockTmuxManager) DeleteWorktreeSession(sessionName string, removeWorktree bool) error {
+	return nil
+}
+func (m *mockTmuxManager) GetProjectBranches(project string) ([]git.Branch, error) {
+	return nil, nil
+}
+func (m *mockTmuxManager) ResolveProject(project string) string { return "" }
 
 func TestNormalizeBasePath(t *testing.T) {
 	tests := []struct {

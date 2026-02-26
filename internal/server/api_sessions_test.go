@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tjst-t/palmux/internal/git"
 	"github.com/tjst-t/palmux/internal/tmux"
 )
 
@@ -67,6 +68,21 @@ type configurableMock struct {
 	replaceClaudeWindow      *tmux.Window
 	replaceClaudeWindowErr   error
 	calledReplaceClaudeWindow struct{ session, name, command string }
+
+	// project/worktree 関連
+	projectWorktrees           []tmux.ProjectWorktree
+	projectWorktreesErr        error
+	calledListProjectWorktrees string
+	newWorktreeSession         *tmux.Session
+	newWorktreeSessionErr      error
+	calledNewWorktreeSession   struct{ project, branch string; createBranch bool }
+	deleteWorktreeSessionErr   error
+	calledDeleteWorktreeSession struct{ sessionName string; removeWorktree bool }
+	projectBranches            []git.Branch
+	projectBranchesErr         error
+	calledGetProjectBranches   string
+	resolvedProject            string
+	calledResolveProject       string
 }
 
 func (m *configurableMock) ListSessions() ([]tmux.Session, error) {
@@ -172,6 +188,37 @@ func (m *configurableMock) EnsureClaudeWindow(session, claudePath string) (*tmux
 func (m *configurableMock) ReplaceClaudeWindow(session, name, command string) (*tmux.Window, error) {
 	m.calledReplaceClaudeWindow = struct{ session, name, command string }{session, name, command}
 	return m.replaceClaudeWindow, m.replaceClaudeWindowErr
+}
+
+func (m *configurableMock) ListProjectWorktrees(project string) ([]tmux.ProjectWorktree, error) {
+	m.calledListProjectWorktrees = project
+	return m.projectWorktrees, m.projectWorktreesErr
+}
+
+func (m *configurableMock) NewWorktreeSession(project, branch string, createBranch bool) (*tmux.Session, error) {
+	m.calledNewWorktreeSession = struct {
+		project, branch string
+		createBranch    bool
+	}{project, branch, createBranch}
+	return m.newWorktreeSession, m.newWorktreeSessionErr
+}
+
+func (m *configurableMock) DeleteWorktreeSession(sessionName string, removeWorktree bool) error {
+	m.calledDeleteWorktreeSession = struct {
+		sessionName    string
+		removeWorktree bool
+	}{sessionName, removeWorktree}
+	return m.deleteWorktreeSessionErr
+}
+
+func (m *configurableMock) GetProjectBranches(project string) ([]git.Branch, error) {
+	m.calledGetProjectBranches = project
+	return m.projectBranches, m.projectBranchesErr
+}
+
+func (m *configurableMock) ResolveProject(project string) string {
+	m.calledResolveProject = project
+	return m.resolvedProject
 }
 
 // newTestServer はテスト用 Server を作成するヘルパー。
