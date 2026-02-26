@@ -405,6 +405,52 @@ export async function deleteNotification(session, windowIndex) {
 }
 
 /**
+ * プロジェクトの worktree 一覧を取得する。
+ * @param {string} project - プロジェクト名
+ * @returns {Promise<Array>}
+ */
+export async function listProjectWorktrees(project) {
+  return fetchAPI(`api/projects/${encodeURIComponent(project)}/worktrees`);
+}
+
+/**
+ * プロジェクトに新しい worktree セッションを作成する。
+ * @param {string} project - プロジェクト名
+ * @param {string} branch - ブランチ名
+ * @param {boolean} createBranch - 新規ブランチを作成するか
+ * @returns {Promise<Object>}
+ */
+export async function createProjectWorktree(project, branch, createBranch = false) {
+  return fetchAPI(`api/projects/${encodeURIComponent(project)}/worktrees`, {
+    method: 'POST',
+    body: JSON.stringify({ branch, create_branch: createBranch }),
+  });
+}
+
+/**
+ * プロジェクトの worktree セッションを削除する。
+ * @param {string} project - プロジェクト名
+ * @param {string} branch - ブランチ名
+ * @param {boolean} removeWorktree - worktree ディレクトリも削除するか
+ * @returns {Promise<void>}
+ */
+export async function deleteProjectWorktree(project, branch, removeWorktree = false) {
+  const params = removeWorktree ? '?remove_worktree=true' : '';
+  return fetchAPI(`api/projects/${encodeURIComponent(project)}/worktrees/${branch}${params}`, {
+    method: 'DELETE',
+  });
+}
+
+/**
+ * プロジェクトのブランチ一覧を取得する。
+ * @param {string} project - プロジェクト名
+ * @returns {Promise<Array>}
+ */
+export async function listProjectBranches(project) {
+  return fetchAPI(`api/projects/${encodeURIComponent(project)}/branches`);
+}
+
+/**
  * WebSocket 接続用の URL を生成する。
  * base-path とプロトコル（ws/wss）を考慮し、認証トークンをクエリパラメータに付与する。
  * @param {string} session - セッション名

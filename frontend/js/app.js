@@ -453,9 +453,9 @@ function showFileBrowser(sessionName, { push = true, path = null } = {}) {
     );
   }
 
-  // Drawer の viewMode を更新
+  // Drawer の状態を更新
   if (drawer) {
-    drawer.setCurrent(panelManager.getCurrentSession(), panelManager.getCurrentWindowIndex(), { viewMode: 'filebrowser' });
+    drawer.setCurrent(panelManager.getCurrentSession(), panelManager.getCurrentWindowIndex());
   }
 }
 
@@ -489,9 +489,9 @@ function showTerminalView({ push = true } = {}) {
     history.pushState({ view: 'terminal', session: currentSession, window: currentWindowIndex, split: panelManager.isSplit, rightPanel: _buildRightPanelState() }, '', hash);
   }
 
-  // Drawer の viewMode を更新
+  // Drawer の状態を更新
   if (drawer) {
-    drawer.setCurrent(panelManager.getCurrentSession(), panelManager.getCurrentWindowIndex(), { viewMode: 'terminal' });
+    drawer.setCurrent(panelManager.getCurrentSession(), panelManager.getCurrentWindowIndex());
   }
 }
 
@@ -530,9 +530,9 @@ function showGitBrowser(sessionName, { push = true } = {}) {
     );
   }
 
-  // Drawer の viewMode を更新
+  // Drawer の状態を更新
   if (drawer) {
-    drawer.setCurrent(panelManager.getCurrentSession(), panelManager.getCurrentWindowIndex(), { viewMode: 'gitbrowser' });
+    drawer.setCurrent(panelManager.getCurrentSession(), panelManager.getCurrentWindowIndex());
   }
 }
 
@@ -736,9 +736,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const result = await createWindow(currentSession, '', '');
         connectToWindow(currentSession, result.index);
         _refreshTabBar(currentSession, { type: 'terminal', windowIndex: result.index });
-        if (drawer) {
-          drawer.refreshWindowList?.(currentSession);
-        }
       } catch (err) {
         console.error('Failed to create window:', err);
       }
@@ -807,9 +804,6 @@ document.addEventListener('DOMContentLoaded', () => {
           const win = await restartClaudeWindow(sessionName, command);
           connectToWindow(sessionName, win.index);
           _refreshTabBar(sessionName, { type: 'terminal', windowIndex: win.index });
-          if (drawer) {
-            drawer.refreshWindowList?.(sessionName);
-          }
         } catch (err) {
           console.error('Failed to restart claude window:', err);
         }
@@ -881,9 +875,6 @@ document.addEventListener('DOMContentLoaded', () => {
         await renameWindow(sessionName, windowIndex, newName);
         closeDialog();
         _refreshTabBar(sessionName, _getActiveTabDescriptor());
-        if (drawer) {
-          drawer.refreshWindowList?.(sessionName);
-        }
       } catch (err) {
         console.error('Failed to rename window:', err);
         closeDialog();
@@ -942,9 +933,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       _refreshTabBar(sessionName, _getActiveTabDescriptor());
-      if (drawer) {
-        drawer.refreshWindowList?.(sessionName);
-      }
     } catch (err) {
       console.error('Failed to delete window:', err);
     }
@@ -1025,105 +1013,33 @@ document.addEventListener('DOMContentLoaded', () => {
   // Drawer 初期化
   drawer = new Drawer({
     claudePath,
-    onSelectWindow: (session, windowIndex) => {
-      switchWindow(session, windowIndex);
-    },
     onSelectSession: (sessionName, windowIndex) => {
       switchSession(sessionName, windowIndex);
-    },
-    onSelectFiles: (sessionName) => {
-      const currentSession = panelManager ? panelManager.getCurrentSession() : null;
-      if (currentSession !== sessionName) {
-        // 別セッションの場合、先にウィンドウ接続してからファイルブラウザ表示
-        listWindows(sessionName).then((windows) => {
-          const activeWin = (windows && windows.find(w => w.active)) || (windows && windows[0]);
-          if (activeWin) {
-            connectToWindow(sessionName, activeWin.index, { push: false });
-          }
-          showFileBrowser(sessionName);
-        }).catch((err) => {
-          console.error('Failed to load windows for files:', err);
-        });
-      } else {
-        showFileBrowser(sessionName);
-      }
-    },
-    onSelectGit: (sessionName) => {
-      const currentSession = panelManager ? panelManager.getCurrentSession() : null;
-      if (currentSession !== sessionName) {
-        // 別セッションの場合、先にウィンドウ接続してからGitブラウザ表示
-        listWindows(sessionName).then((windows) => {
-          const activeWin = (windows && windows.find(w => w.active)) || (windows && windows[0]);
-          if (activeWin) {
-            connectToWindow(sessionName, activeWin.index, { push: false });
-          }
-          showGitBrowser(sessionName);
-        }).catch((err) => {
-          console.error('Failed to load windows for git:', err);
-        });
-      } else {
-        showGitBrowser(sessionName);
-      }
     },
     onCreateSession: async (sessionName) => {
       try {
         const mode = await getSessionMode(sessionName);
         if (mode && mode.claude_code && mode.claude_window >= 0) {
           connectToWindow(sessionName, mode.claude_window);
-        } else {
-          connectToWindow(sessionName, 0);
+          return;
         }
       } catch {
-        connectToWindow(sessionName, 0);
+        // ignore
       }
+      connectToWindow(sessionName, 0);
     },
     onDeleteSession: () => {
       showSessionList({ replace: true });
-    },
-    onCreateWindow: (session, windowIndex) => {
-      const headerTitleEl = document.getElementById('header-title');
-      const currentSession = panelManager ? panelManager.getCurrentSession() : null;
-      if (headerTitleEl && session === currentSession) {
-        headerTitleEl.textContent = `${session}:${windowIndex}`;
-      }
-      // タブバーをリフレッシュ
-      if (tabBar && session === currentSession) {
-        _refreshTabBar(session, { type: 'terminal', windowIndex });
-      }
-    },
-    onDeleteWindow: () => {
-      const headerTitleEl = document.getElementById('header-title');
-      const currentSession = panelManager ? panelManager.getCurrentSession() : null;
-      const currentWindowIndex = panelManager ? panelManager.getCurrentWindowIndex() : null;
-      if (headerTitleEl && currentSession !== null) {
-        headerTitleEl.textContent = `${currentSession}:${currentWindowIndex}`;
-      }
-      // タブバーをリフレッシュ
-      if (tabBar && currentSession) {
-        _refreshTabBar(currentSession, _getActiveTabDescriptor());
-      }
-    },
-    onRenameWindow: (session, windowIndex, newName) => {
-      const currentSession = panelManager ? panelManager.getCurrentSession() : null;
-      const currentWindowIndex = panelManager ? panelManager.getCurrentWindowIndex() : null;
-      if (session === currentSession && windowIndex === currentWindowIndex) {
-        const headerTitleEl = document.getElementById('header-title');
-        if (headerTitleEl) {
-          headerTitleEl.textContent = `${session}:${windowIndex}`;
-        }
-      }
-      // タブバーをリフレッシュ（ウィンドウ名変更反映）
-      if (tabBar && session === currentSession) {
-        _refreshTabBar(session, _getActiveTabDescriptor());
-      }
     },
     onClose: () => {
       // Drawer が閉じた後、フォーカスパネルのターミナルにフォーカスを戻す
       if (panelManager) {
         const panel = panelManager.getFocusedPanel();
-        const terminal = panel.getTerminal();
-        if (terminal && panel.viewMode === 'terminal') {
-          terminal.focus();
+        if (panel) {
+          const terminal = panel.getTerminal();
+          if (terminal && panel.viewMode === 'terminal') {
+            terminal.focus();
+          }
         }
       }
     },

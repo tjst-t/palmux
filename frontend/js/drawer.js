@@ -1,58 +1,56 @@
-// drawer.js - セッション/ウィンドウ Drawer UI
-// ハンバーガーメニューからスライドインし、セッション/ウィンドウの切り替えを行う
-// セッション作成・削除機能を含む
+// drawer.js - プロジェクト/ブランチ Drawer UI
+// ハンバーガーメニューからスライドインし、プロジェクト/ブランチの切り替えを行う
+// プロジェクト作成・削除、ブランチ（worktree）管理機能を含む
 
-import { listSessions, listWindows, createSession, deleteSession, createWindow, deleteWindow, renameWindow, listGhqRepos, cloneGhqRepo, deleteGhqRepo, getSessionMode, restartClaudeWindow } from './api.js';
+import { listSessions, createSession, deleteSession, listGhqRepos, cloneGhqRepo, deleteGhqRepo, listProjectWorktrees, createProjectWorktree, deleteProjectWorktree, listProjectBranches } from './api.js';
 
 /**
- * Drawer はセッション/ウィンドウ切り替え用のスライドインパネル。
+ * セッション名をプロジェクト名とブランチ名に分解する。
+ * @param {string} sessionName - セッション名
+ * @returns {{repo: string, branch: string}}
+ */
+function parseSessionName(sessionName) {
+  const idx = sessionName.indexOf('@');
+  if (idx < 0) return { repo: sessionName, branch: '' };
+  return { repo: sessionName.substring(0, idx), branch: sessionName.substring(idx + 1) };
+}
+
+/**
+ * Drawer はプロジェクト/ブランチ切り替え用のスライドインパネル。
  *
  * - ハンバーガーメニュー (☰) タップで左からスライドイン
- * - セッション一覧を折りたたみ式で表示
- * - ウィンドウをタップで同一セッション内のウィンドウ切り替え（tmux select-window）
- * - セッションをタップで別セッションに切り替え（WebSocket 再接続）
+ * - プロジェクト一覧を折りたたみ式で表示
+ * - ブランチをタップで別セッションに切り替え（WebSocket 再接続）
  * - drawer 外タップまたはスワイプで閉じる
  * - 開くたびに API から最新データを取得
- * - [New Session] ボタンでセッション作成
- * - セッション長押しで削除オプション表示
+ * - [New Session] ボタンでプロジェクト作成
+ * - プロジェクト長押しで削除オプション表示
  */
 export class Drawer {
   /**
    * @param {Object} options
-   * @param {function(string, number): void} options.onSelectWindow - ウィンドウ選択時のコールバック (session, windowIndex)
    * @param {function(string, number): void} options.onSelectSession - 別セッション選択時のコールバック (sessionName, windowIndex)
    * @param {function(string): void} [options.onCreateSession] - セッション作成後のコールバック (sessionName)
    * @param {function(): void} [options.onDeleteSession] - セッション削除後のコールバック
-   * @param {function(string, number): void} [options.onCreateWindow] - ウィンドウ作成後のコールバック (session, windowIndex)
-   * @param {function(): void} [options.onDeleteWindow] - ウィンドウ削除後のコールバック
-   * @param {function(string, number, string): void} [options.onRenameWindow] - ウィンドウリネーム後のコールバック (session, windowIndex, newName)
    * @param {function(): void} [options.onClose] - Drawer が閉じた後のコールバック
    */
   constructor(options) {
     this._claudePath = options.claudePath || 'claude';
-    this._onSelectWindow = options.onSelectWindow;
     this._onSelectSession = options.onSelectSession;
-    this._onSelectFiles = options.onSelectFiles || null;
-    this._onSelectGit = options.onSelectGit || null;
     this._onCreateSession = options.onCreateSession || null;
     this._onDeleteSession = options.onDeleteSession || null;
-    this._onCreateWindow = options.onCreateWindow || null;
-    this._onDeleteWindow = options.onDeleteWindow || null;
-    this._onRenameWindow = options.onRenameWindow || null;
     this._onClose = options.onClose || null;
     this._visible = false;
     this._currentSession = null;
     this._currentWindowIndex = null;
-    /** @type {'terminal'|'filebrowser'|'gitbrowser'} 現在の viewMode */
-    this._currentViewMode = 'terminal';
-    /** @type {Set<string>} 展開中のセッション名 */
-    this._expandedSessions = new Set();
+    /** @type {Map<string, {sessions: Array, defaultSession: Object|null}>} プロジェクト名 -> プロジェクトデータ */
+    this._projects = new Map();
+    /** @type {Array} ghq 以外のセッション */
+    this._otherSessions = [];
+    /** @type {Set<string>} 展開中のプロジェクト名 */
+    this._expandedProjects = new Set();
     /** @type {Array} キャッシュ済みセッションデータ */
     this._sessions = [];
-    /** @type {Object<string, Array>} セッション名 -> ウィンドウ一覧 */
-    this._windowsCache = {};
-    /** @type {Object<string, {claude_code: boolean, claude_window: number}>} セッション名 -> モード情報 */
-    this._modeCache = {};
 
     /** @type {number|null} 長押しタイマー ID */
     this._longPressTimer = null;
@@ -60,8 +58,6 @@ export class Drawer {
     this._longPressDetected = false;
     /** @type {boolean} セッション作成中フラグ */
     this._creating = false;
-    /** @type {boolean} ウィンドウ作成中フラグ */
-    this._creatingWindow = false;
     /** @type {'activity'|'name'} セッション並び順 */
     this._sortOrder = 'activity';
     /** @type {Array<{session: string, window_index: number, type: string}>} 通知一覧 */
@@ -70,7 +66,7 @@ export class Drawer {
     this._pinned = false;
     /** @type {Function|null} リサイズハンドラ（解除用） */
     this._resizeHandler = null;
-    /** @type {number|null} ウィンドウ一覧の定期リフレッシュタイマー ID */
+    /** @type {number|null} 定期リフレッシュタイマー ID */
     this._refreshTimer = null;
 
     /** @type {number} ピン留め時の Drawer 幅 */
@@ -366,26 +362,24 @@ export class Drawer {
       this._overlay.classList.add('drawer-overlay--visible');
     }
 
-    // 現在のセッションだけ自動展開（アコーディオン）
-    this._expandedSessions.clear();
+    // 現在のプロジェクトだけ自動展開
+    this._expandedProjects.clear();
     if (this._currentSession) {
-      this._expandedSessions.add(this._currentSession);
+      const { repo } = parseSessionName(this._currentSession);
+      this._expandedProjects.add(repo);
     }
 
     // ローディング表示
     this._content.innerHTML = '<div class="drawer-loading">Loading...</div>';
 
     try {
-      await this._loadSessions();
-      // 現在のセッションのウィンドウ一覧を事前ロード
-      if (this._currentSession) {
-        await this._loadWindows(this._currentSession).catch(() => {});
-      }
+      const [sessions, repos] = await Promise.all([listSessions(), listGhqRepos()]);
+      this._sessions = sessions || [];
+      this._groupSessionsByProject(this._sessions, repos || []);
       this._renderContent();
-      // ウィンドウ名の定期リフレッシュを開始
       this._startRefreshPolling();
     } catch (err) {
-      console.error('Failed to load sessions for drawer:', err);
+      console.error('Failed to load drawer data:', err);
       this._content.innerHTML = '<div class="drawer-error">Failed to load sessions</div>';
     }
   }
@@ -422,39 +416,54 @@ export class Drawer {
    * セッションまたはウィンドウが変わり、Drawer が開いている場合は再描画する。
    * @param {string} session - セッション名
    * @param {number} windowIndex - ウィンドウインデックス
-   */
-  /**
-   * 現在のセッション/ウィンドウを設定する。
-   * セッションまたはウィンドウが変わり、Drawer が開いている場合は再描画する。
-   * @param {string} session - セッション名
-   * @param {number} windowIndex - ウィンドウインデックス
    * @param {{ sessionChanged?: boolean }} [opts]
    */
-  setCurrent(session, windowIndex, { sessionChanged = false, viewMode = 'terminal' } = {}) {
-    const changed = (this._currentSession !== session || this._currentWindowIndex !== windowIndex || this._currentViewMode !== viewMode);
+  setCurrent(session, windowIndex, { sessionChanged = false } = {}) {
+    const changed = (this._currentSession !== session || this._currentWindowIndex !== windowIndex);
     this._currentSession = session;
     this._currentWindowIndex = windowIndex;
-    this._currentViewMode = viewMode;
 
     if (!changed || !this._visible) return;
 
     if (sessionChanged) {
-      // セッション切替: セッション一覧とウィンドウ一覧を再取得して再描画
-      this._expandedSessions.clear();
-      this._expandedSessions.add(session);
-      this._loadSessions()
-        .then(() => this._loadWindows(session).catch(() => {}))
-        .then(() => this._renderContent())
-        .catch(() => this._renderContent());
+      const { repo } = parseSessionName(session);
+      this._expandedProjects.clear();
+      this._expandedProjects.add(repo);
+      // Reload sessions
+      Promise.all([listSessions(), listGhqRepos()]).then(([sessions, repos]) => {
+        this._sessions = sessions || [];
+        this._groupSessionsByProject(this._sessions, repos || []);
+        this._renderContent();
+      }).catch(() => this._renderContent());
     } else {
-      // ウィンドウ切替: キャッシュの active フラグを更新して即再描画
-      // （旧・新ウィンドウ両方に ● が表示される問題を回避）
-      if (this._windowsCache[session]) {
-        for (const w of this._windowsCache[session]) {
-          w.active = (w.index === windowIndex);
-        }
-      }
       this._renderContent();
+    }
+  }
+
+  /**
+   * セッションをプロジェクト別にグループ化する。
+   * @param {Array} sessions - セッション一覧
+   * @param {Array} repos - ghq リポジトリ一覧
+   */
+  _groupSessionsByProject(sessions, repos) {
+    const repoNames = new Set(repos.map(r => r.name));
+    this._projects = new Map();
+    this._otherSessions = [];
+
+    for (const session of sessions) {
+      const { repo, branch } = parseSessionName(session.name);
+      if (repoNames.has(repo)) {
+        if (!this._projects.has(repo)) {
+          this._projects.set(repo, { sessions: [], defaultSession: null });
+        }
+        const project = this._projects.get(repo);
+        project.sessions.push({ ...session, branch: branch || repo, isDefault: !branch });
+        if (!branch) {
+          project.defaultSession = session;
+        }
+      } else {
+        this._otherSessions.push(session);
+      }
     }
   }
 
@@ -463,135 +472,41 @@ export class Drawer {
    */
   async _loadSessions() {
     this._sessions = await listSessions() || [];
-    this._windowsCache = {};
     // セッション一覧が更新されたので、ハンバーガーバッジも再評価する
     this._updateDrawerBtnBadge();
   }
 
   /**
-   * 指定セッションのウィンドウ一覧をロードする。
-   * @param {string} sessionName
-   * @returns {Promise<Array>}
-   */
-  async _loadWindows(sessionName) {
-    if (this._windowsCache[sessionName]) {
-      return this._windowsCache[sessionName];
-    }
-    const windows = await listWindows(sessionName) || [];
-    this._windowsCache[sessionName] = windows;
-    return windows;
-  }
-
-  /**
-   * セッションのモード情報をロード（キャッシュ済みならそれを返す）。
-   * @param {string} sessionName - セッション名
-   * @returns {Promise<{claude_code: boolean, claude_window: number}|null>}
-   */
-  async _loadMode(sessionName) {
-    if (this._modeCache[sessionName]) {
-      return this._modeCache[sessionName];
-    }
-    try {
-      const mode = await getSessionMode(sessionName);
-      this._modeCache[sessionName] = mode;
-      return mode;
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * セッションが Claude Code モードかどうかを返す（キャッシュベース）。
-   * @param {string} sessionName - セッション名
-   * @returns {boolean}
-   */
-  _isClaudeCodeMode(sessionName) {
-    const mode = this._modeCache[sessionName];
-    return mode ? mode.claude_code : false;
-  }
-
-  /**
-   * 展開中のセッションのウィンドウ一覧を定期的にリフレッシュするポーリングを開始する。
-   * ウィンドウ名（プロセス名）の変化を半リアルタイムで反映する。
+   * 展開中のプロジェクトのセッション一覧を定期的にリフレッシュするポーリングを開始する。
    */
   _startRefreshPolling() {
     this._stopRefreshPolling();
-    this._refreshTimer = window.setInterval(() => {
-      this._refreshExpandedWindows();
+    this._refreshTimer = window.setInterval(async () => {
+      if (!this._visible) return;
+      try {
+        const [sessions, repos] = await Promise.all([listSessions(), listGhqRepos()]);
+        const oldNames = new Set(this._sessions.map(s => s.name));
+        const newNames = new Set((sessions || []).map(s => s.name));
+        // Only re-render if sessions changed
+        if (oldNames.size !== newNames.size || [...oldNames].some(n => !newNames.has(n))) {
+          this._sessions = sessions || [];
+          this._groupSessionsByProject(this._sessions, repos || []);
+          this._renderContent();
+        }
+      } catch {
+        // ネットワークエラー等は無視（次回ポーリングで再試行）
+      }
     }, 5000);
   }
 
   /**
-   * ウィンドウ一覧のポーリングを停止する。
+   * ポーリングを停止する。
    */
   _stopRefreshPolling() {
     if (this._refreshTimer !== null) {
       window.clearInterval(this._refreshTimer);
       this._refreshTimer = null;
     }
-  }
-
-  /**
-   * 展開中の各セッションのウィンドウ一覧を API から再取得し、
-   * 変更があれば再描画する。
-   */
-  async _refreshExpandedWindows() {
-    if (!this._visible) return;
-    if (this._expandedSessions.size === 0) return;
-
-    let changed = false;
-
-    for (const sessionName of this._expandedSessions) {
-      try {
-        const freshWindows = await listWindows(sessionName) || [];
-        const cached = this._windowsCache[sessionName] || [];
-
-        // ウィンドウ数やプロパティが変わったかを簡易比較
-        if (this._windowsChanged(cached, freshWindows)) {
-          this._windowsCache[sessionName] = freshWindows;
-          changed = true;
-        }
-      } catch (err) {
-        // ネットワークエラー等は無視（次回ポーリングで再試行）
-      }
-    }
-
-    if (changed) {
-      this._renderContent();
-    }
-  }
-
-  /**
-   * 2つのウィンドウ配列が異なるかを比較する。
-   * @param {Array} oldWindows
-   * @param {Array} newWindows
-   * @returns {boolean} 変更があれば true
-   */
-  _windowsChanged(oldWindows, newWindows) {
-    if (oldWindows.length !== newWindows.length) return true;
-    for (let i = 0; i < oldWindows.length; i++) {
-      const o = oldWindows[i];
-      const n = newWindows[i];
-      if (o.index !== n.index || o.name !== n.name || o.active !== n.active) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /**
-   * セッションをソートして返す。元の配列は変更しない。
-   * @returns {Array}
-   */
-  _getSortedSessions() {
-    const sessions = [...this._sessions];
-    if (this._sortOrder === 'name') {
-      sessions.sort((a, b) => a.name.localeCompare(b.name));
-    } else {
-      // activity 降順（新しい順）
-      sessions.sort((a, b) => new Date(b.activity) - new Date(a.activity));
-    }
-    return sessions;
   }
 
   /**
@@ -609,27 +524,669 @@ export class Drawer {
   }
 
   /**
+   * プロジェクトをソートして返す。
+   * @returns {Array<[string, Object]>}
+   */
+  _getSortedProjects() {
+    const entries = [...this._projects.entries()];
+    if (this._sortOrder === 'name') {
+      entries.sort((a, b) => a[0].localeCompare(b[0]));
+    } else {
+      // activity: sort by most recent session in each project
+      entries.sort((a, b) => {
+        const aMax = Math.max(...a[1].sessions.map(s => new Date(s.activity)));
+        const bMax = Math.max(...b[1].sessions.map(s => new Date(s.activity)));
+        return bMax - aMax;
+      });
+    }
+    return entries;
+  }
+
+  /**
    * Drawer の内容を描画する。
    */
   _renderContent() {
     this._content.innerHTML = '';
 
-    if (this._sessions.length === 0) {
-      const emptyEl = document.createElement('div');
-      emptyEl.className = 'drawer-empty';
-      emptyEl.textContent = 'No sessions';
-      this._content.appendChild(emptyEl);
-    } else {
-      const sorted = this._getSortedSessions();
-      for (const session of sorted) {
-        const sessionEl = this._createSessionElement(session);
-        this._content.appendChild(sessionEl);
-      }
+    // 1. プロジェクト一覧
+    const sortedProjects = this._getSortedProjects();
+    for (const [name, project] of sortedProjects) {
+      this._content.appendChild(this._createProjectElement(name, project));
     }
 
-    // [New Session] ボタンを常に表示
-    const newSessionBtn = this._createNewSessionButton();
-    this._content.appendChild(newSessionBtn);
+    // 2. Other Sessions
+    if (this._otherSessions.length > 0) {
+      this._content.appendChild(this._createOtherSessionsSection());
+    }
+
+    // 3. + New Session
+    this._content.appendChild(this._createNewSessionButton());
+  }
+
+  /**
+   * プロジェクト要素を作成する。
+   * @param {string} projectName - プロジェクト名
+   * @param {Object} project - プロジェクトデータ
+   * @returns {HTMLElement}
+   */
+  _createProjectElement(projectName, project) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'drawer-project';
+
+    const isExpanded = this._expandedProjects.has(projectName);
+    const { repo: currentRepo } = this._currentSession ? parseSessionName(this._currentSession) : { repo: '' };
+    const isCurrent = currentRepo === projectName;
+
+    // Project header
+    const header = document.createElement('div');
+    header.className = 'drawer-session-header';
+    if (isCurrent) header.classList.add('drawer-session-header--current');
+
+    const arrow = document.createElement('span');
+    arrow.className = 'drawer-session-arrow';
+    arrow.textContent = isExpanded ? '\u25BC' : '\u25B6';
+
+    const name = document.createElement('span');
+    name.className = 'drawer-session-name';
+    name.textContent = projectName;
+
+    // Notification badge
+    const badge = document.createElement('span');
+    badge.className = 'drawer-session-badge';
+    if (project.sessions.some(s => this._hasSessionNotification(s.name))) {
+      badge.classList.add('drawer-session-badge--active');
+    }
+
+    header.appendChild(arrow);
+    header.appendChild(name);
+    header.appendChild(badge);
+
+    // Long press for delete
+    this._setupLongPress(header, project.defaultSession || project.sessions[0]);
+
+    // Click to expand/collapse + auto-connect
+    header.addEventListener('click', async () => {
+      if (this._longPressDetected) {
+        this._longPressDetected = false;
+        return;
+      }
+
+      if (this._expandedProjects.has(projectName)) {
+        this._expandedProjects.delete(projectName);
+        this._renderContent();
+      } else {
+        this._expandedProjects.clear();
+        this._expandedProjects.add(projectName);
+        this._renderContent();
+
+        // Auto-connect to default branch session if not already connected
+        if (currentRepo !== projectName && project.defaultSession) {
+          this._onSelectSession(project.defaultSession.name, 0);
+          this._currentSession = project.defaultSession.name;
+          this._currentWindowIndex = 0;
+          this._renderContent();
+        }
+      }
+    });
+
+    wrapper.appendChild(header);
+
+    // Expanded: show branches + Open Branch button
+    if (isExpanded) {
+      const branchList = document.createElement('div');
+      branchList.className = 'drawer-windows'; // reuse existing style
+
+      // Sort: default first, then alphabetical
+      const sortedSessions = [...project.sessions].sort((a, b) => {
+        if (a.isDefault) return -1;
+        if (b.isDefault) return 1;
+        return a.branch.localeCompare(b.branch);
+      });
+
+      for (const branchSession of sortedSessions) {
+        branchList.appendChild(this._createBranchElement(projectName, branchSession));
+      }
+
+      // "Open Branch..." button
+      branchList.appendChild(this._createOpenBranchButton(projectName));
+
+      wrapper.appendChild(branchList);
+    }
+
+    return wrapper;
+  }
+
+  /**
+   * ブランチ要素を作成する。
+   * @param {string} projectName - プロジェクト名
+   * @param {Object} branchSession - ブランチセッション情報
+   * @returns {HTMLElement}
+   */
+  _createBranchElement(projectName, branchSession) {
+    const el = document.createElement('div');
+    el.className = 'drawer-branch-item';
+
+    const isCurrent = branchSession.name === this._currentSession;
+    if (isCurrent) el.classList.add('drawer-branch-item--current');
+
+    // Git branch icon
+    const iconEl = document.createElement('span');
+    iconEl.className = 'drawer-window-icon';
+    iconEl.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="4" cy="3" r="1.5" stroke="currentColor" stroke-width="1.2"/><circle cx="4" cy="11" r="1.5" stroke="currentColor" stroke-width="1.2"/><circle cx="10" cy="5" r="1.5" stroke="currentColor" stroke-width="1.2"/><line x1="4" y1="4.5" x2="4" y2="9.5" stroke="currentColor" stroke-width="1.2"/><path d="M4 6 Q4 5 10 5" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>';
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'drawer-window-name';
+    nameEl.textContent = branchSession.branch;
+
+    const indicator = document.createElement('span');
+    indicator.className = 'drawer-window-active';
+    if (isCurrent) indicator.textContent = '\u25CF';
+
+    // Notification badge
+    const badge = document.createElement('span');
+    badge.className = 'drawer-window-badge';
+    if (this._hasSessionNotification(branchSession.name)) {
+      badge.classList.add('drawer-window-badge--active');
+    }
+
+    el.appendChild(iconEl);
+    el.appendChild(nameEl);
+    el.appendChild(badge);
+    el.appendChild(indicator);
+
+    // Long press for delete (worktree session)
+    this._setupBranchLongPress(el, projectName, branchSession);
+
+    // Click to connect
+    el.addEventListener('click', () => {
+      if (this._longPressDetected) {
+        this._longPressDetected = false;
+        return;
+      }
+      this._onSelectSession(branchSession.name, 0);
+      this._currentSession = branchSession.name;
+      this._currentWindowIndex = 0;
+      this._renderContent();
+      if (!this._pinned) this.close();
+    });
+
+    return el;
+  }
+
+  /**
+   * ブランチ要素に長押し検出を設定する。
+   * @param {HTMLElement} el - ブランチ要素
+   * @param {string} projectName - プロジェクト名
+   * @param {Object} branchSession - ブランチセッション情報
+   */
+  _setupBranchLongPress(el, projectName, branchSession) {
+    let startX = 0;
+    let startY = 0;
+
+    const showDelete = () => {
+      this._showBranchDeleteConfirmation(projectName, branchSession);
+    };
+
+    el.addEventListener('touchstart', (e) => {
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      this._longPressDetected = false;
+      this._longPressTimer = window.setTimeout(() => {
+        this._longPressDetected = true;
+        showDelete();
+      }, 500);
+    }, { passive: true });
+
+    el.addEventListener('touchmove', (e) => {
+      if (this._longPressTimer !== null) {
+        const moveX = e.touches[0].clientX;
+        const moveY = e.touches[0].clientY;
+        if (Math.abs(moveX - startX) > 10 || Math.abs(moveY - startY) > 10) {
+          this._clearLongPressTimer();
+        }
+      }
+    }, { passive: true });
+
+    el.addEventListener('touchend', () => this._clearLongPressTimer(), { passive: true });
+    el.addEventListener('touchcancel', () => this._clearLongPressTimer(), { passive: true });
+
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showDelete();
+    });
+  }
+
+  /**
+   * ブランチ削除確認モーダルを表示する。
+   * @param {string} projectName - プロジェクト名
+   * @param {Object} branchSession - ブランチセッション情報
+   */
+  _showBranchDeleteConfirmation(projectName, branchSession) {
+    const existing = document.querySelector('.drawer-delete-modal-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'drawer-delete-modal-overlay';
+
+    const modal = document.createElement('div');
+    modal.className = 'drawer-delete-modal';
+
+    const message = document.createElement('div');
+    message.className = 'drawer-delete-modal-message';
+    message.textContent = branchSession.isDefault
+      ? `Delete session "${branchSession.name}"?`
+      : `Delete branch session "${branchSession.branch}"?`;
+
+    const actions = document.createElement('div');
+    actions.className = 'drawer-delete-modal-actions';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'drawer-delete-modal-cancel';
+    cancelBtn.textContent = 'Cancel';
+
+    const closeModal = () => {
+      overlay.classList.remove('drawer-delete-modal-overlay--visible');
+      setTimeout(() => overlay.remove(), 200);
+    };
+
+    cancelBtn.addEventListener('click', closeModal);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
+
+    // For non-default branches, offer "Delete + Remove Worktree"
+    if (!branchSession.isDefault) {
+      const deleteKeepBtn = document.createElement('button');
+      deleteKeepBtn.className = 'drawer-delete-modal-delete';
+      deleteKeepBtn.textContent = 'Kill Session';
+      deleteKeepBtn.style.background = '#666';
+
+      const deleteRemoveBtn = document.createElement('button');
+      deleteRemoveBtn.className = 'drawer-delete-modal-delete';
+      deleteRemoveBtn.textContent = 'Kill + Remove';
+
+      actions.appendChild(cancelBtn);
+      actions.appendChild(deleteKeepBtn);
+      actions.appendChild(deleteRemoveBtn);
+
+      const doDelete = async (removeWorktree) => {
+        deleteKeepBtn.disabled = true;
+        deleteRemoveBtn.disabled = true;
+        try {
+          await deleteProjectWorktree(projectName, branchSession.branch, removeWorktree);
+          closeModal();
+          const [sessions, repos] = await Promise.all([listSessions(), listGhqRepos()]);
+          this._sessions = sessions || [];
+          this._groupSessionsByProject(this._sessions, repos || []);
+          this._renderContent();
+          if (branchSession.name === this._currentSession) {
+            await this._transitionToRecentSession();
+          }
+        } catch (err) {
+          closeModal();
+          this._showDeleteError(`Failed to delete: ${err.message}`);
+        }
+      };
+
+      deleteKeepBtn.addEventListener('click', () => doDelete(false));
+      deleteRemoveBtn.addEventListener('click', () => doDelete(true));
+    } else {
+      // Default branch: just kill session (same as before)
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'drawer-delete-modal-delete';
+      deleteBtn.textContent = 'Delete';
+      actions.appendChild(cancelBtn);
+      actions.appendChild(deleteBtn);
+
+      deleteBtn.addEventListener('click', async () => {
+        deleteBtn.disabled = true;
+        deleteBtn.textContent = 'Deleting...';
+        try {
+          await deleteSession(branchSession.name);
+          closeModal();
+          const [sessions, repos] = await Promise.all([listSessions(), listGhqRepos()]);
+          this._sessions = sessions || [];
+          this._groupSessionsByProject(this._sessions, repos || []);
+          this._renderContent();
+          if (branchSession.name === this._currentSession) {
+            await this._transitionToRecentSession();
+          }
+        } catch (err) {
+          closeModal();
+          this._showDeleteError(`Failed to delete session: ${err.message}`);
+        }
+      });
+    }
+
+    modal.appendChild(message);
+    modal.appendChild(actions);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('drawer-delete-modal-overlay--visible'));
+  }
+
+  /**
+   * "Open Branch..." ボタンを作成する。
+   * @param {string} projectName - プロジェクト名
+   * @returns {HTMLElement}
+   */
+  _createOpenBranchButton(projectName) {
+    const btn = document.createElement('div');
+    btn.className = 'drawer-open-branch-btn';
+    btn.textContent = 'Open Branch...';
+
+    btn.addEventListener('click', () => {
+      this._showBranchPicker(projectName, btn);
+    });
+
+    return btn;
+  }
+
+  /**
+   * ブランチピッカーを表示する。
+   * @param {string} projectName - プロジェクト名
+   * @param {HTMLElement} triggerBtn - トリガーボタン
+   */
+  async _showBranchPicker(projectName, triggerBtn) {
+    triggerBtn.textContent = 'Loading...';
+
+    try {
+      const [branches, worktrees] = await Promise.all([
+        listProjectBranches(projectName),
+        listProjectWorktrees(projectName),
+      ]);
+
+      // Filter: exclude branches that already have sessions
+      const existingBranches = new Set(worktrees.filter(w => w.has_session).map(w => w.branch));
+      const availableBranches = (branches || []).filter(b => !existingBranches.has(b.name));
+
+      this._showBranchPickerUI(projectName, availableBranches, triggerBtn);
+    } catch (err) {
+      console.error('Failed to load branches:', err);
+      triggerBtn.textContent = 'Open Branch...';
+      this._showDeleteError(`Failed to load branches: ${err.message}`);
+    }
+  }
+
+  /**
+   * ブランチピッカー UI を表示する。
+   * @param {string} projectName - プロジェクト名
+   * @param {Array} branches - 利用可能なブランチ一覧
+   * @param {HTMLElement} triggerBtn - トリガーボタン
+   */
+  _showBranchPickerUI(projectName, branches, triggerBtn) {
+    // Replace the triggerBtn's parent with the picker
+    const parent = triggerBtn.parentElement;
+    triggerBtn.style.display = 'none';
+
+    const picker = document.createElement('div');
+    picker.className = 'drawer-branch-picker';
+
+    // Filter input
+    const filterInput = document.createElement('input');
+    filterInput.type = 'text';
+    filterInput.className = 'drawer-project-picker-filter';
+    filterInput.placeholder = 'Filter branches...';
+    filterInput.autocomplete = 'off';
+    filterInput.autocapitalize = 'off';
+    filterInput.spellcheck = false;
+    picker.appendChild(filterInput);
+
+    // Branch list
+    const listEl = document.createElement('div');
+    listEl.className = 'drawer-project-picker-list';
+    picker.appendChild(listEl);
+
+    const renderList = (filter) => {
+      listEl.innerHTML = '';
+      const filtered = filter
+        ? branches.filter(b => b.name.toLowerCase().includes(filter))
+        : branches;
+
+      if (filtered.length === 0) {
+        const emptyEl = document.createElement('div');
+        emptyEl.className = 'drawer-project-picker-empty';
+        emptyEl.textContent = filter ? 'No matching branches' : 'No available branches';
+        listEl.appendChild(emptyEl);
+      } else {
+        for (const branch of filtered) {
+          const item = document.createElement('div');
+          item.className = 'drawer-project-picker-item';
+
+          const nameEl = document.createElement('div');
+          nameEl.className = 'drawer-project-picker-item-name';
+          nameEl.textContent = branch.name;
+
+          if (branch.remote) {
+            const remoteTag = document.createElement('span');
+            remoteTag.className = 'drawer-branch-remote-tag';
+            remoteTag.textContent = 'remote';
+            nameEl.appendChild(remoteTag);
+          }
+
+          item.appendChild(nameEl);
+
+          item.addEventListener('click', () => {
+            this._createWorktreeAndConnect(projectName, branch.name, false, picker, triggerBtn);
+          });
+          listEl.appendChild(item);
+        }
+      }
+    };
+
+    renderList('');
+    filterInput.addEventListener('input', () => renderList(filterInput.value.trim().toLowerCase()));
+    filterInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        picker.remove();
+        triggerBtn.style.display = '';
+        triggerBtn.textContent = 'Open Branch...';
+      }
+    });
+
+    // Create new branch button
+    const createBtn = document.createElement('div');
+    createBtn.className = 'drawer-project-picker-custom';
+    createBtn.textContent = 'Create new branch...';
+    createBtn.addEventListener('click', () => {
+      this._showCreateBranchInput(projectName, picker, triggerBtn);
+    });
+    picker.appendChild(createBtn);
+
+    // Cancel button
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'drawer-new-session-cancel drawer-project-picker-cancel';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => {
+      picker.remove();
+      triggerBtn.style.display = '';
+      triggerBtn.textContent = 'Open Branch...';
+    });
+    picker.appendChild(cancelBtn);
+
+    parent.appendChild(picker);
+    filterInput.focus();
+  }
+
+  /**
+   * 新規ブランチ作成入力 UI を表示する。
+   * @param {string} projectName - プロジェクト名
+   * @param {HTMLElement} picker - ピッカーコンテナ
+   * @param {HTMLElement} triggerBtn - トリガーボタン
+   */
+  _showCreateBranchInput(projectName, picker, triggerBtn) {
+    picker.innerHTML = '';
+
+    const title = document.createElement('div');
+    title.className = 'drawer-project-picker-clone-title';
+    title.textContent = 'Create New Branch';
+    picker.appendChild(title);
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'drawer-project-picker-filter';
+    input.placeholder = 'Branch name (e.g. feature/login)';
+    input.autocomplete = 'off';
+    input.autocapitalize = 'off';
+    input.spellcheck = false;
+    picker.appendChild(input);
+
+    const actions = document.createElement('div');
+    actions.className = 'drawer-project-picker-clone-actions';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'drawer-new-session-cancel';
+    cancelBtn.textContent = 'Cancel';
+
+    const createBtn = document.createElement('button');
+    createBtn.className = 'drawer-new-session-create';
+    createBtn.textContent = 'Create';
+
+    actions.appendChild(cancelBtn);
+    actions.appendChild(createBtn);
+    picker.appendChild(actions);
+
+    input.focus();
+
+    const doCreate = () => {
+      const branchName = input.value.trim();
+      if (!branchName) return;
+      this._createWorktreeAndConnect(projectName, branchName, true, picker, triggerBtn);
+    };
+
+    createBtn.addEventListener('click', doCreate);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); doCreate(); }
+      else if (e.key === 'Escape') {
+        e.preventDefault();
+        picker.remove();
+        triggerBtn.style.display = '';
+        triggerBtn.textContent = 'Open Branch...';
+      }
+    });
+    cancelBtn.addEventListener('click', () => {
+      picker.remove();
+      triggerBtn.style.display = '';
+      triggerBtn.textContent = 'Open Branch...';
+    });
+  }
+
+  /**
+   * Worktree を作成してセッションに接続する。
+   * @param {string} projectName - プロジェクト名
+   * @param {string} branch - ブランチ名
+   * @param {boolean} createBranch - 新規ブランチを作成するか
+   * @param {HTMLElement} picker - ピッカーコンテナ
+   * @param {HTMLElement} triggerBtn - トリガーボタン
+   */
+  async _createWorktreeAndConnect(projectName, branch, createBranch, picker, triggerBtn) {
+    if (this._creating) return;
+    this._creating = true;
+
+    try {
+      await createProjectWorktree(projectName, branch, createBranch);
+      this._creating = false;
+
+      picker.remove();
+      triggerBtn.style.display = '';
+      triggerBtn.textContent = 'Open Branch...';
+
+      const sessionName = projectName + '@' + branch;
+      const [sessions, repos] = await Promise.all([listSessions(), listGhqRepos()]);
+      this._sessions = sessions || [];
+      this._groupSessionsByProject(this._sessions, repos || []);
+      this._renderContent();
+
+      if (this._onCreateSession) {
+        this._onCreateSession(sessionName);
+        if (!this._pinned) this.close();
+      }
+    } catch (err) {
+      this._creating = false;
+      console.error('Failed to create worktree session:', err);
+      this._showDeleteError(`Failed to create branch: ${err.message}`);
+      triggerBtn.textContent = 'Open Branch...';
+    }
+  }
+
+  /**
+   * Other Sessions セクションを作成する。
+   * @returns {HTMLElement}
+   */
+  _createOtherSessionsSection() {
+    const section = document.createElement('div');
+    section.className = 'drawer-other-sessions';
+
+    const isExpanded = this._expandedProjects.has('__other__');
+
+    const header = document.createElement('div');
+    header.className = 'drawer-session-header drawer-other-sessions-header';
+
+    const arrow = document.createElement('span');
+    arrow.className = 'drawer-session-arrow';
+    arrow.textContent = isExpanded ? '\u25BC' : '\u25B6';
+
+    const name = document.createElement('span');
+    name.className = 'drawer-session-name';
+    name.textContent = 'Other Sessions';
+
+    header.appendChild(arrow);
+    header.appendChild(name);
+
+    header.addEventListener('click', () => {
+      if (this._expandedProjects.has('__other__')) {
+        this._expandedProjects.delete('__other__');
+      } else {
+        this._expandedProjects.add('__other__');
+      }
+      this._renderContent();
+    });
+
+    section.appendChild(header);
+
+    if (isExpanded) {
+      const list = document.createElement('div');
+      list.className = 'drawer-windows';
+
+      for (const session of this._otherSessions) {
+        const el = document.createElement('div');
+        el.className = 'drawer-branch-item';
+        if (session.name === this._currentSession) el.classList.add('drawer-branch-item--current');
+
+        const iconEl = document.createElement('span');
+        iconEl.className = 'drawer-window-icon';
+        iconEl.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><polyline points="2,4 6,7 2,10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><line x1="7" y1="10" x2="12" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+
+        const nameEl = document.createElement('span');
+        nameEl.className = 'drawer-window-name';
+        nameEl.textContent = session.name;
+
+        const indicator = document.createElement('span');
+        indicator.className = 'drawer-window-active';
+        if (session.name === this._currentSession) indicator.textContent = '\u25CF';
+
+        el.appendChild(iconEl);
+        el.appendChild(nameEl);
+        el.appendChild(indicator);
+
+        // Long press for delete
+        this._setupLongPress(el, session);
+
+        el.addEventListener('click', () => {
+          if (this._longPressDetected) { this._longPressDetected = false; return; }
+          this._onSelectSession(session.name, 0);
+          this._currentSession = session.name;
+          this._currentWindowIndex = 0;
+          this._renderContent();
+          if (!this._pinned) this.close();
+        });
+
+        list.appendChild(el);
+      }
+
+      section.appendChild(list);
+    }
+
+    return section;
   }
 
   /**
@@ -797,6 +1354,9 @@ export class Drawer {
       this._hideProjectPicker(container, btn, picker);
     });
     picker.appendChild(cancelBtn);
+
+    // フォーカス
+    filterInput.focus();
   }
 
   /**
@@ -908,6 +1468,8 @@ export class Drawer {
 
       // セッション一覧を再取得
       await this._loadSessions();
+      const repos = await listGhqRepos() || [];
+      this._groupSessionsByProject(this._sessions, repos);
       this._renderContent();
 
       // コールバックで新セッションに自動接続
@@ -1255,6 +1817,8 @@ export class Drawer {
 
       // セッション一覧を再取得
       await this._loadSessions();
+      const repos = await listGhqRepos() || [];
+      this._groupSessionsByProject(this._sessions, repos);
       this._renderContent();
 
       // コールバックで新セッションに自動接続
@@ -1279,149 +1843,6 @@ export class Drawer {
   _showInlineError(errorEl, message) {
     errorEl.textContent = message;
     errorEl.style.display = 'block';
-  }
-
-  /**
-   * セッション要素を作成する。
-   * @param {Object} session - セッション情報
-   * @returns {HTMLElement}
-   */
-  _createSessionElement(session) {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'drawer-session';
-
-    const isExpanded = this._expandedSessions.has(session.name);
-    const isCurrent = session.name === this._currentSession;
-
-    // セッションヘッダー
-    const header = document.createElement('div');
-    header.className = 'drawer-session-header';
-    if (isCurrent) {
-      header.classList.add('drawer-session-header--current');
-    }
-
-    const arrow = document.createElement('span');
-    arrow.className = 'drawer-session-arrow';
-    arrow.textContent = isExpanded ? '\u25BC' : '\u25B6';
-
-    const name = document.createElement('span');
-    name.className = 'drawer-session-name';
-    name.textContent = session.name;
-
-    // セッションレベルの通知バッジ（折りたたみ時に表示）
-    const sessionBadge = document.createElement('span');
-    sessionBadge.className = 'drawer-session-badge';
-    if (this._hasSessionNotification(session.name)) {
-      sessionBadge.classList.add('drawer-session-badge--active');
-    }
-
-    header.appendChild(arrow);
-    header.appendChild(name);
-    header.appendChild(sessionBadge);
-
-    // 長押しで削除オプション表示
-    this._setupLongPress(header, session);
-
-    // セッションヘッダーのクリックで展開/折りたたみ
-    header.addEventListener('click', async (e) => {
-      // 長押し後のクリックイベントは無視
-      if (this._longPressDetected) {
-        this._longPressDetected = false;
-        return;
-      }
-
-      if (this._expandedSessions.has(session.name)) {
-        this._expandedSessions.delete(session.name);
-        this._renderContent();
-      } else {
-        // 他のセッションを閉じて、このセッションだけ展開（アコーディオン）
-        this._expandedSessions.clear();
-        this._expandedSessions.add(session.name);
-        // ウィンドウ一覧とモード情報をロード
-        let windows = [];
-        try {
-          [windows] = await Promise.all([
-            this._loadWindows(session.name),
-            this._loadMode(session.name),
-          ]);
-        } catch (err) {
-          console.error('Failed to load windows:', err);
-        }
-        this._renderContent();
-
-        // 別セッションの場合: アクティブなウィンドウに自動遷移（Drawer は開いたまま）
-        if (session.name !== this._currentSession && windows && windows.length > 0) {
-          const activeWindow = windows.find((w) => w.active) || windows[0];
-          this._onSelectSession(session.name, activeWindow.index);
-          this._currentSession = session.name;
-          this._currentWindowIndex = activeWindow.index;
-          // ウィンドウ一覧の current 表示を更新するため再描画
-          this._renderContent();
-        }
-      }
-    });
-
-    wrapper.appendChild(header);
-
-    // 展開中の場合、ウィンドウ一覧を表示
-    if (isExpanded) {
-      const windowsList = document.createElement('div');
-      windowsList.className = 'drawer-windows';
-
-      const windows = this._windowsCache[session.name] || [];
-
-      if (windows.length === 0) {
-        const loading = document.createElement('div');
-        loading.className = 'drawer-window-loading';
-        loading.textContent = 'Loading windows...';
-        windowsList.appendChild(loading);
-
-        // 非同期でウィンドウ取得してから再描画
-        this._loadWindows(session.name).then(() => {
-          this._renderContent();
-        }).catch((err) => {
-          console.error('Failed to load windows:', err);
-        });
-      } else {
-        // 仮想アイテム: Files, Git（実ウィンドウの前に挿入）
-        const filesItem = this._createVirtualItem(
-          session.name,
-          'filebrowser',
-          'Files',
-          '<path d="M1.5 3.5h4l1.5 1.5h5.5v6.5h-11z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>',
-        );
-        windowsList.appendChild(filesItem);
-
-        const gitItem = this._createVirtualItem(
-          session.name,
-          'gitbrowser',
-          'Git',
-          '<circle cx="4" cy="4" r="1.5" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="4" r="1.5" stroke="currentColor" stroke-width="1.3"/><circle cx="7" cy="11" r="1.5" stroke="currentColor" stroke-width="1.3"/><line x1="4" y1="5.5" x2="7" y2="9.5" stroke="currentColor" stroke-width="1.3"/><line x1="10" y1="5.5" x2="7" y2="9.5" stroke="currentColor" stroke-width="1.3"/>',
-        );
-        windowsList.appendChild(gitItem);
-
-        // Claude Code モードの場合、claude ウィンドウを先頭にソート
-        let sortedWindows = windows;
-        if (this._isClaudeCodeMode(session.name)) {
-          sortedWindows = [...windows].sort((a, b) =>
-            a.name === 'claude' ? -1 : b.name === 'claude' ? 1 : 0
-          );
-        }
-
-        for (const win of sortedWindows) {
-          const winEl = this._createWindowElement(session.name, win, windows.length);
-          windowsList.appendChild(winEl);
-        }
-
-        // [+] 新規ウィンドウ作成ボタン
-        const newWinBtn = this._createNewWindowButton(session.name);
-        windowsList.appendChild(newWinBtn);
-      }
-
-      wrapper.appendChild(windowsList);
-    }
-
-    return wrapper;
   }
 
   /**
@@ -1552,7 +1973,9 @@ export class Drawer {
 
         // セッション一覧を再取得して描画
         await this._loadSessions();
-        this._expandedSessions.delete(session.name);
+        const repos = await listGhqRepos() || [];
+        this._groupSessionsByProject(this._sessions, repos);
+        this._expandedProjects.delete(session.name);
         this._renderContent();
 
         if (wasActive) {
@@ -1587,24 +2010,10 @@ export class Drawer {
     );
     const target = sorted[0];
 
-    // ウィンドウ一覧を取得し、active なウィンドウに遷移
-    try {
-      const windows = await this._loadWindows(target.name);
-      if (windows.length > 0) {
-        const activeWindow = windows.find((w) => w.active) || windows[0];
-        this._currentSession = target.name;
-        this._currentWindowIndex = activeWindow.index;
-        this._onSelectSession(target.name, activeWindow.index);
-        this._renderContent();
-      } else if (this._onDeleteSession) {
-        this._onDeleteSession();
-      }
-    } catch (err) {
-      console.error('Failed to transition to recent session:', err);
-      if (this._onDeleteSession) {
-        this._onDeleteSession();
-      }
-    }
+    this._currentSession = target.name;
+    this._currentWindowIndex = 0;
+    this._onSelectSession(target.name, 0);
+    this._renderContent();
   }
 
   /**
@@ -1638,713 +2047,6 @@ export class Drawer {
   }
 
   /**
-   * 仮想アイテム（Files / Git）を作成する。
-   * @param {string} sessionName - セッション名
-   * @param {'filebrowser'|'gitbrowser'} mode - ビューモード
-   * @param {string} label - 表示ラベル
-   * @param {string} svgContent - SVG の内部コンテンツ
-   * @returns {HTMLElement}
-   */
-  _createVirtualItem(sessionName, mode, label, svgContent) {
-    const el = document.createElement('div');
-    el.className = 'drawer-virtual-item';
-
-    const isCurrent = sessionName === this._currentSession &&
-                      this._currentViewMode === mode;
-    if (isCurrent) {
-      el.classList.add('drawer-virtual-item--current');
-    }
-
-    const icon = document.createElement('span');
-    icon.className = 'drawer-virtual-item-icon';
-    icon.innerHTML = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">${svgContent}</svg>`;
-
-    const nameEl = document.createElement('span');
-    nameEl.className = 'drawer-virtual-item-name';
-    nameEl.textContent = label;
-
-    el.appendChild(icon);
-    el.appendChild(nameEl);
-
-    el.addEventListener('click', () => {
-      if (this._longPressDetected) {
-        this._longPressDetected = false;
-        return;
-      }
-      if (mode === 'filebrowser' && this._onSelectFiles) {
-        this._onSelectFiles(sessionName);
-      } else if (mode === 'gitbrowser' && this._onSelectGit) {
-        this._onSelectGit(sessionName);
-      }
-      this._currentViewMode = mode;
-      this._currentSession = sessionName;
-      this._renderContent();
-      this.close();
-    });
-
-    return el;
-  }
-
-  /**
-   * ウィンドウ要素を作成する。
-   * @param {string} sessionName - セッション名
-   * @param {Object} win - ウィンドウ情報
-   * @param {number} windowCount - セッション内のウィンドウ総数
-   * @returns {HTMLElement}
-   */
-  _createWindowElement(sessionName, win, windowCount) {
-    const el = document.createElement('div');
-    el.className = 'drawer-window-item';
-
-    const isCurrent = sessionName === this._currentSession &&
-                      win.index === this._currentWindowIndex &&
-                      this._currentViewMode === 'terminal';
-    if (isCurrent) {
-      el.classList.add('drawer-window-item--current');
-    }
-
-    // ウィンドウアイコン（claude ウィンドウは Claude スパークル、それ以外はターミナル）
-    const isClaude = this._isClaudeCodeMode(sessionName) && win.name === 'claude';
-    const iconEl = document.createElement('span');
-    iconEl.className = 'drawer-window-icon' + (isClaude ? ' drawer-window-icon--claude' : '');
-    if (isClaude) {
-      iconEl.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5"/><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5" transform="rotate(45 12 12)"/><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5" transform="rotate(90 12 12)"/><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5" transform="rotate(135 12 12)"/><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5" transform="rotate(180 12 12)"/><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5" transform="rotate(225 12 12)"/><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5" transform="rotate(270 12 12)"/><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5" transform="rotate(315 12 12)"/></svg>';
-    } else {
-      iconEl.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><polyline points="2,4 6,7 2,10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><line x1="7" y1="10" x2="12" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
-    }
-
-    // claude ウィンドウはインデックス番号を非表示
-    const indexEl = document.createElement('span');
-    indexEl.className = 'drawer-window-index';
-    if (!isClaude) {
-      indexEl.textContent = `${win.index}: `;
-    }
-
-    const nameEl = document.createElement('span');
-    nameEl.className = 'drawer-window-name';
-    nameEl.textContent = win.name;
-
-    // インジケーターは常に配置し、アクティブ/現在でない場合は非表示
-    const indicator = document.createElement('span');
-    indicator.className = 'drawer-window-active';
-    if (win.active || isCurrent) {
-      indicator.textContent = '\u25CF';
-    }
-
-    // 通知バッジ
-    const badge = document.createElement('span');
-    badge.className = 'drawer-window-badge';
-    if (this._hasNotification(sessionName, win.index)) {
-      badge.classList.add('drawer-window-badge--active');
-    }
-
-    el.appendChild(iconEl);
-    el.appendChild(indexEl);
-    el.appendChild(nameEl);
-    el.appendChild(badge);
-    el.appendChild(indicator);
-
-    // 長押しでウィンドウ操作メニュー表示（Rename / Delete）
-    this._setupWindowLongPress(el, sessionName, win, windowCount, indexEl, nameEl);
-
-    // ウィンドウタップでの挙動（名前以外の部分をタップした場合）
-    el.addEventListener('click', () => {
-      // 長押し後のクリックイベントは無視
-      if (this._longPressDetected) {
-        this._longPressDetected = false;
-        return;
-      }
-
-      if (sessionName === this._currentSession) {
-        // 同じセッション内: ウィンドウ切り替え
-        this._onSelectWindow(sessionName, win.index);
-      } else {
-        // 別セッション: セッション切り替え + ウィンドウ選択
-        this._onSelectSession(sessionName, win.index);
-      }
-      this._currentSession = sessionName;
-      this._currentWindowIndex = win.index;
-      this._currentViewMode = 'terminal';
-      this.close();
-    });
-
-    return el;
-  }
-
-  /**
-   * ウィンドウ名のインライン編集を開始する。
-   * ウィンドウ名部分を input に切り替え、Enter で確定、Esc でキャンセルする。
-   * @param {HTMLElement} el - ウィンドウ要素
-   * @param {HTMLElement} indexEl - インデックス表示要素
-   * @param {HTMLElement} nameEl - 名前表示要素
-   * @param {string} sessionName - セッション名
-   * @param {Object} win - ウィンドウ情報
-   */
-  _startWindowRename(el, indexEl, nameEl, sessionName, win) {
-    // 既に編集中なら何もしない
-    if (el.querySelector('.drawer-window-rename-input')) {
-      return;
-    }
-
-    const originalName = win.name;
-
-    // 名前要素を非表示にして input に置き換え
-    nameEl.style.display = 'none';
-
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'drawer-window-rename-input';
-    input.value = originalName;
-    input.autocomplete = 'off';
-    input.autocapitalize = 'off';
-    input.spellcheck = false;
-
-    // indexEl の後に挿入
-    indexEl.after(input);
-    input.focus();
-    input.select();
-
-    const finishRename = async () => {
-      const newName = input.value.trim();
-
-      // 空や変更なしの場合はキャンセル
-      if (!newName || newName === originalName) {
-        input.remove();
-        nameEl.style.display = '';
-        return;
-      }
-
-      input.disabled = true;
-
-      try {
-        const result = await renameWindow(sessionName, win.index, newName);
-
-        // キャッシュを更新
-        if (this._windowsCache[sessionName]) {
-          const cachedWin = this._windowsCache[sessionName].find(w => w.index === win.index);
-          if (cachedWin) {
-            cachedWin.name = result.name;
-          }
-        }
-
-        // 表示を更新
-        input.remove();
-        nameEl.textContent = result.name;
-        nameEl.style.display = '';
-
-        // コールバック呼び出し（ヘッダータイトルの更新用）
-        if (this._onRenameWindow) {
-          this._onRenameWindow(sessionName, win.index, result.name);
-        }
-      } catch (err) {
-        console.error('Failed to rename window:', err);
-        input.remove();
-        nameEl.style.display = '';
-        this._showDeleteError(`Failed to rename window: ${err.message}`);
-      }
-    };
-
-    const cancelRename = () => {
-      input.remove();
-      nameEl.style.display = '';
-    };
-
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        e.stopPropagation();
-        finishRename();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
-        cancelRename();
-      }
-    });
-
-    input.addEventListener('blur', () => {
-      // blur 時にも確定を試みる（名前変更あれば保存、なければキャンセル）
-      finishRename();
-    });
-
-    // input のクリックが親要素に伝播しないようにする
-    input.addEventListener('click', (e) => {
-      e.stopPropagation();
-    });
-  }
-
-  /**
-   * ウィンドウ要素に長押し検出を設定する。
-   * 500ms の長押しで操作メニュー（Rename / Delete）を表示する。
-   * @param {HTMLElement} el - ウィンドウ要素
-   * @param {string} sessionName - セッション名
-   * @param {Object} win - ウィンドウ情報
-   * @param {number} windowCount - セッション内のウィンドウ総数
-   * @param {HTMLElement} indexEl - インデックス表示要素
-   * @param {HTMLElement} nameEl - 名前表示要素
-   */
-  _setupWindowLongPress(el, sessionName, win, windowCount, indexEl, nameEl) {
-    let startX = 0;
-    let startY = 0;
-
-    const showMenu = () => {
-      this._showWindowContextMenu(el, sessionName, win, windowCount, indexEl, nameEl);
-    };
-
-    el.addEventListener('touchstart', (e) => {
-      startX = e.touches[0].clientX;
-      startY = e.touches[0].clientY;
-      this._longPressDetected = false;
-
-      this._longPressTimer = window.setTimeout(() => {
-        this._longPressDetected = true;
-        showMenu();
-      }, 500);
-    }, { passive: true });
-
-    el.addEventListener('touchmove', (e) => {
-      if (this._longPressTimer !== null) {
-        const moveX = e.touches[0].clientX;
-        const moveY = e.touches[0].clientY;
-        if (Math.abs(moveX - startX) > 10 || Math.abs(moveY - startY) > 10) {
-          this._clearLongPressTimer();
-        }
-      }
-    }, { passive: true });
-
-    el.addEventListener('touchend', () => {
-      this._clearLongPressTimer();
-    }, { passive: true });
-
-    el.addEventListener('touchcancel', () => {
-      this._clearLongPressTimer();
-    }, { passive: true });
-
-    // デスクトップ: 右クリック（contextmenu）でも操作メニュー表示
-    el.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      showMenu();
-    });
-  }
-
-  /**
-   * ウィンドウ操作メニュー（Rename / Delete）を表示する。
-   * @param {HTMLElement} el - ウィンドウ要素
-   * @param {string} sessionName - セッション名
-   * @param {Object} win - ウィンドウ情報
-   * @param {number} windowCount - セッション内のウィンドウ総数
-   * @param {HTMLElement} indexEl - インデックス表示要素
-   * @param {HTMLElement} nameEl - 名前表示要素
-   */
-  _showWindowContextMenu(el, sessionName, win, windowCount, indexEl, nameEl) {
-    // 既にメニューが表示中なら除去
-    const existing = document.querySelector('.drawer-context-menu-overlay');
-    if (existing) {
-      existing.remove();
-    }
-
-    const overlay = document.createElement('div');
-    overlay.className = 'drawer-context-menu-overlay';
-
-    const menu = document.createElement('div');
-    menu.className = 'drawer-context-menu';
-
-    const title = document.createElement('div');
-    title.className = 'drawer-context-menu-title';
-    title.textContent = `${win.index}: ${win.name}`;
-    menu.appendChild(title);
-
-    // Claude Code モードの claude ウィンドウは保護
-    const isProtected = this._isClaudeCodeMode(sessionName) && win.name === 'claude';
-
-    if (isProtected) {
-      // Restart: 新しい claude セッションで再起動
-      const restartBtn = document.createElement('button');
-      restartBtn.className = 'drawer-context-menu-item';
-      restartBtn.textContent = 'Restart';
-      restartBtn.addEventListener('click', () => {
-        closeMenu();
-        this._showClaudeRestartModelDialog(sessionName, this._claudePath);
-      });
-      menu.appendChild(restartBtn);
-
-      // Resume: --continue 付きで再起動
-      const resumeBtn = document.createElement('button');
-      resumeBtn.className = 'drawer-context-menu-item';
-      resumeBtn.textContent = 'Resume';
-      resumeBtn.addEventListener('click', () => {
-        closeMenu();
-        this._showClaudeRestartModelDialog(sessionName, `${this._claudePath} --continue`);
-      });
-      menu.appendChild(resumeBtn);
-    } else {
-      // Rename
-      const renameBtn = document.createElement('button');
-      renameBtn.className = 'drawer-context-menu-item';
-      renameBtn.textContent = 'Rename';
-      renameBtn.addEventListener('click', () => {
-        closeMenu();
-        this._startWindowRename(el, indexEl, nameEl, sessionName, win);
-      });
-      menu.appendChild(renameBtn);
-
-      // Delete
-      const deleteBtn = document.createElement('button');
-      deleteBtn.className = 'drawer-context-menu-item drawer-context-menu-item--danger';
-      deleteBtn.textContent = 'Delete';
-      deleteBtn.addEventListener('click', () => {
-        closeMenu();
-        this._doDeleteWindow(sessionName, win, windowCount);
-      });
-      menu.appendChild(deleteBtn);
-    }
-
-    overlay.appendChild(menu);
-    document.body.appendChild(overlay);
-
-    requestAnimationFrame(() => {
-      overlay.classList.add('drawer-context-menu-overlay--visible');
-    });
-
-    const closeMenu = () => {
-      overlay.classList.remove('drawer-context-menu-overlay--visible');
-      setTimeout(() => {
-        overlay.remove();
-      }, 200);
-    };
-
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) {
-        closeMenu();
-      }
-    });
-  }
-
-  /**
-   * ウィンドウを確認なしで即削除する。
-   * @param {string} sessionName - セッション名
-   * @param {Object} win - 削除対象ウィンドウ
-   * @param {number} windowCount - セッション内のウィンドウ総数
-   */
-  async _doDeleteWindow(sessionName, win, windowCount) {
-    try {
-      await deleteWindow(sessionName, win.index);
-
-      // ウィンドウ一覧を再取得
-      delete this._windowsCache[sessionName];
-      const updatedWindows = await this._loadWindows(sessionName);
-
-      if (updatedWindows.length === 0) {
-        // 最後のウィンドウを削除 → セッションも消えるので再取得して遷移
-        await this._loadSessions();
-        this._expandedSessions.delete(sessionName);
-        this._renderContent();
-        await this._transitionToRecentSession();
-        return;
-      }
-
-      // 削除したウィンドウが現在表示中だった場合、前のウィンドウに切り替え
-      if (sessionName === this._currentSession && win.index === this._currentWindowIndex) {
-        // 削除されたインデックスより前のウィンドウに切り替え、なければ最初のウィンドウ
-        const prevWindow = updatedWindows.reduce((prev, w) => {
-          if (w.index < win.index && (prev === null || w.index > prev.index)) {
-            return w;
-          }
-          return prev;
-        }, null) || updatedWindows[0];
-
-        this._currentWindowIndex = prevWindow.index;
-        this._onSelectWindow(sessionName, prevWindow.index);
-      }
-
-      this._renderContent();
-
-      // コールバック呼び出し
-      if (this._onDeleteWindow) {
-        this._onDeleteWindow();
-      }
-    } catch (err) {
-      console.error('Failed to delete window:', err);
-      this._showDeleteError(`Failed to delete window: ${err.message}`);
-    }
-  }
-
-  /**
-   * [+] 新規ウィンドウ作成ボタンを作成する。
-   * クリックするとウィンドウ種別選択ダイアログを表示する。
-   * @param {string} sessionName - セッション名
-   * @returns {HTMLElement}
-   */
-  _createNewWindowButton(sessionName) {
-    const btn = document.createElement('div');
-    btn.className = 'drawer-new-window-btn';
-    btn.textContent = '+ New Window';
-
-    btn.addEventListener('click', () => {
-      this._showNewWindowDialog(sessionName);
-    });
-
-    return btn;
-  }
-
-  /**
-   * 新規ウィンドウ種別選択ダイアログを表示する。
-   * @param {string} sessionName - セッション名
-   */
-  _showNewWindowDialog(sessionName) {
-    // Claude Code モード: shell のみ許可なのでダイアログをスキップ
-    if (this._isClaudeCodeMode(sessionName)) {
-      this._handleCreateWindow(sessionName, '');
-      return;
-    }
-
-    // 既にダイアログが表示中なら除去
-    const existing = document.querySelector('.drawer-context-menu-overlay');
-    if (existing) {
-      existing.remove();
-    }
-
-    const overlay = document.createElement('div');
-    overlay.className = 'drawer-context-menu-overlay';
-
-    const menu = document.createElement('div');
-    menu.className = 'drawer-context-menu';
-
-    const title = document.createElement('div');
-    title.className = 'drawer-context-menu-title';
-    title.textContent = 'New Window';
-    menu.appendChild(title);
-
-    const options = [
-      { label: 'claude · new session', command: this._claudePath, isClaude: true },
-      { label: 'claude · resume', command: `${this._claudePath} --continue`, isClaude: true },
-      { label: 'shell', command: '' },
-    ];
-
-    for (const opt of options) {
-      const btn = document.createElement('button');
-      btn.className = 'drawer-context-menu-item';
-      btn.textContent = opt.label;
-      btn.addEventListener('click', () => {
-        closeDialog();
-        if (opt.isClaude) {
-          this._showModelSelectDialog(sessionName, opt.command);
-        } else {
-          this._handleCreateWindow(sessionName, opt.command);
-        }
-      });
-      menu.appendChild(btn);
-    }
-
-    overlay.appendChild(menu);
-    document.body.appendChild(overlay);
-
-    requestAnimationFrame(() => {
-      overlay.classList.add('drawer-context-menu-overlay--visible');
-    });
-
-    const closeDialog = () => {
-      overlay.classList.remove('drawer-context-menu-overlay--visible');
-      setTimeout(() => {
-        overlay.remove();
-      }, 200);
-    };
-
-    // オーバーレイ外タップでキャンセル
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) {
-        closeDialog();
-      }
-    });
-  }
-
-  /**
-   * Claude モデル選択ダイアログを表示する。
-   * @param {string} sessionName - セッション名
-   * @param {string} baseCommand - ベースコマンド（'claude' or 'claude --continue'）
-   */
-  _showModelSelectDialog(sessionName, baseCommand) {
-    const existing = document.querySelector('.drawer-context-menu-overlay');
-    if (existing) {
-      existing.remove();
-    }
-
-    const overlay = document.createElement('div');
-    overlay.className = 'drawer-context-menu-overlay';
-
-    const menu = document.createElement('div');
-    menu.className = 'drawer-context-menu';
-
-    const title = document.createElement('div');
-    title.className = 'drawer-context-menu-title';
-    title.textContent = 'Select Model';
-    menu.appendChild(title);
-
-    const models = [
-      { label: 'opus', flag: 'opus' },
-      { label: 'sonnet', flag: 'sonnet' },
-      { label: 'haiku', flag: 'haiku' },
-    ];
-
-    for (const model of models) {
-      const btn = document.createElement('button');
-      btn.className = 'drawer-context-menu-item';
-      btn.textContent = model.label;
-      btn.addEventListener('click', () => {
-        closeDialog();
-        const command = `${baseCommand} --model ${model.flag}`;
-        this._handleCreateWindow(sessionName, command);
-      });
-      menu.appendChild(btn);
-    }
-
-    overlay.appendChild(menu);
-    document.body.appendChild(overlay);
-
-    requestAnimationFrame(() => {
-      overlay.classList.add('drawer-context-menu-overlay--visible');
-    });
-
-    const closeDialog = () => {
-      overlay.classList.remove('drawer-context-menu-overlay--visible');
-      setTimeout(() => {
-        overlay.remove();
-      }, 200);
-    };
-
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) {
-        closeDialog();
-      }
-    });
-  }
-
-  /**
-   * claude ウィンドウのリスタート/レジューム用モデル選択ダイアログを表示する。
-   * @param {string} sessionName - セッション名
-   * @param {string} baseCommand - ベースコマンド（'claude' or 'claude --continue'）
-   */
-  _showClaudeRestartModelDialog(sessionName, baseCommand) {
-    const existing = document.querySelector('.drawer-context-menu-overlay');
-    if (existing) {
-      existing.remove();
-    }
-
-    const overlay = document.createElement('div');
-    overlay.className = 'drawer-context-menu-overlay';
-
-    const menu = document.createElement('div');
-    menu.className = 'drawer-context-menu';
-
-    const title = document.createElement('div');
-    title.className = 'drawer-context-menu-title';
-    title.textContent = 'Select Model';
-    menu.appendChild(title);
-
-    const models = [
-      { label: 'opus', flag: 'opus' },
-      { label: 'sonnet', flag: 'sonnet' },
-      { label: 'haiku', flag: 'haiku' },
-    ];
-
-    for (const model of models) {
-      const btn = document.createElement('button');
-      btn.className = 'drawer-context-menu-item';
-      btn.textContent = model.label;
-      btn.addEventListener('click', () => {
-        closeDialog();
-        const command = `${baseCommand} --model ${model.flag}`;
-        this._handleRestartClaudeWindow(sessionName, command);
-      });
-      menu.appendChild(btn);
-    }
-
-    overlay.appendChild(menu);
-    document.body.appendChild(overlay);
-
-    requestAnimationFrame(() => {
-      overlay.classList.add('drawer-context-menu-overlay--visible');
-    });
-
-    const closeDialog = () => {
-      overlay.classList.remove('drawer-context-menu-overlay--visible');
-      setTimeout(() => {
-        overlay.remove();
-      }, 200);
-    };
-
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) {
-        closeDialog();
-      }
-    });
-  }
-
-  /**
-   * claude ウィンドウを再起動して切り替える。
-   * @param {string} sessionName - セッション名
-   * @param {string} command - 起動コマンド（例: 'claude --model opus'）
-   */
-  async _handleRestartClaudeWindow(sessionName, command) {
-    try {
-      const win = await restartClaudeWindow(sessionName, command);
-
-      // ウィンドウキャッシュクリア → 再取得
-      delete this._windowsCache[sessionName];
-      await this._loadWindows(sessionName);
-      this._renderContent();
-
-      // 新しいウィンドウに切り替え
-      this._currentWindowIndex = win.index;
-      this._onSelectWindow(sessionName, win.index);
-    } catch (err) {
-      console.error('Failed to restart claude window:', err);
-      this._showDeleteError(`Failed to restart claude window: ${err.message}`);
-    }
-  }
-
-  /**
-   * ウィンドウを作成して切り替える。
-   * @param {string} sessionName - セッション名
-   * @param {string} command - 起動コマンド（空の場合はデフォルトシェル）
-   */
-  async _handleCreateWindow(sessionName, command) {
-    if (this._creatingWindow) return;
-    this._creatingWindow = true;
-
-    try {
-      const result = await createWindow(sessionName, '', command);
-
-      // ウィンドウ一覧を再取得
-      delete this._windowsCache[sessionName];
-      await this._loadWindows(sessionName);
-      this._renderContent();
-
-      this._creatingWindow = false;
-
-      // 新しいウィンドウに自動切り替え
-      const newWindowIndex = result.index;
-      if (sessionName === this._currentSession) {
-        this._onSelectWindow(sessionName, newWindowIndex);
-        this._currentWindowIndex = newWindowIndex;
-      } else {
-        this._onSelectSession(sessionName, newWindowIndex);
-        this._currentSession = sessionName;
-        this._currentWindowIndex = newWindowIndex;
-      }
-
-      if (this._onCreateWindow) {
-        this._onCreateWindow(sessionName, newWindowIndex);
-      }
-
-      this.close();
-    } catch (err) {
-      this._creatingWindow = false;
-      console.error('Failed to create window:', err);
-      this._showDeleteError(`Failed to create window: ${err.message}`);
-    }
-  }
-
-  /**
    * 通知一覧を更新し、Drawer が開いていれば再描画する。
    * ハンバーガーボタンの通知ドットも更新する。
    * @param {Array<{session: string, window_index: number, type: string}>} notifications
@@ -2355,18 +2057,6 @@ export class Drawer {
     if (this._visible) {
       this._renderContent();
     }
-  }
-
-  /**
-   * 指定ウィンドウに通知があるかを返す。
-   * @param {string} session
-   * @param {number} windowIndex
-   * @returns {boolean}
-   */
-  _hasNotification(session, windowIndex) {
-    return this._notifications.some(
-      (n) => n.session === session && n.window_index === windowIndex
-    );
   }
 
   /**
@@ -2410,8 +2100,9 @@ export class Drawer {
   dispose() {
     this._content.innerHTML = '';
     this._sessions = [];
-    this._windowsCache = {};
-    this._expandedSessions.clear();
+    this._projects = new Map();
+    this._otherSessions = [];
+    this._expandedProjects.clear();
     this._clearLongPressTimer();
     this._stopRefreshPolling();
 
