@@ -433,19 +433,25 @@ export class TabBar {
     e.preventDefault();
 
     const info = this._getTabInfo(tab);
-    this._showContextMenu(tab, info.type, info.windowIndex, info.windowName);
+    this._showContextMenu(tab, info.type, info.windowIndex, info.windowName, {
+      x: e.clientX,
+      y: e.clientY,
+    });
   }
 
   /**
    * Show a context menu modal overlay for a tab.
    * Reuses the existing drawer-context-menu CSS classes.
+   * On desktop (right-click), positions menu at mouse cursor.
+   * On mobile (long press), centers menu on screen.
    * @param {HTMLElement} tab - Tab element
    * @param {string} type - Tab type ('terminal')
    * @param {number} windowIndex - Window index
    * @param {string} windowName - Window name
+   * @param {{x: number, y: number}} [cursorPos] - Mouse position for desktop right-click
    * @private
    */
-  _showContextMenu(tab, type, windowIndex, windowName) {
+  _showContextMenu(tab, type, windowIndex, windowName, cursorPos) {
     // Only terminal tabs get context menus
     if (type !== 'terminal') return;
 
@@ -527,10 +533,36 @@ export class TabBar {
     overlay.appendChild(menu);
     document.body.appendChild(overlay);
 
-    // Fade in
-    requestAnimationFrame(() => {
-      overlay.classList.add('drawer-context-menu-overlay--visible');
-    });
+    // Position menu at cursor for desktop right-click
+    if (cursorPos) {
+      overlay.style.alignItems = 'flex-start';
+      overlay.style.justifyContent = 'flex-start';
+      menu.style.position = 'absolute';
+
+      // Use rAF to measure after layout
+      requestAnimationFrame(() => {
+        const menuRect = menu.getBoundingClientRect();
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+
+        // Clamp so menu stays within viewport
+        let left = cursorPos.x;
+        let top = cursorPos.y;
+        if (left + menuRect.width > vw) left = vw - menuRect.width - 8;
+        if (top + menuRect.height > vh) top = vh - menuRect.height - 8;
+        if (left < 0) left = 8;
+        if (top < 0) top = 8;
+
+        menu.style.left = left + 'px';
+        menu.style.top = top + 'px';
+        overlay.classList.add('drawer-context-menu-overlay--visible');
+      });
+    } else {
+      // Mobile: centered (default flex layout)
+      requestAnimationFrame(() => {
+        overlay.classList.add('drawer-context-menu-overlay--visible');
+      });
+    }
 
     // Click overlay to close
     overlay.addEventListener('click', (e) => {

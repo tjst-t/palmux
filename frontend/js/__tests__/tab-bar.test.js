@@ -768,6 +768,37 @@ describe('TabBar', () => {
       expect(title.textContent).toBe('3: myterm');
     });
 
+    it('positions menu at cursor on right-click (desktop)', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [makeWindow(0, 'zsh')], false);
+
+      const termTab = container.querySelector('.tab[data-type="terminal"]');
+      const event = new Event('contextmenu', { bubbles: true });
+      event.clientX = 150;
+      event.clientY = 80;
+      termTab.dispatchEvent(event);
+
+      const menu = document.querySelector('.drawer-context-menu');
+      expect(menu).not.toBeNull();
+      expect(menu.style.position).toBe('absolute');
+    });
+
+    it('centers menu on long press (mobile, no cursorPos)', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [makeWindow(0, 'zsh')], false);
+
+      // Directly call _showContextMenu without cursorPos (simulates long press path)
+      bar._showContextMenu(
+        container.querySelector('.tab[data-type="terminal"]'),
+        'terminal', 0, 'zsh',
+      );
+
+      const menu = document.querySelector('.drawer-context-menu');
+      expect(menu).not.toBeNull();
+      // No absolute positioning when no cursorPos
+      expect(menu.style.position).toBe('');
+    });
+
     it('delete button has danger class', () => {
       const bar = new TabBar({ container, onTabSelect });
       bar.setWindows('main', [makeWindow(0, 'zsh')], false);
