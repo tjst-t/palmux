@@ -451,6 +451,31 @@ export async function listProjectBranches(project) {
 }
 
 /**
+ * プロジェクトのブランチが HEAD にマージ済みかを確認する。
+ * @param {string} project - プロジェクト名
+ * @param {string} branch - ブランチ名
+ * @returns {Promise<{merged: boolean}>}
+ */
+export async function isProjectBranchMerged(project, branch) {
+  return fetchAPI(`api/projects/${encodeURIComponent(project)}/branch-merged/${branch}`);
+}
+
+/**
+ * プロジェクトのブランチを削除する。
+ * worktree がある場合はセッション kill + worktree 削除も行う。
+ * @param {string} project - プロジェクト名
+ * @param {string} branch - ブランチ名
+ * @param {boolean} force - 強制削除するか
+ * @returns {Promise<void>}
+ */
+export async function deleteProjectBranch(project, branch, force = false) {
+  const params = force ? '?force=true' : '';
+  return fetchAPI(`api/projects/${encodeURIComponent(project)}/branches/${branch}${params}`, {
+    method: 'DELETE',
+  });
+}
+
+/**
  * WebSocket 接続用の URL を生成する。
  * base-path とプロトコル（ws/wss）を考慮し、認証トークンをクエリパラメータに付与する。
  * @param {string} session - セッション名

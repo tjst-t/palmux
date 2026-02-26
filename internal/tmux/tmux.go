@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -445,17 +444,6 @@ func (m *Manager) DeleteGhqRepo(fullPath string) error {
 	return m.Ghq.DeleteRepo(fullPath)
 }
 
-// sanitizeBranch はブランチ名をディレクトリ名に安全な形式に変換する。
-// "/" を "--" に置換する。
-func sanitizeBranch(branch string) string {
-	return strings.ReplaceAll(branch, "/", "--")
-}
-
-// WorktreePath は worktree ディレクトリパスを計算する。
-func WorktreePath(repoPath, branch string) string {
-	return filepath.Join(repoPath, ".palmux-worktrees", sanitizeBranch(branch))
-}
-
 // ProjectWorktree はプロジェクトの worktree 情報とセッション状態を表す。
 type ProjectWorktree struct {
 	Branch      string `json:"branch"`
@@ -469,8 +457,8 @@ type ProjectWorktree struct {
 // ListProjectWorktrees はプロジェクトの worktree 一覧とセッション状態を返す。
 // project はプロジェクト名（= ghq repo 名）。
 func (m *Manager) ListProjectWorktrees(project string) ([]ProjectWorktree, error) {
-	if m.Ghq == nil || m.Ghq.GitCmd == nil {
-		return nil, fmt.Errorf("git command runner is not configured")
+	if m.Ghq == nil {
+		return nil, fmt.Errorf("ghq resolver is not configured")
 	}
 
 	repoPath := m.Ghq.ResolveRepo(project)
@@ -478,8 +466,7 @@ func (m *Manager) ListProjectWorktrees(project string) ([]ProjectWorktree, error
 		return nil, fmt.Errorf("project %q not found", project)
 	}
 
-	gitOps := &git.Git{Cmd: m.Ghq.GitCmd}
-	worktrees, err := gitOps.ListWorktrees(repoPath)
+	worktrees, err := m.Ghq.GwqListWorktrees(repoPath)
 	if err != nil {
 		return nil, fmt.Errorf("list worktrees: %w", err)
 	}
@@ -500,10 +487,10 @@ func (m *Manager) ListProjectWorktrees(project string) ([]ProjectWorktree, error
 		pw := ProjectWorktree{
 			Branch: wt.Branch,
 			Path:   wt.Path,
-			Head:   wt.Head,
+			Head:   wt.CommitHash,
 		}
 
-		if wt.Path == repoPath {
+		if wt.IsMain {
 			pw.IsDefault = true
 			pw.SessionName = project
 		} else {
@@ -530,8 +517,8 @@ func (m *Manager) ListProjectWorktrees(project string) ([]ProjectWorktree, error
 
 // NewWorktreeSession は worktree を作成し、それに対応する tmux セッションを作成する。
 func (m *Manager) NewWorktreeSession(project, branch string, createBranch bool) (*Session, error) {
-	if m.Ghq == nil || m.Ghq.GitCmd == nil {
-		return nil, fmt.Errorf("git command runner is not configured")
+	if m.Ghq == nil {
+		return nil, fmt.Errorf("ghq resolver is not configured")
 	}
 
 	repoPath := m.Ghq.ResolveRepo(project)
@@ -539,10 +526,8 @@ func (m *Manager) NewWorktreeSession(project, branch string, createBranch bool) 
 		return nil, fmt.Errorf("project %q not found", project)
 	}
 
-	gitOps := &git.Git{Cmd: m.Ghq.GitCmd}
-
 	// 既存 worktree を確認
-	worktrees, err := gitOps.ListWorktrees(repoPath)
+	worktrees, err := m.Ghq.GwqListWorktrees(repoPath)
 	if err != nil {
 		return nil, fmt.Errorf("list worktrees: %w", err)
 	}
@@ -556,11 +541,24 @@ func (m *Manager) NewWorktreeSession(project, branch string, createBranch bool) 
 		}
 	}
 
-	// worktree がなければ作成
+	// worktree がなければ gwq add で作成
 	if !found {
-		wtPath := WorktreePath(repoPath, branch)
-		if err := gitOps.AddWorktree(repoPath, wtPath, branch, createBranch); err != nil {
-			return nil, fmt.Errorf("add worktree: %w", err)
+		if err := m.Ghq.GwqAddWorktree(repoPath, branch, createBranch); err != nil {
+			// gwq add 失敗時に再確認 — 別プロセスが作成した可能性
+			retryWorktrees, retryErr := m.Ghq.GwqListWorktrees(repoPath)
+			if retryErr != nil {
+				return nil, fmt.Errorf("add worktree: %w", err)
+			}
+			retryFound := false
+			for _, wt := range retryWorktrees {
+				if wt.Branch == branch {
+					retryFound = true
+					break
+				}
+			}
+			if !retryFound {
+				return nil, fmt.Errorf("add worktree: %w", err)
+			}
 		}
 	}
 
@@ -575,9 +573,12 @@ func (m *Manager) NewWorktreeSession(project, branch string, createBranch bool) 
 }
 
 // DeleteWorktreeSession は tmux セッションを kill し、オプションで worktree も削除する。
+// セッションが既に存在しない場合（session not found / no server）はエラーにしない。
 func (m *Manager) DeleteWorktreeSession(sessionName string, removeWorktree bool) error {
 	if err := m.KillSession(sessionName); err != nil {
-		return fmt.Errorf("delete worktree session: %w", err)
+		if !isSessionNotFoundError(err) && !isNoServerError(err) {
+			return fmt.Errorf("delete worktree session: %w", err)
+		}
 	}
 
 	if removeWorktree {
@@ -587,7 +588,7 @@ func (m *Manager) DeleteWorktreeSession(sessionName string, removeWorktree bool)
 			return nil
 		}
 
-		if m.Ghq == nil || m.Ghq.GitCmd == nil {
+		if m.Ghq == nil {
 			return nil
 		}
 
@@ -596,9 +597,7 @@ func (m *Manager) DeleteWorktreeSession(sessionName string, removeWorktree bool)
 			return nil
 		}
 
-		gitOps := &git.Git{Cmd: m.Ghq.GitCmd}
-		wtPath := WorktreePath(repoPath, branch)
-		if err := gitOps.RemoveWorktree(repoPath, wtPath); err != nil {
+		if err := m.Ghq.GwqRemoveWorktree(repoPath, branch); err != nil {
 			return fmt.Errorf("remove worktree: %w", err)
 		}
 	}
@@ -608,8 +607,8 @@ func (m *Manager) DeleteWorktreeSession(sessionName string, removeWorktree bool)
 
 // GetProjectBranches はプロジェクトのブランチ一覧を返す。
 func (m *Manager) GetProjectBranches(project string) ([]git.Branch, error) {
-	if m.Ghq == nil || m.Ghq.GitCmd == nil {
-		return nil, fmt.Errorf("git command runner is not configured")
+	if m.Ghq == nil {
+		return nil, fmt.Errorf("ghq resolver is not configured")
 	}
 
 	repoPath := m.Ghq.ResolveRepo(project)
@@ -617,8 +616,71 @@ func (m *Manager) GetProjectBranches(project string) ([]git.Branch, error) {
 		return nil, fmt.Errorf("project %q not found", project)
 	}
 
-	gitOps := &git.Git{Cmd: m.Ghq.GitCmd}
-	return gitOps.Branches(repoPath)
+	return m.Ghq.GitBranches(repoPath)
+}
+
+// IsProjectBranchMerged はプロジェクトのブランチが HEAD にマージ済みかを返す。
+func (m *Manager) IsProjectBranchMerged(project, branch string) (bool, error) {
+	if m.Ghq == nil {
+		return false, fmt.Errorf("ghq resolver is not configured")
+	}
+
+	repoPath := m.Ghq.ResolveRepo(project)
+	if repoPath == "" {
+		return false, fmt.Errorf("project %q not found", project)
+	}
+
+	return m.Ghq.GitIsBranchMerged(repoPath, branch)
+}
+
+// DeleteProjectBranch はプロジェクトのブランチを削除する。
+// worktree が存在する場合はセッション kill → gwq remove -b で削除。
+// worktree がない場合は git branch -d/-D で削除。
+func (m *Manager) DeleteProjectBranch(project, branch string, force bool) error {
+	if m.Ghq == nil {
+		return fmt.Errorf("ghq resolver is not configured")
+	}
+
+	repoPath := m.Ghq.ResolveRepo(project)
+	if repoPath == "" {
+		return fmt.Errorf("project %q not found", project)
+	}
+
+	// worktree があるかチェック
+	worktrees, err := m.Ghq.GwqListWorktrees(repoPath)
+	if err != nil {
+		return fmt.Errorf("list worktrees: %w", err)
+	}
+
+	hasWorktree := false
+	for _, wt := range worktrees {
+		if wt.Branch == branch {
+			hasWorktree = true
+			break
+		}
+	}
+
+	if hasWorktree {
+		// セッションがあれば kill
+		sessionName := project + "@" + branch
+		if err := m.KillSession(sessionName); err != nil {
+			if !isSessionNotFoundError(err) && !isNoServerError(err) {
+				// kill 失敗は無視しない（ログだけ残すケースもあるが、ここではエラーとする）
+			}
+		}
+
+		// gwq remove -b で worktree + ブランチを削除
+		if err := m.Ghq.GwqRemoveWorktreeAndBranch(repoPath, branch, force); err != nil {
+			return fmt.Errorf("remove worktree and branch: %w", err)
+		}
+	} else {
+		// worktree なし → git branch で削除
+		if err := m.Ghq.GitDeleteBranch(repoPath, branch, force); err != nil {
+			return fmt.Errorf("delete branch: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // ResolveProject はプロジェクト名に対応する ghq リポジトリパスを返す。

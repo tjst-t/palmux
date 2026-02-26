@@ -371,7 +371,7 @@ func TestHandleGitBranches(t *testing.T) {
 			name:       "正常系: ブランチ一覧を返す",
 			session:    "main",
 			cwd:        "/home/user/project",
-			gitOutput:  "* main\n  develop\n  remotes/origin/main\n",
+			gitOutput:  "* main\n  develop\n  remotes/origin/feature-y\n",
 			wantStatus: http.StatusOK,
 			wantCount:  3,
 		},

@@ -9,31 +9,12 @@ import (
 	"testing"
 )
 
-// mockGitCommandRunner は git.CommandRunner のモック実装。
-type mockGitCommandRunner struct {
-	results map[string]mockGitResult
-}
-
-type mockGitResult struct {
-	output []byte
-	err    error
-}
-
-func (m *mockGitCommandRunner) RunInDir(dir string, args ...string) ([]byte, error) {
-	key := dir
-	for _, a := range args {
-		key += " " + a
-	}
-	if r, ok := m.results[key]; ok {
-		return r.output, r.err
-	}
-	return nil, errors.New("unexpected git command: " + key)
-}
-
 // mockCommandRunner は CommandRunner のモック実装。
 type mockCommandRunner struct {
 	// results はコマンド名+引数のキーに対するレスポンスを保持する。
 	results map[string]mockResult
+	// dirResults は dir+コマンド名+引数のキーに対するレスポンスを保持する。
+	dirResults map[string]mockResult
 }
 
 type mockResult struct {
@@ -50,6 +31,19 @@ func (m *mockCommandRunner) RunCommand(name string, args ...string) ([]byte, err
 		return r.output, r.err
 	}
 	return nil, errors.New("unexpected command: " + key)
+}
+
+func (m *mockCommandRunner) RunCommandInDir(dir, name string, args ...string) ([]byte, error) {
+	key := dir + " " + name
+	for _, a := range args {
+		key += " " + a
+	}
+	if m.dirResults != nil {
+		if r, ok := m.dirResults[key]; ok {
+			return r.output, r.err
+		}
+	}
+	return nil, errors.New("unexpected command in dir: " + key)
 }
 
 func TestParseSessionName(t *testing.T) {
@@ -322,73 +316,77 @@ func TestGhqResolver_Resolve(t *testing.T) {
 }
 
 func TestGhqResolver_Resolve_WithBranch(t *testing.T) {
-	ghqResults := map[string]mockResult{
-		"ghq root": {output: []byte("/home/user/ghq\n"), err: nil},
-		"ghq list": {output: []byte("github.com/tjst-t/palmux\ngithub.com/golang/go\n"), err: nil},
-	}
-
-	worktreeOutput := "worktree /home/user/ghq/github.com/tjst-t/palmux\n" +
-		"HEAD abc1234def5678901234567890123456789abcde\n" +
-		"branch refs/heads/main\n\n" +
-		"worktree /home/user/worktrees/palmux-feature-x\n" +
-		"HEAD def5678abc1234567890123456789012345678901\n" +
-		"branch refs/heads/feature-x\n\n"
+	gwqJSON := `[{"path":"/home/user/ghq/github.com/tjst-t/palmux","branch":"main","commit_hash":"abc123","is_main":true,"created_at":""},{"path":"/home/user/worktrees/github.com/tjst-t/palmux/feature-x","branch":"feature-x","commit_hash":"def456","is_main":false,"created_at":""}]`
 
 	tests := []struct {
 		name        string
 		sessionName string
-		gitResults  map[string]mockGitResult
-		useGitCmd   bool
+		results     map[string]mockResult
+		dirResults  map[string]mockResult
 		want        string
 	}{
 		{
 			name:        "repo@branch: worktree マッチあり → worktree パス",
 			sessionName: "palmux@feature-x",
-			gitResults: map[string]mockGitResult{
-				"/home/user/ghq/github.com/tjst-t/palmux worktree list --porcelain": {
-					output: []byte(worktreeOutput),
+			results: map[string]mockResult{
+				"ghq root": {output: []byte("/home/user/ghq\n"), err: nil},
+				"ghq list": {output: []byte("github.com/tjst-t/palmux\ngithub.com/golang/go\n"), err: nil},
+			},
+			dirResults: map[string]mockResult{
+				"/home/user/ghq/github.com/tjst-t/palmux gwq list --json": {
+					output: []byte(gwqJSON),
 					err:    nil,
 				},
 			},
-			useGitCmd: true,
-			want:      "/home/user/worktrees/palmux-feature-x",
+			want: "/home/user/worktrees/github.com/tjst-t/palmux/feature-x",
 		},
 		{
 			name:        "repo@branch: worktree マッチなし → リポジトリパスにフォールバック",
 			sessionName: "palmux@nonexistent-branch",
-			gitResults: map[string]mockGitResult{
-				"/home/user/ghq/github.com/tjst-t/palmux worktree list --porcelain": {
-					output: []byte(worktreeOutput),
+			results: map[string]mockResult{
+				"ghq root": {output: []byte("/home/user/ghq\n"), err: nil},
+				"ghq list": {output: []byte("github.com/tjst-t/palmux\ngithub.com/golang/go\n"), err: nil},
+			},
+			dirResults: map[string]mockResult{
+				"/home/user/ghq/github.com/tjst-t/palmux gwq list --json": {
+					output: []byte(gwqJSON),
 					err:    nil,
 				},
 			},
-			useGitCmd: true,
-			want:      "/home/user/ghq/github.com/tjst-t/palmux",
+			want: "/home/user/ghq/github.com/tjst-t/palmux",
 		},
 		{
-			name:        "repo@branch: GitCmd が nil → リポジトリパスにフォールバック",
+			name:        "repo@branch: gwq エラー → リポジトリパスにフォールバック",
 			sessionName: "palmux@feature-x",
-			gitResults:  nil,
-			useGitCmd:   false,
-			want:        "/home/user/ghq/github.com/tjst-t/palmux",
+			results: map[string]mockResult{
+				"ghq root": {output: []byte("/home/user/ghq\n"), err: nil},
+				"ghq list": {output: []byte("github.com/tjst-t/palmux\ngithub.com/golang/go\n"), err: nil},
+			},
+			dirResults: map[string]mockResult{
+				"/home/user/ghq/github.com/tjst-t/palmux gwq list --json": {
+					output: nil,
+					err:    errors.New("gwq not found"),
+				},
+			},
+			want: "/home/user/ghq/github.com/tjst-t/palmux",
 		},
 		{
 			name:        "repo@branch: リポジトリが見つからない → ホームディレクトリ",
 			sessionName: "nonexistent@feature-x",
-			gitResults: map[string]mockGitResult{},
-			useGitCmd:   true,
-			want:        "/home/user",
+			results: map[string]mockResult{
+				"ghq root": {output: []byte("/home/user/ghq\n"), err: nil},
+				"ghq list": {output: []byte("github.com/tjst-t/palmux\ngithub.com/golang/go\n"), err: nil},
+			},
+			dirResults: map[string]mockResult{},
+			want:       "/home/user",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			resolver := &GhqResolver{
-				Cmd:     &mockCommandRunner{results: ghqResults},
+				Cmd:     &mockCommandRunner{results: tt.results, dirResults: tt.dirResults},
 				HomeDir: "/home/user",
-			}
-			if tt.useGitCmd {
-				resolver.GitCmd = &mockGitCommandRunner{results: tt.gitResults}
 			}
 
 			got := resolver.Resolve(tt.sessionName)
@@ -729,4 +727,411 @@ func TestGhqResolver_DeleteRepo(t *testing.T) {
 			t.Fatal("DeleteRepo() should return error for medium depth path (depth < 3)")
 		}
 	})
+}
+
+func TestGhqResolver_GwqListWorktrees(t *testing.T) {
+	tests := []struct {
+		name       string
+		dirResults map[string]mockResult
+		wantCount  int
+		wantErr    bool
+	}{
+		{
+			name: "正常系: 複数の worktree",
+			dirResults: map[string]mockResult{
+				"/repo gwq list --json": {
+					output: []byte(`[{"path":"/home/user/worktrees/github.com/owner/repo/main","branch":"main","commit_hash":"abc123","is_main":true,"created_at":"2025-01-01T00:00:00Z"},{"path":"/home/user/worktrees/github.com/owner/repo/feature-x","branch":"feature-x","commit_hash":"def456","is_main":false,"created_at":"2025-01-02T00:00:00Z"}]`),
+					err:    nil,
+				},
+			},
+			wantCount: 2,
+		},
+		{
+			name: "正常系: 空の配列",
+			dirResults: map[string]mockResult{
+				"/repo gwq list --json": {
+					output: []byte(`[]`),
+					err:    nil,
+				},
+			},
+			wantCount: 0,
+		},
+		{
+			name: "異常系: gwq コマンドエラー",
+			dirResults: map[string]mockResult{
+				"/repo gwq list --json": {
+					output: nil,
+					err:    errors.New("gwq not found"),
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "異常系: 不正な JSON",
+			dirResults: map[string]mockResult{
+				"/repo gwq list --json": {
+					output: []byte(`invalid json`),
+					err:    nil,
+				},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver := &GhqResolver{
+				Cmd:     &mockCommandRunner{dirResults: tt.dirResults},
+				HomeDir: "/home/user",
+			}
+
+			got, err := resolver.GwqListWorktrees("/repo")
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GwqListWorktrees() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && len(got) != tt.wantCount {
+				t.Errorf("GwqListWorktrees() returned %d worktrees, want %d", len(got), tt.wantCount)
+			}
+		})
+	}
+}
+
+func TestGhqResolver_GwqListWorktrees_Details(t *testing.T) {
+	jsonOutput := `[{"path":"/home/user/worktrees/github.com/owner/repo/main","branch":"main","commit_hash":"abc123","is_main":true,"created_at":"2025-01-01T00:00:00Z"},{"path":"/home/user/worktrees/github.com/owner/repo/feature-x","branch":"feature-x","commit_hash":"def456","is_main":false,"created_at":"2025-01-02T00:00:00Z"}]`
+
+	resolver := &GhqResolver{
+		Cmd: &mockCommandRunner{
+			dirResults: map[string]mockResult{
+				"/repo gwq list --json": {output: []byte(jsonOutput), err: nil},
+			},
+		},
+		HomeDir: "/home/user",
+	}
+
+	got, err := resolver.GwqListWorktrees("/repo")
+	if err != nil {
+		t.Fatalf("GwqListWorktrees() error = %v", err)
+	}
+
+	if len(got) != 2 {
+		t.Fatalf("expected 2 worktrees, got %d", len(got))
+	}
+
+	if got[0].Branch != "main" || !got[0].IsMain || got[0].CommitHash != "abc123" {
+		t.Errorf("first worktree = %+v, want main/true/abc123", got[0])
+	}
+	if got[1].Branch != "feature-x" || got[1].IsMain || got[1].CommitHash != "def456" {
+		t.Errorf("second worktree = %+v, want feature-x/false/def456", got[1])
+	}
+}
+
+func TestGhqResolver_GwqAddWorktree(t *testing.T) {
+	tests := []struct {
+		name         string
+		branch       string
+		createBranch bool
+		dirResults   map[string]mockResult
+		wantErr      bool
+	}{
+		{
+			name:         "正常系: 既存ブランチで追加",
+			branch:       "feature-x",
+			createBranch: false,
+			dirResults: map[string]mockResult{
+				"/repo gwq add feature-x": {output: []byte(""), err: nil},
+			},
+		},
+		{
+			name:         "正常系: 新規ブランチ作成で追加",
+			branch:       "new-feature",
+			createBranch: true,
+			dirResults: map[string]mockResult{
+				"/repo gwq add -b new-feature": {output: []byte(""), err: nil},
+			},
+		},
+		{
+			name:         "異常系: gwq エラー",
+			branch:       "fail-branch",
+			createBranch: false,
+			dirResults: map[string]mockResult{
+				"/repo gwq add fail-branch": {output: nil, err: errors.New("gwq error")},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver := &GhqResolver{
+				Cmd:     &mockCommandRunner{dirResults: tt.dirResults},
+				HomeDir: "/home/user",
+			}
+
+			err := resolver.GwqAddWorktree("/repo", tt.branch, tt.createBranch)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GwqAddWorktree() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestGhqResolver_GwqRemoveWorktree(t *testing.T) {
+	tests := []struct {
+		name       string
+		branch     string
+		dirResults map[string]mockResult
+		wantErr    bool
+	}{
+		{
+			name:   "正常系: worktree 削除",
+			branch: "feature-x",
+			dirResults: map[string]mockResult{
+				"/repo gwq remove feature-x": {output: []byte(""), err: nil},
+			},
+		},
+		{
+			name:   "異常系: gwq エラー",
+			branch: "fail-branch",
+			dirResults: map[string]mockResult{
+				"/repo gwq remove fail-branch": {output: nil, err: errors.New("gwq error")},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver := &GhqResolver{
+				Cmd:     &mockCommandRunner{dirResults: tt.dirResults},
+				HomeDir: "/home/user",
+			}
+
+			err := resolver.GwqRemoveWorktree("/repo", tt.branch)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GwqRemoveWorktree() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestGhqResolver_GitIsBranchMerged(t *testing.T) {
+	tests := []struct {
+		name       string
+		branch     string
+		dirResults map[string]mockResult
+		want       bool
+		wantErr    bool
+	}{
+		{
+			name:   "マージ済みブランチ",
+			branch: "feature-x",
+			dirResults: map[string]mockResult{
+				"/repo git branch --merged": {
+					output: []byte("* main\n  feature-x\n  fix/typo\n"),
+					err:    nil,
+				},
+			},
+			want: true,
+		},
+		{
+			name:   "未マージブランチ",
+			branch: "feature-y",
+			dirResults: map[string]mockResult{
+				"/repo git branch --merged": {
+					output: []byte("* main\n  feature-x\n"),
+					err:    nil,
+				},
+			},
+			want: false,
+		},
+		{
+			name:   "+プレフィクス付きのworktreeブランチもマッチ",
+			branch: "worktree-branch",
+			dirResults: map[string]mockResult{
+				"/repo git branch --merged": {
+					output: []byte("* main\n+ worktree-branch\n"),
+					err:    nil,
+				},
+			},
+			want: true,
+		},
+		{
+			name:   "git エラー",
+			branch: "feature-x",
+			dirResults: map[string]mockResult{
+				"/repo git branch --merged": {
+					output: nil,
+					err:    errors.New("git error"),
+				},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver := &GhqResolver{
+				Cmd:     &mockCommandRunner{dirResults: tt.dirResults},
+				HomeDir: "/home/user",
+			}
+
+			got, err := resolver.GitIsBranchMerged("/repo", tt.branch)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GitIsBranchMerged() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("GitIsBranchMerged() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGhqResolver_GitDeleteBranch(t *testing.T) {
+	tests := []struct {
+		name       string
+		branch     string
+		force      bool
+		dirResults map[string]mockResult
+		wantErr    bool
+	}{
+		{
+			name:   "安全削除 (-d)",
+			branch: "feature-x",
+			force:  false,
+			dirResults: map[string]mockResult{
+				"/repo git branch -d feature-x": {output: []byte(""), err: nil},
+			},
+		},
+		{
+			name:   "強制削除 (-D)",
+			branch: "feature-x",
+			force:  true,
+			dirResults: map[string]mockResult{
+				"/repo git branch -D feature-x": {output: []byte(""), err: nil},
+			},
+		},
+		{
+			name:   "git エラー",
+			branch: "fail-branch",
+			force:  false,
+			dirResults: map[string]mockResult{
+				"/repo git branch -d fail-branch": {output: nil, err: errors.New("branch not merged")},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver := &GhqResolver{
+				Cmd:     &mockCommandRunner{dirResults: tt.dirResults},
+				HomeDir: "/home/user",
+			}
+
+			err := resolver.GitDeleteBranch("/repo", tt.branch, tt.force)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GitDeleteBranch() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestGhqResolver_GwqRemoveWorktreeAndBranch(t *testing.T) {
+	tests := []struct {
+		name       string
+		branch     string
+		force      bool
+		dirResults map[string]mockResult
+		wantErr    bool
+	}{
+		{
+			name:   "通常削除",
+			branch: "feature-x",
+			force:  false,
+			dirResults: map[string]mockResult{
+				"/repo gwq remove -b feature-x": {output: []byte(""), err: nil},
+			},
+		},
+		{
+			name:   "強制削除",
+			branch: "feature-x",
+			force:  true,
+			dirResults: map[string]mockResult{
+				"/repo gwq remove -b --force-delete-branch feature-x": {output: []byte(""), err: nil},
+			},
+		},
+		{
+			name:   "gwq エラー",
+			branch: "fail-branch",
+			force:  false,
+			dirResults: map[string]mockResult{
+				"/repo gwq remove -b fail-branch": {output: nil, err: errors.New("gwq error")},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver := &GhqResolver{
+				Cmd:     &mockCommandRunner{dirResults: tt.dirResults},
+				HomeDir: "/home/user",
+			}
+
+			err := resolver.GwqRemoveWorktreeAndBranch("/repo", tt.branch, tt.force)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GwqRemoveWorktreeAndBranch() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestGhqResolver_GitBranches(t *testing.T) {
+	tests := []struct {
+		name       string
+		dirResults map[string]mockResult
+		wantCount  int
+		wantErr    bool
+	}{
+		{
+			name: "正常系: ブランチ一覧",
+			dirResults: map[string]mockResult{
+				"/repo git branch -a --no-color": {
+					output: []byte("* main\n  feature-x\n  remotes/origin/feature-y\n"),
+					err:    nil,
+				},
+			},
+			wantCount: 3,
+		},
+		{
+			name: "異常系: git エラー",
+			dirResults: map[string]mockResult{
+				"/repo git branch -a --no-color": {
+					output: nil,
+					err:    errors.New("git error"),
+				},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver := &GhqResolver{
+				Cmd:     &mockCommandRunner{dirResults: tt.dirResults},
+				HomeDir: "/home/user",
+			}
+
+			got, err := resolver.GitBranches("/repo")
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GitBranches() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && len(got) != tt.wantCount {
+				t.Errorf("GitBranches() returned %d branches, want %d", len(got), tt.wantCount)
+			}
+		})
+	}
 }

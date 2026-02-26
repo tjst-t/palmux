@@ -72,6 +72,12 @@ func (m *mockTmuxManager) DeleteWorktreeSession(sessionName string, removeWorktr
 func (m *mockTmuxManager) GetProjectBranches(project string) ([]git.Branch, error) {
 	return nil, nil
 }
+func (m *mockTmuxManager) IsProjectBranchMerged(project, branch string) (bool, error) {
+	return false, nil
+}
+func (m *mockTmuxManager) DeleteProjectBranch(project, branch string, force bool) error {
+	return nil
+}
 func (m *mockTmuxManager) ResolveProject(project string) string { return "" }
 
 func TestNormalizeBasePath(t *testing.T) {

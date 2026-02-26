@@ -1,5 +1,7 @@
 * main
   feature/login
   fix/typo
++ worktree-branch
   remotes/origin/main
   remotes/origin/feature/login
+  remotes/origin/feature/new
