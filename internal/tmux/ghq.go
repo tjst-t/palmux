@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,6 +15,7 @@ import (
 // テスト時にはモック実装を注入する。
 type CommandRunner interface {
 	RunCommand(name string, args ...string) ([]byte, error)
+	RunCommandInDir(dir, name string, args ...string) ([]byte, error)
 }
 
 // RealCommandRunner は実際のコマンドを実行する。
@@ -24,11 +26,17 @@ func (r *RealCommandRunner) RunCommand(name string, args ...string) ([]byte, err
 	return exec.Command(name, args...).Output()
 }
 
+// RunCommandInDir は指定ディレクトリでコマンドを実行し、標準出力の内容を返す。
+func (r *RealCommandRunner) RunCommandInDir(dir, name string, args ...string) ([]byte, error) {
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	return cmd.Output()
+}
+
 // GhqResolver は ghq リポジトリとセッション名のマッチングを行う。
 // セッション名に対応する ghq リポジトリが存在する場合、そのパスを返す。
 type GhqResolver struct {
 	Cmd     CommandRunner
-	GitCmd  git.CommandRunner // worktree 解決用（nil なら skip）
 	HomeDir string
 }
 
@@ -119,7 +127,7 @@ func (g *GhqResolver) ResolveRepo(repoName string) string {
 // 対応するリポジトリが見つからない場合、または ghq が利用できない場合は HomeDir を返す。
 //
 // セッション名が "repo@branch" 形式の場合、リポジトリを解決してから
-// git worktree list で branch に一致する worktree パスを探す。
+// gwq list --json で branch に一致する worktree パスを探す。
 //
 // マッチングの優先順位:
 //  1. basename の完全一致（最初にマッチしたものを使用）
@@ -139,15 +147,12 @@ func (g *GhqResolver) Resolve(sessionName string) string {
 		return repoPath
 	}
 
-	// worktree 解決
-	if g.GitCmd != nil {
-		gitOps := &git.Git{Cmd: g.GitCmd}
-		worktrees, err := gitOps.ListWorktrees(repoPath)
-		if err == nil {
-			for _, wt := range worktrees {
-				if wt.Branch == branch {
-					return wt.Path
-				}
+	// gwq で worktree 解決
+	worktrees, err := g.GwqListWorktrees(repoPath)
+	if err == nil {
+		for _, wt := range worktrees {
+			if wt.Branch == branch {
+				return wt.Path
 			}
 		}
 	}
@@ -256,6 +261,123 @@ func (g *GhqResolver) CloneRepo(url string) (*GhqRepo, error) {
 	// 見つからなくてもエラーにはしない（ghq get は成功している）
 	// 最後にクローンされたリポジトリがリストに出ない場合
 	return nil, fmt.Errorf("cloned repository not found in ghq list")
+}
+
+// GwqWorktree は gwq list --json の1エントリ。
+type GwqWorktree struct {
+	Path       string `json:"path"`
+	Branch     string `json:"branch"`
+	CommitHash string `json:"commit_hash"`
+	IsMain     bool   `json:"is_main"`
+	CreatedAt  string `json:"created_at"`
+}
+
+// GwqListWorktrees は gwq list --json で worktree 一覧を返す。
+// repoPath 内で gwq を実行する。
+func (g *GhqResolver) GwqListWorktrees(repoPath string) ([]GwqWorktree, error) {
+	out, err := g.Cmd.RunCommandInDir(repoPath, "gwq", "list", "--json")
+	if err != nil {
+		return nil, fmt.Errorf("gwq list: %w", err)
+	}
+
+	var worktrees []GwqWorktree
+	if err := json.Unmarshal(out, &worktrees); err != nil {
+		return nil, fmt.Errorf("gwq list: parse JSON: %w", err)
+	}
+
+	return worktrees, nil
+}
+
+// GwqAddWorktree は gwq add でブランチの worktree を作成する。
+// createBranch が true の場合は -b フラグで新しいブランチを作成する。
+func (g *GhqResolver) GwqAddWorktree(repoPath, branch string, createBranch bool) error {
+	args := []string{"add"}
+	if createBranch {
+		args = append(args, "-b")
+	}
+	args = append(args, branch)
+
+	_, err := g.Cmd.RunCommandInDir(repoPath, "gwq", args...)
+	if err != nil {
+		return fmt.Errorf("gwq add %q: %w", branch, err)
+	}
+
+	return nil
+}
+
+// GwqRemoveWorktree は gwq remove でブランチの worktree を削除する。
+func (g *GhqResolver) GwqRemoveWorktree(repoPath, branch string) error {
+	_, err := g.Cmd.RunCommandInDir(repoPath, "gwq", "remove", branch)
+	if err != nil {
+		return fmt.Errorf("gwq remove %q: %w", branch, err)
+	}
+
+	return nil
+}
+
+// GitIsBranchMerged は HEAD にマージ済みかを判定する。
+// git branch --merged を実行し、出力にブランチ名が含まれるか判定する。
+func (g *GhqResolver) GitIsBranchMerged(repoPath, branch string) (bool, error) {
+	out, err := g.Cmd.RunCommandInDir(repoPath, "git", "branch", "--merged")
+	if err != nil {
+		return false, fmt.Errorf("git branch --merged: %w", err)
+	}
+
+	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	for _, line := range lines {
+		name := strings.TrimSpace(line)
+		// "* main" → "main"
+		if strings.HasPrefix(name, "* ") {
+			name = name[2:]
+		} else if strings.HasPrefix(name, "+ ") {
+			name = name[2:]
+		}
+		if name == branch {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// GitDeleteBranch は git branch -d/-D でブランチを削除する。
+// force が true の場合は -D（強制削除）、false の場合は -d（安全削除）。
+func (g *GhqResolver) GitDeleteBranch(repoPath, branch string, force bool) error {
+	flag := "-d"
+	if force {
+		flag = "-D"
+	}
+	_, err := g.Cmd.RunCommandInDir(repoPath, "git", "branch", flag, branch)
+	if err != nil {
+		return fmt.Errorf("git branch %s %q: %w", flag, branch, err)
+	}
+	return nil
+}
+
+// GwqRemoveWorktreeAndBranch は gwq remove -b でブランチと worktree をまとめて削除する。
+// force が true の場合は --force-delete-branch フラグを追加する。
+func (g *GhqResolver) GwqRemoveWorktreeAndBranch(repoPath, branch string, force bool) error {
+	args := []string{"remove", "-b"}
+	if force {
+		args = append(args, "--force-delete-branch")
+	}
+	args = append(args, branch)
+
+	_, err := g.Cmd.RunCommandInDir(repoPath, "gwq", args...)
+	if err != nil {
+		return fmt.Errorf("gwq remove -b %q: %w", branch, err)
+	}
+	return nil
+}
+
+// GitBranches は git branch -a --no-color でブランチ一覧を返す。
+func (g *GhqResolver) GitBranches(repoPath string) ([]git.Branch, error) {
+	out, err := g.Cmd.RunCommandInDir(repoPath, "git", "branch", "-a", "--no-color")
+	if err != nil {
+		return nil, fmt.Errorf("git branches: %w", err)
+	}
+
+	return git.ParseBranches(string(out)), nil
 }
 
 // DeleteRepo は指定されたフルパスのリポジトリを削除する。

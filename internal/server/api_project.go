@@ -77,6 +77,41 @@ func (s *Server) handleDeleteProjectWorktree() http.Handler {
 	})
 }
 
+// handleIsProjectBranchMerged は GET /api/projects/{project}/branches/{branch...}/merged のハンドラ。
+// ブランチが HEAD にマージ済みかを JSON で返す。
+func (s *Server) handleIsProjectBranchMerged() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		project := r.PathValue("project")
+		branch := r.PathValue("branch")
+
+		merged, err := s.tmux.IsProjectBranchMerged(project, branch)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]bool{"merged": merged})
+	})
+}
+
+// handleDeleteProjectBranch は DELETE /api/projects/{project}/branches/{branch...} のハンドラ。
+// ブランチを削除する。worktree がある場合はセッション kill + worktree 削除も行う。
+// クエリパラメータ force=true で強制削除。
+func (s *Server) handleDeleteProjectBranch() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		project := r.PathValue("project")
+		branch := r.PathValue("branch")
+		force := r.URL.Query().Get("force") == "true"
+
+		if err := s.tmux.DeleteProjectBranch(project, branch, force); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	})
+}
+
 // handleListProjectBranches は GET /api/projects/{project}/branches のハンドラ。
 // プロジェクトのブランチ一覧を JSON 配列で返す。
 func (s *Server) handleListProjectBranches() http.Handler {

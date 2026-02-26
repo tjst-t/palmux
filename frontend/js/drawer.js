@@ -2,7 +2,7 @@
 // ハンバーガーメニューからスライドインし、プロジェクト/ブランチの切り替えを行う
 // プロジェクト作成・削除、ブランチ（worktree）管理機能を含む
 
-import { listSessions, createSession, deleteSession, listGhqRepos, cloneGhqRepo, deleteGhqRepo, listProjectWorktrees, createProjectWorktree, deleteProjectWorktree, listProjectBranches } from './api.js';
+import { listSessions, createSession, deleteSession, listGhqRepos, cloneGhqRepo, deleteGhqRepo, listProjectWorktrees, createProjectWorktree, deleteProjectWorktree, listProjectBranches, isProjectBranchMerged, deleteProjectBranch } from './api.js';
 
 /**
  * セッション名をプロジェクト名とブランチ名に分解する。
@@ -56,6 +56,8 @@ export class Drawer {
     this._longPressTimer = null;
     /** @type {boolean} 長押し検出フラグ（クリックイベント抑制用） */
     this._longPressDetected = false;
+    /** @type {boolean} ブランチピッカー長押し検出フラグ */
+    this._branchPickerLongPressDetected = false;
     /** @type {boolean} セッション作成中フラグ */
     this._creating = false;
     /** @type {'activity'|'name'} セッション並び順 */
@@ -68,6 +70,8 @@ export class Drawer {
     this._resizeHandler = null;
     /** @type {number|null} 定期リフレッシュタイマー ID */
     this._refreshTimer = null;
+    /** @type {Map<string, Array>} プロジェクト名 -> worktree 一覧キャッシュ */
+    this._projectWorktrees = new Map();
 
     /** @type {number} ピン留め時の Drawer 幅 */
     this._drawerWidth = this._loadDrawerWidth() || 280;
@@ -446,6 +450,7 @@ export class Drawer {
    * @param {Array} repos - ghq リポジトリ一覧
    */
   _groupSessionsByProject(sessions, repos) {
+    this._lastRepos = repos;
     const repoNames = new Set(repos.map(r => r.name));
     this._projects = new Map();
     this._otherSessions = [];
@@ -457,7 +462,8 @@ export class Drawer {
           this._projects.set(repo, { sessions: [], defaultSession: null });
         }
         const project = this._projects.get(repo);
-        project.sessions.push({ ...session, branch: branch || repo, isDefault: !branch });
+        const defaultBranchName = !branch ? this._getDefaultBranchName(repo) : '';
+        project.sessions.push({ ...session, branch: branch || defaultBranchName || repo, isDefault: !branch });
         if (!branch) {
           project.defaultSession = session;
         }
@@ -465,6 +471,18 @@ export class Drawer {
         this._otherSessions.push(session);
       }
     }
+  }
+
+  /**
+   * プロジェクトのデフォルトブランチ名を worktree キャッシュから取得する。
+   * @param {string} projectName - プロジェクト名
+   * @returns {string} デフォルトブランチ名（キャッシュがなければ空文字列）
+   */
+  _getDefaultBranchName(projectName) {
+    const worktrees = this._projectWorktrees.get(projectName);
+    if (!worktrees) return '';
+    const defaultWt = worktrees.find(w => w.is_default);
+    return defaultWt ? defaultWt.branch : '';
   }
 
   /**
@@ -484,7 +502,16 @@ export class Drawer {
     this._refreshTimer = window.setInterval(async () => {
       if (!this._visible) return;
       try {
-        const [sessions, repos] = await Promise.all([listSessions(), listGhqRepos()]);
+        const fetches = [listSessions(), listGhqRepos()];
+        // 展開中プロジェクトの worktree キャッシュも更新
+        const expandedProject = [...this._expandedProjects][0] || null;
+        if (expandedProject) {
+          fetches.push(listProjectWorktrees(expandedProject));
+        }
+        const [sessions, repos, worktrees] = await Promise.all(fetches);
+        if (expandedProject && worktrees && worktrees.length > 0) {
+          this._projectWorktrees.set(expandedProject, worktrees);
+        }
         const oldNames = new Set(this._sessions.map(s => s.name));
         const newNames = new Set((sessions || []).map(s => s.name));
         // Only re-render if sessions changed
@@ -618,6 +645,17 @@ export class Drawer {
         this._expandedProjects.clear();
         this._expandedProjects.add(projectName);
         this._renderContent();
+
+        // worktree キャッシュがなければ取得して再描画（デフォルトブランチ名解決用）
+        if (!this._projectWorktrees.has(projectName)) {
+          listProjectWorktrees(projectName).then(wts => {
+            if (wts && wts.length > 0) {
+              this._projectWorktrees.set(projectName, wts);
+              this._groupSessionsByProject(this._sessions, this._lastRepos || []);
+              this._renderContent();
+            }
+          }).catch(() => {});
+        }
 
         // Auto-connect to default branch session if not already connected
         if (currentRepo !== projectName && project.defaultSession) {
@@ -894,11 +932,24 @@ export class Drawer {
         listProjectWorktrees(projectName),
       ]);
 
+      // worktree キャッシュを更新
+      if (worktrees && worktrees.length > 0) {
+        this._projectWorktrees.set(projectName, worktrees);
+      }
+
       // Filter: exclude branches that already have sessions
       const existingBranches = new Set(worktrees.filter(w => w.has_session).map(w => w.branch));
-      const availableBranches = (branches || []).filter(b => !existingBranches.has(b.name));
+      const availableBranches = (branches || []).filter(b => {
+        if (existingBranches.has(b.name)) return false;
+        // リモートブランチの場合、ベア名（origin/X → X）でもセッション存在チェック
+        if (b.remote) {
+          const slashIdx = b.name.indexOf('/');
+          if (slashIdx >= 0 && existingBranches.has(b.name.substring(slashIdx + 1))) return false;
+        }
+        return true;
+      });
 
-      this._showBranchPickerUI(projectName, availableBranches, triggerBtn);
+      this._showBranchPickerUI(projectName, availableBranches, worktrees || [], triggerBtn);
     } catch (err) {
       console.error('Failed to load branches:', err);
       triggerBtn.textContent = 'Open Branch...';
@@ -910,9 +961,10 @@ export class Drawer {
    * ブランチピッカー UI を表示する。
    * @param {string} projectName - プロジェクト名
    * @param {Array} branches - 利用可能なブランチ一覧
+   * @param {Array} worktrees - worktree 一覧
    * @param {HTMLElement} triggerBtn - トリガーボタン
    */
-  _showBranchPickerUI(projectName, branches, triggerBtn) {
+  _showBranchPickerUI(projectName, branches, worktrees, triggerBtn) {
     // Replace the triggerBtn's parent with the picker
     const parent = triggerBtn.parentElement;
     triggerBtn.style.display = 'none';
@@ -935,6 +987,42 @@ export class Drawer {
     listEl.className = 'drawer-project-picker-list';
     picker.appendChild(listEl);
 
+    // worktree が存在するブランチをセットに変換
+    const worktreeBranches = new Set(
+      worktrees.filter(w => !w.is_default).map(w => w.branch)
+    );
+
+    // デフォルトブランチ名を取得（削除不可）
+    const defaultBranch = worktrees.find(w => w.is_default)?.branch || '';
+
+    const refreshPicker = async () => {
+      try {
+        const [newBranches, newWorktrees] = await Promise.all([
+          listProjectBranches(projectName),
+          listProjectWorktrees(projectName),
+        ]);
+        if (newWorktrees && newWorktrees.length > 0) {
+          this._projectWorktrees.set(projectName, newWorktrees);
+        }
+        const newExisting = new Set(newWorktrees.filter(w => w.has_session).map(w => w.branch));
+        const newAvailable = (newBranches || []).filter(b => {
+          if (newExisting.has(b.name)) return false;
+          if (b.remote) {
+            const slashIdx = b.name.indexOf('/');
+            if (slashIdx >= 0 && newExisting.has(b.name.substring(slashIdx + 1))) return false;
+          }
+          return true;
+        });
+        branches = newAvailable;
+        worktrees = newWorktrees || [];
+        worktreeBranches.clear();
+        worktrees.filter(w => !w.is_default).forEach(w => worktreeBranches.add(w.branch));
+        renderList(filterInput.value.trim().toLowerCase());
+      } catch {
+        // ignore
+      }
+    };
+
     const renderList = (filter) => {
       listEl.innerHTML = '';
       const filtered = filter
@@ -951,6 +1039,11 @@ export class Drawer {
           const item = document.createElement('div');
           item.className = 'drawer-project-picker-item';
 
+          const iconEl = document.createElement('span');
+          iconEl.className = 'drawer-window-icon';
+          iconEl.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="4" cy="3" r="1.5" stroke="currentColor" stroke-width="1.2"/><circle cx="4" cy="11" r="1.5" stroke="currentColor" stroke-width="1.2"/><circle cx="10" cy="5" r="1.5" stroke="currentColor" stroke-width="1.2"/><line x1="4" y1="4.5" x2="4" y2="9.5" stroke="currentColor" stroke-width="1.2"/><path d="M4 6 Q4 5 10 5" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>';
+          item.appendChild(iconEl);
+
           const nameEl = document.createElement('div');
           nameEl.className = 'drawer-project-picker-item-name';
           nameEl.textContent = branch.name;
@@ -965,8 +1058,27 @@ export class Drawer {
           item.appendChild(nameEl);
 
           item.addEventListener('click', () => {
-            this._createWorktreeAndConnect(projectName, branch.name, false, picker, triggerBtn);
+            if (this._branchPickerLongPressDetected) {
+              this._branchPickerLongPressDetected = false;
+              return;
+            }
+            // リモートブランチの場合はリモートプレフィクスを除去してローカルブランチとして開く
+            // 例: "origin/feature/new" → "feature/new"
+            let branchName = branch.name;
+            if (branch.remote) {
+              const slashIdx = branchName.indexOf('/');
+              if (slashIdx >= 0) {
+                branchName = branchName.substring(slashIdx + 1);
+              }
+            }
+            this._createWorktreeAndConnect(projectName, branchName, false, picker, triggerBtn);
           });
+
+          // ローカルブランチ（デフォルト以外）にコンテキストメニュー（右クリック/長押し）を設定
+          if (!branch.remote && branch.name !== defaultBranch) {
+            this._setupBranchPickerContextMenu(item, projectName, branch.name, worktreeBranches.has(branch.name), refreshPicker);
+          }
+
           listEl.appendChild(item);
         }
       }
@@ -983,14 +1095,18 @@ export class Drawer {
       }
     });
 
+    // Actions container
+    const actions = document.createElement('div');
+    actions.className = 'drawer-picker-actions';
+
     // Create new branch button
     const createBtn = document.createElement('div');
     createBtn.className = 'drawer-project-picker-custom';
-    createBtn.textContent = 'Create new branch...';
+    createBtn.textContent = '+ New branch...';
     createBtn.addEventListener('click', () => {
       this._showCreateBranchInput(projectName, picker, triggerBtn);
     });
-    picker.appendChild(createBtn);
+    actions.appendChild(createBtn);
 
     // Cancel button
     const cancelBtn = document.createElement('button');
@@ -1001,7 +1117,9 @@ export class Drawer {
       triggerBtn.style.display = '';
       triggerBtn.textContent = 'Open Branch...';
     });
-    picker.appendChild(cancelBtn);
+    actions.appendChild(cancelBtn);
+
+    picker.appendChild(actions);
 
     parent.appendChild(picker);
     filterInput.focus();
@@ -1067,6 +1185,165 @@ export class Drawer {
       picker.remove();
       triggerBtn.style.display = '';
       triggerBtn.textContent = 'Open Branch...';
+    });
+  }
+
+  /**
+   * ブランチピッカー項目にコンテキストメニュー（右クリック/長押し）を設定する。
+   * @param {HTMLElement} el - ブランチ項目要素
+   * @param {string} projectName - プロジェクト名
+   * @param {string} branchName - ブランチ名
+   * @param {boolean} hasWorktree - worktree が存在するか
+   * @param {function} refreshPicker - ピッカーリフレッシュ関数
+   */
+  _setupBranchPickerContextMenu(el, projectName, branchName, hasWorktree, refreshPicker) {
+    let startX = 0;
+    let startY = 0;
+    let longPressTimer = null;
+
+    const showMenu = (clientX, clientY, isMobile) => {
+      this._showBranchPickerDeleteMenu(projectName, branchName, hasWorktree, clientX, clientY, isMobile, refreshPicker);
+    };
+
+    el.addEventListener('touchstart', (e) => {
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      this._branchPickerLongPressDetected = false;
+      longPressTimer = window.setTimeout(() => {
+        this._branchPickerLongPressDetected = true;
+        showMenu(startX, startY, true);
+      }, 500);
+    }, { passive: true });
+
+    el.addEventListener('touchmove', (e) => {
+      if (longPressTimer !== null) {
+        const moveX = e.touches[0].clientX;
+        const moveY = e.touches[0].clientY;
+        if (Math.abs(moveX - startX) > 10 || Math.abs(moveY - startY) > 10) {
+          window.clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+      }
+    }, { passive: true });
+
+    el.addEventListener('touchend', () => {
+      if (longPressTimer !== null) {
+        window.clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+    }, { passive: true });
+
+    el.addEventListener('touchcancel', () => {
+      if (longPressTimer !== null) {
+        window.clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+    }, { passive: true });
+
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showMenu(e.clientX, e.clientY, false);
+    });
+  }
+
+  /**
+   * ブランチピッカーの削除コンテキストメニューを表示する。
+   * @param {string} projectName - プロジェクト名
+   * @param {string} branchName - ブランチ名
+   * @param {boolean} hasWorktree - worktree が存在するか
+   * @param {number} clientX - クリック位置 X
+   * @param {number} clientY - クリック位置 Y
+   * @param {boolean} isMobile - モバイルかどうか
+   * @param {function} refreshPicker - ピッカーリフレッシュ関数
+   */
+  _showBranchPickerDeleteMenu(projectName, branchName, hasWorktree, clientX, clientY, isMobile, refreshPicker) {
+    // 既存メニューを閉じる
+    const existing = document.querySelector('.drawer-branch-context-menu');
+    if (existing) existing.remove();
+
+    const menu = document.createElement('div');
+    menu.className = 'drawer-branch-context-menu';
+
+    const deleteItem = document.createElement('div');
+    deleteItem.className = 'drawer-branch-context-menu-item drawer-branch-context-menu-item--danger';
+    deleteItem.textContent = 'Delete branch';
+    menu.appendChild(deleteItem);
+
+    document.body.appendChild(menu);
+
+    // 位置設定
+    if (isMobile) {
+      menu.style.left = '50%';
+      menu.style.top = '50%';
+      menu.style.transform = 'translate(-50%, -50%)';
+    } else {
+      // 画面からはみ出ないように調整
+      const menuRect = menu.getBoundingClientRect();
+      let x = clientX;
+      let y = clientY;
+      if (x + menuRect.width > window.innerWidth) {
+        x = window.innerWidth - menuRect.width - 8;
+      }
+      if (y + menuRect.height > window.innerHeight) {
+        y = window.innerHeight - menuRect.height - 8;
+      }
+      menu.style.left = x + 'px';
+      menu.style.top = y + 'px';
+    }
+
+    const closeMenu = () => {
+      menu.remove();
+      document.removeEventListener('click', outsideClickHandler, true);
+      document.removeEventListener('touchstart', outsideClickHandler, true);
+    };
+
+    const outsideClickHandler = (e) => {
+      if (!menu.contains(e.target)) {
+        closeMenu();
+      }
+    };
+
+    // 次のイベントループでリスナーを追加（即時発火防止）
+    setTimeout(() => {
+      document.addEventListener('click', outsideClickHandler, true);
+      document.addEventListener('touchstart', outsideClickHandler, true);
+    }, 0);
+
+    deleteItem.addEventListener('click', async () => {
+      deleteItem.textContent = 'Checking...';
+      deleteItem.style.pointerEvents = 'none';
+      try {
+        // マージ済みかチェック
+        const { merged } = await isProjectBranchMerged(projectName, branchName);
+        let force = false;
+
+        if (!merged) {
+          // 未マージの場合は確認ダイアログ
+          const confirmed = window.confirm(
+            `Branch "${branchName}" has unmerged commits. Delete anyway?`
+          );
+          if (!confirmed) {
+            closeMenu();
+            return;
+          }
+          force = true;
+        }
+
+        deleteItem.textContent = 'Deleting...';
+        await deleteProjectBranch(projectName, branchName, force);
+        closeMenu();
+
+        // 削除後にセッション情報を更新
+        const [sessions, repos] = await Promise.all([listSessions(), listGhqRepos()]);
+        this._sessions = sessions || [];
+        this._groupSessionsByProject(this._sessions, repos || []);
+        this._renderContent();
+        // ピッカーのリストをリフレッシュ
+        refreshPicker();
+      } catch (err) {
+        closeMenu();
+        this._showDeleteError(`Failed to delete branch: ${err.message}`);
+      }
     });
   }
 
@@ -1199,7 +1476,7 @@ export class Drawer {
 
     const btn = document.createElement('button');
     btn.className = 'drawer-new-session-btn';
-    btn.textContent = '+ New Session';
+    btn.textContent = '+ Open Project';
     btn.addEventListener('click', () => {
       this._showProjectPicker(container, btn);
     });
@@ -1327,24 +1604,28 @@ export class Drawer {
       }
     });
 
+    // Actions container
+    const actionsEl = document.createElement('div');
+    actionsEl.className = 'drawer-picker-actions';
+
     // Clone new repo ボタン
     const cloneBtn = document.createElement('div');
     cloneBtn.className = 'drawer-project-picker-clone';
-    cloneBtn.textContent = 'Clone new repo...';
+    cloneBtn.textContent = '+ Clone repo...';
     cloneBtn.addEventListener('click', () => {
       this._showCloneRepoInput(picker, availableRepos, container, btn);
     });
-    picker.appendChild(cloneBtn);
+    actionsEl.appendChild(cloneBtn);
 
     // Custom name ボタン
     const customBtn = document.createElement('div');
     customBtn.className = 'drawer-project-picker-custom';
-    customBtn.textContent = 'Custom name...';
+    customBtn.textContent = '+ Custom name...';
     customBtn.addEventListener('click', () => {
       picker.remove();
       this._showCustomNameInput(container, btn);
     });
-    picker.appendChild(customBtn);
+    actionsEl.appendChild(customBtn);
 
     // Cancel ボタン
     const cancelBtn = document.createElement('button');
@@ -1353,7 +1634,9 @@ export class Drawer {
     cancelBtn.addEventListener('click', () => {
       this._hideProjectPicker(container, btn, picker);
     });
-    picker.appendChild(cancelBtn);
+    actionsEl.appendChild(cancelBtn);
+
+    picker.appendChild(actionsEl);
 
     // フォーカス
     filterInput.focus();

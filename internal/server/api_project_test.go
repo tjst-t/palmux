@@ -291,6 +291,152 @@ func TestHandleDeleteProjectWorktree(t *testing.T) {
 	}
 }
 
+func TestHandleIsProjectBranchMerged(t *testing.T) {
+	tests := []struct {
+		name       string
+		project    string
+		branch     string
+		merged     bool
+		err        error
+		wantStatus int
+	}{
+		{
+			name:       "マージ済みブランチ: merged=true を返す",
+			project:    "palmux",
+			branch:     "feature-x",
+			merged:     true,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "未マージブランチ: merged=false を返す",
+			project:    "palmux",
+			branch:     "feature-y",
+			merged:     false,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "エラー時は500を返す",
+			project:    "palmux",
+			branch:     "feature-z",
+			err:        errors.New("git error"),
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name:       "スラッシュ付きブランチ名",
+			project:    "palmux",
+			branch:     "feature/login",
+			merged:     true,
+			wantStatus: http.StatusOK,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &configurableMock{
+				isBranchMerged:    tt.merged,
+				isBranchMergedErr: tt.err,
+			}
+			srv, token := newTestServer(mock)
+			rec := doRequest(t, srv.Handler(), http.MethodGet, "/api/projects/"+tt.project+"/branch-merged/"+tt.branch, token, "")
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+
+			if tt.wantStatus == http.StatusOK {
+				var result map[string]bool
+				if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+					t.Fatalf("failed to decode response: %v", err)
+				}
+				if result["merged"] != tt.merged {
+					t.Errorf("merged = %v, want %v", result["merged"], tt.merged)
+				}
+			}
+
+			if mock.calledIsProjectBranchMerged.project != tt.project {
+				t.Errorf("IsProjectBranchMerged project = %q, want %q", mock.calledIsProjectBranchMerged.project, tt.project)
+			}
+			if mock.calledIsProjectBranchMerged.branch != tt.branch {
+				t.Errorf("IsProjectBranchMerged branch = %q, want %q", mock.calledIsProjectBranchMerged.branch, tt.branch)
+			}
+		})
+	}
+}
+
+func TestHandleDeleteProjectBranch(t *testing.T) {
+	tests := []struct {
+		name       string
+		project    string
+		branch     string
+		force      bool
+		err        error
+		wantStatus int
+	}{
+		{
+			name:       "ブランチ削除: 204を返す",
+			project:    "palmux",
+			branch:     "feature-x",
+			force:      false,
+			wantStatus: http.StatusNoContent,
+		},
+		{
+			name:       "force=trueで強制削除",
+			project:    "palmux",
+			branch:     "feature-x",
+			force:      true,
+			wantStatus: http.StatusNoContent,
+		},
+		{
+			name:       "スラッシュ付きブランチ名",
+			project:    "palmux",
+			branch:     "feature/login",
+			force:      false,
+			wantStatus: http.StatusNoContent,
+		},
+		{
+			name:       "エラー時は500を返す",
+			project:    "palmux",
+			branch:     "feature-x",
+			err:        errors.New("delete failed"),
+			wantStatus: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &configurableMock{
+				deleteProjectBranchErr: tt.err,
+			}
+			srv, token := newTestServer(mock)
+
+			path := "/api/projects/" + tt.project + "/branches/" + tt.branch
+			if tt.force {
+				path += "?force=true"
+			}
+			rec := doRequest(t, srv.Handler(), http.MethodDelete, path, token, "")
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+
+			if tt.wantStatus == http.StatusNoContent {
+				if mock.calledDeleteProjectBranch.project != tt.project {
+					t.Errorf("DeleteProjectBranch project = %q, want %q", mock.calledDeleteProjectBranch.project, tt.project)
+				}
+				if mock.calledDeleteProjectBranch.branch != tt.branch {
+					t.Errorf("DeleteProjectBranch branch = %q, want %q", mock.calledDeleteProjectBranch.branch, tt.branch)
+				}
+				if mock.calledDeleteProjectBranch.force != tt.force {
+					t.Errorf("DeleteProjectBranch force = %v, want %v", mock.calledDeleteProjectBranch.force, tt.force)
+				}
+				if rec.Body.Len() != 0 {
+					t.Errorf("body should be empty for 204, got %q", rec.Body.String())
+				}
+			}
+		})
+	}
+}
+
 func TestHandleListProjectBranches(t *testing.T) {
 	tests := []struct {
 		name       string

@@ -38,6 +38,8 @@ type TmuxManager interface {
 	NewWorktreeSession(project, branch string, createBranch bool) (*tmux.Session, error)
 	DeleteWorktreeSession(sessionName string, removeWorktree bool) error
 	GetProjectBranches(project string) ([]git.Branch, error)
+	IsProjectBranchMerged(project, branch string) (bool, error)
+	DeleteProjectBranch(project, branch string, force bool) error
 	ResolveProject(project string) string
 }
 
@@ -115,6 +117,8 @@ func NewServer(opts Options) *Server {
 	mux.Handle("POST /api/projects/{project}/worktrees", auth(s.handleCreateProjectWorktree()))
 	mux.Handle("DELETE /api/projects/{project}/worktrees/{branch...}", auth(s.handleDeleteProjectWorktree()))
 	mux.Handle("GET /api/projects/{project}/branches", auth(s.handleListProjectBranches()))
+	mux.Handle("GET /api/projects/{project}/branch-merged/{branch...}", auth(s.handleIsProjectBranchMerged()))
+	mux.Handle("DELETE /api/projects/{project}/branches/{branch...}", auth(s.handleDeleteProjectBranch()))
 	mux.Handle("GET /api/sessions/{session}/mode", auth(s.handleGetSessionMode()))
 	mux.Handle("POST /api/sessions/{session}/claude/restart", auth(s.handleRestartClaudeWindow()))
 	mux.Handle("GET /api/sessions/{session}/git/status", auth(s.handleGitStatus()))

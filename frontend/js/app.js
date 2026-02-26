@@ -413,7 +413,16 @@ function switchWindow(sessionName, windowIndex) {
  * @param {string} sessionName - セッション名
  * @param {number} windowIndex - ウィンドウインデックス
  */
-function switchSession(sessionName, windowIndex) {
+async function switchSession(sessionName, windowIndex) {
+  try {
+    const mode = await getSessionMode(sessionName);
+    if (mode && mode.claude_code && mode.claude_window >= 0) {
+      connectToWindow(sessionName, mode.claude_window);
+      return;
+    }
+  } catch {
+    // ignore — フォールバックで指定ウィンドウに接続
+  }
   connectToWindow(sessionName, windowIndex);
 }
 

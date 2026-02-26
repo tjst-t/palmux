@@ -81,6 +81,11 @@ type configurableMock struct {
 	projectBranches            []git.Branch
 	projectBranchesErr         error
 	calledGetProjectBranches   string
+	isBranchMerged             bool
+	isBranchMergedErr          error
+	calledIsProjectBranchMerged struct{ project, branch string }
+	deleteProjectBranchErr     error
+	calledDeleteProjectBranch  struct{ project, branch string; force bool }
 	resolvedProject            string
 	calledResolveProject       string
 }
@@ -214,6 +219,19 @@ func (m *configurableMock) DeleteWorktreeSession(sessionName string, removeWorkt
 func (m *configurableMock) GetProjectBranches(project string) ([]git.Branch, error) {
 	m.calledGetProjectBranches = project
 	return m.projectBranches, m.projectBranchesErr
+}
+
+func (m *configurableMock) IsProjectBranchMerged(project, branch string) (bool, error) {
+	m.calledIsProjectBranchMerged = struct{ project, branch string }{project, branch}
+	return m.isBranchMerged, m.isBranchMergedErr
+}
+
+func (m *configurableMock) DeleteProjectBranch(project, branch string, force bool) error {
+	m.calledDeleteProjectBranch = struct {
+		project, branch string
+		force           bool
+	}{project, branch, force}
+	return m.deleteProjectBranchErr
 }
 
 func (m *configurableMock) ResolveProject(project string) string {

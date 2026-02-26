@@ -7,6 +7,28 @@ PORT="${2:-8443}"
 CERT_DIR="/tmp/palmux-dev-certs"
 CERT_FILE="${CERT_DIR}/palmux-${HOST}.crt"
 KEY_FILE="${CERT_DIR}/palmux-${HOST}.key"
+PID_FILE="/tmp/palmux-dev.pid"
+LOG_FILE="/tmp/palmux-dev.log"
+
+# 以前の dev-serve プロセスを停止
+if [ -f "$PID_FILE" ]; then
+  OLD_PID=$(cat "$PID_FILE")
+  if kill -0 "$OLD_PID" 2>/dev/null; then
+    echo "==> Killing previous palmux process (PID: ${OLD_PID})..."
+    kill "$OLD_PID"
+    # 終了を待つ（最大5秒）
+    for i in $(seq 1 50); do
+      kill -0 "$OLD_PID" 2>/dev/null || break
+      sleep 0.1
+    done
+    # まだ生きていれば SIGKILL
+    if kill -0 "$OLD_PID" 2>/dev/null; then
+      echo "    Process did not exit, sending SIGKILL..."
+      kill -9 "$OLD_PID" 2>/dev/null || true
+    fi
+  fi
+  rm -f "$PID_FILE"
+fi
 
 # ビルド
 echo "==> Building..."
@@ -43,5 +65,8 @@ else
   echo "==> Using existing certificate for ${HOST} (valid)"
 fi
 
-echo "==> Starting Palmux on https://${HOST}:${PORT}"
-exec ./palmux --tls-cert "$CERT_FILE" --tls-key "$KEY_FILE" --host 0.0.0.0 --port "${PORT}"
+echo "==> Starting Palmux on https://${HOST}:${PORT} (nohup, log: ${LOG_FILE})"
+nohup ./palmux --tls-cert "$CERT_FILE" --tls-key "$KEY_FILE" --host 0.0.0.0 --port "${PORT}" \
+  > "$LOG_FILE" 2>&1 &
+echo $! > "$PID_FILE"
+echo "    PID: $(cat "$PID_FILE")"

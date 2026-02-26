@@ -152,55 +152,17 @@ func ParseDiffTree(output string) []StatusFile {
 	return files
 }
 
-// ParseWorktrees は git worktree list --porcelain の出力をパースする。
-func ParseWorktrees(output string) []Worktree {
-	worktrees := []Worktree{}
-	if output == "" {
-		return worktrees
-	}
-
-	// エントリは空行で区切られる
-	blocks := strings.Split(output, "\n\n")
-	for _, block := range blocks {
-		block = strings.TrimSpace(block)
-		if block == "" {
-			continue
-		}
-
-		var wt Worktree
-		lines := strings.Split(block, "\n")
-		for _, line := range lines {
-			switch {
-			case strings.HasPrefix(line, "worktree "):
-				wt.Path = strings.TrimPrefix(line, "worktree ")
-			case strings.HasPrefix(line, "HEAD "):
-				wt.Head = strings.TrimPrefix(line, "HEAD ")
-			case strings.HasPrefix(line, "branch "):
-				ref := strings.TrimPrefix(line, "branch ")
-				// refs/heads/ プレフィックスを除去
-				wt.Branch = strings.TrimPrefix(ref, "refs/heads/")
-			case line == "bare":
-				wt.Bare = true
-			case line == "detached":
-				// detached HEAD: branch は空のまま
-			}
-		}
-
-		if wt.Path != "" {
-			worktrees = append(worktrees, wt)
-		}
-	}
-
-	return worktrees
-}
-
 // ParseBranches は git branch -a --no-color の出力をパースする。
+// ローカルブランチが存在するリモートブランチは除外する。
+// 例: ローカル "main" が存在する場合、"origin/main" は返さない。
 func ParseBranches(output string) []Branch {
 	branches := []Branch{}
 	if output == "" {
 		return branches
 	}
 
+	// まず全ブランチをパースする
+	var allBranches []Branch
 	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
 	for _, line := range lines {
 		if line == "" {
@@ -210,6 +172,9 @@ func ParseBranches(output string) []Branch {
 		current := false
 		if strings.HasPrefix(line, "* ") {
 			current = true
+			line = line[2:]
+		} else if strings.HasPrefix(line, "+ ") {
+			// worktree でチェックアウト中のブランチ
 			line = line[2:]
 		} else {
 			line = strings.TrimSpace(line)
@@ -227,11 +192,33 @@ func ParseBranches(output string) []Branch {
 			name = strings.TrimPrefix(name, "remotes/")
 		}
 
-		branches = append(branches, Branch{
+		allBranches = append(allBranches, Branch{
 			Name:    name,
 			Current: current,
 			Remote:  remote,
 		})
+	}
+
+	// ローカルブランチ名のセットを構築
+	localNames := make(map[string]bool)
+	for _, b := range allBranches {
+		if !b.Remote {
+			localNames[b.Name] = true
+		}
+	}
+
+	// リモートブランチのうち、対応するローカルブランチが存在するものを除外
+	for _, b := range allBranches {
+		if b.Remote {
+			// "origin/feature/login" → "feature/login"
+			if idx := strings.Index(b.Name, "/"); idx >= 0 {
+				bareName := b.Name[idx+1:]
+				if localNames[bareName] {
+					continue
+				}
+			}
+		}
+		branches = append(branches, b)
 	}
 
 	return branches

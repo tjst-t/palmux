@@ -1034,36 +1034,37 @@ html, body {
 
 /* Drawer New Session Button */
 .drawer-new-session {
-  padding: 12px 16px;
-  border-top: 1px solid #2a2a4a;
+  padding: 4px 0;
+  border-top: 1px solid rgba(126, 200, 227, 0.08);
 }
 
 .drawer-new-session-btn {
   display: flex;
   align-items: center;
-  justify-content: center;
   width: 100%;
   padding: 10px 16px;
-  min-height: 44px;
-  background: rgba(126, 200, 227, 0.1);
-  border: 1px dashed rgba(126, 200, 227, 0.4);
-  border-radius: 8px;
-  color: #7ec8e3;
-  font-size: 14px;
+  min-height: 40px;
+  background: none;
+  border: none;
+  border-radius: 0;
+  color: rgba(126, 200, 227, 0.7);
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background 0.15s, color 0.15s;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
+  letter-spacing: 0.01em;
 }
 
 .drawer-new-session-btn:hover {
-  background: rgba(126, 200, 227, 0.18);
-  border-color: rgba(126, 200, 227, 0.6);
+  background: rgba(126, 200, 227, 0.06);
+  color: #7ec8e3;
 }
 
 .drawer-new-session-btn:active {
-  background: rgba(126, 200, 227, 0.25);
+  background: rgba(126, 200, 227, 0.12);
+  color: #7ec8e3;
 }
 
 /* Drawer New Session Input Form */
@@ -1153,136 +1154,153 @@ html, body {
   padding: 4px 0;
 }
 
-/* Project Picker */
+/* ─── Picker Shared Styles ─── */
 .drawer-project-picker {
   display: flex;
   flex-direction: column;
-  gap: 0;
 }
 
 .drawer-project-picker-loading {
-  padding: 16px 0;
-  text-align: center;
-  font-size: 13px;
-  color: #8888aa;
+  padding: 10px 16px;
+  font-size: 12px;
+  color: #6a6a8a;
 }
 
+/* Filter input: inline search bar */
 .drawer-project-picker-filter {
-  width: 100%;
-  padding: 8px 12px;
-  min-height: 40px;
-  background: #1a1a2e;
-  border: 1px solid #2a2a4a;
+  width: calc(100% - 32px);
+  padding: 7px 10px 7px 28px;
+  min-height: 34px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(126, 200, 227, 0.12);
   border-radius: 6px;
   color: #e0e0e0;
   font-size: 16px;
   outline: none;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  margin-bottom: 8px;
+  margin: 6px 16px 4px 16px;
+  transition: border-color 0.2s, background 0.2s;
+  background-image: url("data:image/svg+xml,%3Csvg width='14' height='14' viewBox='0 0 14 14' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='6' cy='6' r='4.5' stroke='%236a6a8a' stroke-width='1.3'/%3E%3Cline x1='9.5' y1='9.5' x2='12.5' y2='12.5' stroke='%236a6a8a' stroke-width='1.3' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: 8px center;
+  background-size: 14px 14px;
 }
 
 .drawer-project-picker-filter::placeholder {
-  color: #6a6a8a;
+  color: #555577;
 }
 
 .drawer-project-picker-filter:focus {
-  border-color: #7ec8e3;
+  border-color: rgba(126, 200, 227, 0.35);
+  background-color: rgba(0, 0, 0, 0.3);
 }
 
+/* Picker list container */
 .drawer-project-picker-list {
   max-height: 240px;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  border: 1px solid #2a2a4a;
-  border-radius: 6px;
-  background: #1a1a2e;
+  padding: 2px 0;
 }
 
+/* Picker items */
 .drawer-project-picker-item {
-  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
   cursor: pointer;
   transition: background 0.15s;
-  border-bottom: 1px solid rgba(42, 42, 74, 0.5);
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
-}
-
-.drawer-project-picker-item:last-child {
-  border-bottom: none;
+  border-left: 2px solid transparent;
 }
 
 .drawer-project-picker-item:hover {
-  background: rgba(126, 200, 227, 0.1);
+  background: rgba(126, 200, 227, 0.06);
+  border-left-color: rgba(126, 200, 227, 0.3);
 }
 
 .drawer-project-picker-item:active {
-  background: rgba(126, 200, 227, 0.2);
+  background: rgba(126, 200, 227, 0.12);
+  border-left-color: rgba(126, 200, 227, 0.5);
 }
 
 .drawer-project-picker-item--creating {
-  opacity: 0.6;
+  opacity: 0.5;
   pointer-events: none;
-  text-align: center;
-  color: #8888aa;
-  font-size: 13px;
+  font-size: 12px;
+  color: #6a6a8a;
 }
 
 .drawer-project-picker-item-name {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
-  color: #e0e0e0;
+  color: #d0d0e0;
 }
 
 .drawer-project-picker-item-path {
-  font-size: 11px;
-  color: #6a6a8a;
-  margin-top: 2px;
+  font-size: 10px;
+  color: #555577;
+  margin-top: 1px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .drawer-project-picker-empty {
-  padding: 16px 12px;
+  padding: 12px 16px;
   text-align: center;
-  font-size: 13px;
-  color: #6a6a8a;
+  font-size: 12px;
+  color: #555577;
 }
 
-.drawer-project-picker-clone {
-  padding: 10px 12px;
-  margin-top: 8px;
+/* Picker action links */
+.drawer-picker-actions {
+  padding: 4px 0 2px;
+  border-top: 1px solid rgba(126, 200, 227, 0.06);
+  margin-top: 2px;
+}
+
+.drawer-project-picker-clone,
+.drawer-project-picker-custom {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  margin: 0;
   cursor: pointer;
-  transition: background 0.15s;
-  border: 1px dashed rgba(100, 180, 130, 0.5);
-  border-radius: 6px;
-  color: #7ab896;
-  font-size: 13px;
-  text-align: center;
+  transition: background 0.15s, color 0.15s;
+  border: none;
+  border-radius: 0;
+  color: rgba(126, 200, 227, 0.55);
+  font-size: 12px;
+  font-style: normal;
+  text-align: left;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
 
-.drawer-project-picker-clone:hover {
-  background: rgba(100, 180, 130, 0.1);
-  color: #a0dbb8;
+.drawer-project-picker-clone:hover,
+.drawer-project-picker-custom:hover {
+  background: rgba(126, 200, 227, 0.06);
+  color: rgba(126, 200, 227, 0.85);
 }
 
-.drawer-project-picker-clone:active {
-  background: rgba(100, 180, 130, 0.15);
+.drawer-project-picker-clone:active,
+.drawer-project-picker-custom:active {
+  background: rgba(126, 200, 227, 0.1);
 }
 
 .drawer-project-picker-clone-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
-  color: #e0e0e0;
-  padding: 4px 0 8px;
+  color: #d0d0e0;
+  padding: 8px 16px 4px;
 }
 
 .drawer-project-picker-clone-actions {
   display: flex;
   gap: 8px;
-  margin-top: 8px;
+  padding: 4px 16px 6px;
 }
 
 .drawer-project-picker-clone-actions button {
@@ -1292,8 +1310,7 @@ html, body {
 .drawer-project-picker-clone-status {
   font-size: 12px;
   color: #7ab896;
-  padding: 8px 0 0;
-  text-align: center;
+  padding: 4px 16px;
 }
 
 .drawer-delete-modal-path {
@@ -1304,32 +1321,26 @@ html, body {
   font-family: monospace;
 }
 
-.drawer-project-picker-custom {
-  padding: 10px 12px;
-  margin-top: 8px;
-  cursor: pointer;
-  transition: background 0.15s;
-  border: 1px dashed rgba(136, 136, 170, 0.4);
-  border-radius: 6px;
-  color: #8888aa;
-  font-size: 13px;
-  text-align: center;
-  -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
-}
-
-.drawer-project-picker-custom:hover {
-  background: rgba(136, 136, 170, 0.1);
-  color: #e0e0e0;
-}
-
-.drawer-project-picker-custom:active {
-  background: rgba(136, 136, 170, 0.15);
-}
-
+/* Cancel button in pickers */
 .drawer-project-picker-cancel {
-  margin-top: 8px;
+  margin: 0;
   width: 100%;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 0;
+  text-align: left;
+  font-size: 12px;
+  font-style: normal;
+  min-height: unset;
+  color: rgba(136, 136, 170, 0.6);
+  background: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.drawer-project-picker-cancel:hover {
+  background: rgba(136, 136, 170, 0.06);
+  color: rgba(136, 136, 170, 0.9);
 }
 
 /* --- Drawer: Project/Branch structure --- */
@@ -1361,35 +1372,116 @@ html, body {
   color: #fff;
 }
 
+/* Open Branch trigger */
 .drawer-open-branch-btn {
   display: flex;
   align-items: center;
-  padding: 6px 12px 6px 28px;
+  padding: 7px 12px 7px 28px;
   cursor: pointer;
-  color: #888;
+  color: rgba(126, 200, 227, 0.5);
   font-size: 12px;
-  font-style: italic;
   transition: color 0.15s, background-color 0.15s;
 }
 
 .drawer-open-branch-btn:hover {
-  color: #aaa;
-  background-color: rgba(255, 255, 255, 0.05);
+  color: rgba(126, 200, 227, 0.8);
+  background-color: rgba(126, 200, 227, 0.06);
 }
 
+/* ─── Branch Picker (nested inside project) ─── */
 .drawer-branch-picker {
-  padding: 4px 0;
+  padding: 2px 0 0;
+}
+
+.drawer-branch-picker .drawer-project-picker-filter {
+  width: calc(100% - 44px);
+  margin: 4px 16px 4px 28px;
+}
+
+.drawer-branch-picker .drawer-project-picker-list {
+  max-height: 200px;
+}
+
+.drawer-branch-picker .drawer-project-picker-item {
+  padding: 7px 16px 7px 28px;
+}
+
+.drawer-branch-picker .drawer-project-picker-item-name {
+  font-size: 13px;
+  font-weight: 400;
+  color: #c0c0d0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.drawer-branch-picker .drawer-project-picker-empty {
+  padding: 10px 16px 10px 28px;
+}
+
+.drawer-branch-picker .drawer-project-picker-clone,
+.drawer-branch-picker .drawer-project-picker-custom {
+  padding: 7px 16px 7px 28px;
+}
+
+.drawer-branch-picker .drawer-project-picker-cancel {
+  padding: 7px 16px 7px 28px;
+}
+
+.drawer-branch-picker .drawer-project-picker-clone-title {
+  padding: 8px 16px 4px 28px;
+}
+
+.drawer-branch-picker .drawer-project-picker-clone-actions {
+  padding: 4px 16px 6px 28px;
 }
 
 .drawer-branch-remote-tag {
   display: inline-block;
-  margin-left: 6px;
-  padding: 0 4px;
-  font-size: 10px;
-  color: #888;
-  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 6px;
+  font-size: 9px;
+  font-weight: 500;
+  color: rgba(136, 136, 170, 0.8);
+  background: rgba(136, 136, 170, 0.12);
   border-radius: 3px;
   vertical-align: middle;
+  font-style: normal;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Branch picker context menu */
+.drawer-branch-context-menu {
+  position: fixed;
+  z-index: 250;
+  background: #1a1a2e;
+  border: 1px solid #2a2a4a;
+  border-radius: 8px;
+  padding: 4px 0;
+  min-width: 160px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.drawer-branch-context-menu-item {
+  padding: 10px 16px;
+  font-size: 14px;
+  cursor: pointer;
+  color: #ccc;
+  transition: background-color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.drawer-branch-context-menu-item:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.drawer-branch-context-menu-item--danger {
+  color: #e57373;
+}
+
+.drawer-branch-context-menu-item--danger:hover {
+  background-color: rgba(229, 115, 115, 0.1);
 }
 
 .drawer-other-sessions {
@@ -1879,13 +1971,14 @@ html, body {
     font-size: 13px;
   }
 
-  .drawer-new-session {
-    padding: 10px 14px;
-  }
-
   .drawer-new-session-btn {
     padding: 8px 14px;
-    font-size: 13px;
+    font-size: 12px;
+  }
+
+  .drawer-project-picker-filter {
+    margin: 4px 14px;
+    width: calc(100% - 28px);
   }
 
   .drawer-project-picker-list {
@@ -1893,15 +1986,45 @@ html, body {
   }
 
   .drawer-project-picker-item {
-    padding: 8px 10px;
+    padding: 7px 14px;
   }
 
   .drawer-project-picker-item-name {
-    font-size: 13px;
+    font-size: 12px;
   }
 
   .drawer-project-picker-item-path {
-    font-size: 10px;
+    font-size: 9px;
+  }
+
+  .drawer-branch-picker .drawer-project-picker-filter {
+    margin-left: 24px;
+    width: calc(100% - 38px);
+  }
+
+  .drawer-branch-picker .drawer-project-picker-item {
+    padding: 6px 14px 6px 24px;
+  }
+
+  .drawer-branch-picker .drawer-project-picker-empty {
+    padding: 8px 14px 8px 24px;
+  }
+
+  .drawer-branch-picker .drawer-project-picker-clone,
+  .drawer-branch-picker .drawer-project-picker-custom {
+    padding: 6px 14px 6px 24px;
+  }
+
+  .drawer-branch-picker .drawer-project-picker-cancel {
+    padding: 6px 14px 6px 24px;
+  }
+
+  .drawer-branch-item {
+    padding: 6px 14px 6px 24px;
+  }
+
+  .drawer-open-branch-btn {
+    padding: 6px 14px 6px 24px;
   }
 
   .drawer-delete-modal {

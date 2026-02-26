@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -45,6 +44,43 @@ func (m *sequentialMockExecutor) Run(args ...string) ([]byte, error) {
 	c := m.calls[m.callIdx]
 	m.callIdx++
 	return c.output, c.err
+}
+
+// sequentialDirMockCommandRunner は同一キーに対して呼び出し回数に応じて異なる結果を返す CommandRunner モック。
+type sequentialDirMockCommandRunner struct {
+	results        map[string]mockResult
+	dirCallResults map[string][]mockResult
+	dirCallIdx     map[string]int
+}
+
+func (m *sequentialDirMockCommandRunner) RunCommand(name string, args ...string) ([]byte, error) {
+	key := name
+	for _, a := range args {
+		key += " " + a
+	}
+	if r, ok := m.results[key]; ok {
+		return r.output, r.err
+	}
+	return nil, errors.New("unexpected command: " + key)
+}
+
+func (m *sequentialDirMockCommandRunner) RunCommandInDir(dir, name string, args ...string) ([]byte, error) {
+	key := dir + " " + name
+	for _, a := range args {
+		key += " " + a
+	}
+	if m.dirCallIdx == nil {
+		m.dirCallIdx = make(map[string]int)
+	}
+	if results, ok := m.dirCallResults[key]; ok {
+		idx := m.dirCallIdx[key]
+		if idx >= len(results) {
+			return nil, fmt.Errorf("unexpected call #%d for key: %s", idx, key)
+		}
+		m.dirCallIdx[key] = idx + 1
+		return results[idx].output, results[idx].err
+	}
+	return nil, errors.New("unexpected command in dir: " + key)
 }
 
 // assertArgs はモックに渡された引数が期待通りか検証する。
@@ -1643,76 +1679,6 @@ func TestManager_CreateGroupedSession(t *testing.T) {
 	})
 }
 
-func TestSanitizeBranch(t *testing.T) {
-	tests := []struct {
-		name   string
-		branch string
-		want   string
-	}{
-		{
-			name:   "スラッシュなし",
-			branch: "main",
-			want:   "main",
-		},
-		{
-			name:   "スラッシュ1つ",
-			branch: "feature/login",
-			want:   "feature--login",
-		},
-		{
-			name:   "スラッシュ複数",
-			branch: "feature/auth/oauth",
-			want:   "feature--auth--oauth",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := sanitizeBranch(tt.branch)
-			if got != tt.want {
-				t.Errorf("sanitizeBranch(%q) = %q, want %q", tt.branch, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestWorktreePath(t *testing.T) {
-	tests := []struct {
-		name     string
-		repoPath string
-		branch   string
-		want     string
-	}{
-		{
-			name:     "単純なブランチ名",
-			repoPath: "/home/user/ghq/github.com/tjst-t/palmux",
-			branch:   "feature-x",
-			want:     filepath.Join("/home/user/ghq/github.com/tjst-t/palmux", ".palmux-worktrees", "feature-x"),
-		},
-		{
-			name:     "スラッシュ含むブランチ名",
-			repoPath: "/home/user/ghq/github.com/tjst-t/palmux",
-			branch:   "feature/login",
-			want:     filepath.Join("/home/user/ghq/github.com/tjst-t/palmux", ".palmux-worktrees", "feature--login"),
-		},
-		{
-			name:     "main ブランチ",
-			repoPath: "/home/user/repo",
-			branch:   "main",
-			want:     filepath.Join("/home/user/repo", ".palmux-worktrees", "main"),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := WorktreePath(tt.repoPath, tt.branch)
-			if got != tt.want {
-				t.Errorf("WorktreePath(%q, %q) = %q, want %q", tt.repoPath, tt.branch, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestManager_ListProjectWorktrees(t *testing.T) {
 	repoPath := "/home/user/ghq/github.com/tjst-t/palmux"
 
@@ -1721,15 +1687,9 @@ func TestManager_ListProjectWorktrees(t *testing.T) {
 		"ghq list": {output: []byte("github.com/tjst-t/palmux\n"), err: nil},
 	}
 
-	worktreeOutput := "worktree " + repoPath + "\n" +
-		"HEAD abc1234def5678901234567890123456789abcde\n" +
-		"branch refs/heads/main\n\n" +
-		"worktree " + repoPath + "/.palmux-worktrees/feature-x\n" +
-		"HEAD def5678abc1234567890123456789012345678901\n" +
-		"branch refs/heads/feature-x\n\n"
+	gwqJSON := `[{"path":"` + repoPath + `","branch":"main","commit_hash":"abc123","is_main":true,"created_at":""},{"path":"/home/user/worktrees/github.com/tjst-t/palmux/feature-x","branch":"feature-x","commit_hash":"def456","is_main":false,"created_at":""}]`
 
 	t.Run("正常系: worktree とセッション混在", func(t *testing.T) {
-		// list-sessions で palmux と palmux@feature-x が存在する
 		sessionsOutput := "palmux\t1\t0\t1704067200\t1704067200\npalmux@feature-x\t1\t0\t1704067200\t1704067200\n"
 
 		mock := &sequentialMockExecutor{
@@ -1739,20 +1699,15 @@ func TestManager_ListProjectWorktrees(t *testing.T) {
 			},
 		}
 
-		gitMock := &mockGitCommandRunner{
-			results: map[string]mockGitResult{
-				repoPath + " worktree list --porcelain": {
-					output: []byte(worktreeOutput),
-					err:    nil,
-				},
-			},
-		}
-
 		m := &Manager{
 			Exec: mock,
 			Ghq: &GhqResolver{
-				Cmd:     &mockCommandRunner{results: ghqResults},
-				GitCmd:  gitMock,
+				Cmd: &mockCommandRunner{
+					results: ghqResults,
+					dirResults: map[string]mockResult{
+						repoPath + " gwq list --json": {output: []byte(gwqJSON), err: nil},
+					},
+				},
 				HomeDir: "/home/user",
 			},
 		}
@@ -1795,20 +1750,16 @@ func TestManager_ListProjectWorktrees(t *testing.T) {
 		}
 	})
 
-	t.Run("異常系: GitCmd が nil", func(t *testing.T) {
+	t.Run("異常系: Ghq が nil", func(t *testing.T) {
 		mock := &mockExecutor{}
 		m := &Manager{
 			Exec: mock,
-			Ghq: &GhqResolver{
-				Cmd:     &mockCommandRunner{results: ghqResults},
-				GitCmd:  nil,
-				HomeDir: "/home/user",
-			},
+			Ghq:  nil,
 		}
 
 		_, err := m.ListProjectWorktrees("palmux")
 		if err == nil {
-			t.Fatal("ListProjectWorktrees() should return error when GitCmd is nil")
+			t.Fatal("ListProjectWorktrees() should return error when Ghq is nil")
 		}
 	})
 
@@ -1818,7 +1769,6 @@ func TestManager_ListProjectWorktrees(t *testing.T) {
 			Exec: mock,
 			Ghq: &GhqResolver{
 				Cmd:     &mockCommandRunner{results: ghqResults},
-				GitCmd:  &mockGitCommandRunner{results: map[string]mockGitResult{}},
 				HomeDir: "/home/user",
 			},
 		}
@@ -1832,58 +1782,35 @@ func TestManager_ListProjectWorktrees(t *testing.T) {
 
 func TestManager_NewWorktreeSession(t *testing.T) {
 	repoPath := "/home/user/ghq/github.com/tjst-t/palmux"
-	wtPath := filepath.Join(repoPath, ".palmux-worktrees", "feature-x")
 
 	ghqResults := map[string]mockResult{
 		"ghq root": {output: []byte("/home/user/ghq\n"), err: nil},
 		"ghq list": {output: []byte("github.com/tjst-t/palmux\n"), err: nil},
 	}
 
-	// worktree output with only main branch (no feature-x yet)
-	worktreeOutputNoFeature := "worktree " + repoPath + "\n" +
-		"HEAD abc1234def5678901234567890123456789abcde\n" +
-		"branch refs/heads/main\n\n"
-
-	// worktree output with feature-x already present
-	worktreeOutputWithFeature := "worktree " + repoPath + "\n" +
-		"HEAD abc1234def5678901234567890123456789abcde\n" +
-		"branch refs/heads/main\n\n" +
-		"worktree " + wtPath + "\n" +
-		"HEAD def5678abc1234567890123456789012345678901\n" +
-		"branch refs/heads/feature-x\n\n"
+	gwqJSONNoFeature := `[{"path":"` + repoPath + `","branch":"main","commit_hash":"abc123","is_main":true,"created_at":""}]`
+	gwqJSONWithFeature := `[{"path":"` + repoPath + `","branch":"main","commit_hash":"abc123","is_main":true,"created_at":""},{"path":"/home/user/worktrees/github.com/tjst-t/palmux/feature-x","branch":"feature-x","commit_hash":"def456","is_main":false,"created_at":""}]`
 
 	t.Run("正常系: 新規 worktree 作成 + セッション作成", func(t *testing.T) {
 		sessionOutput := "palmux@feature-x\t1\t0\t1704067200\t1704067200\n"
 
-		// NewSession calls new-session with ghq resolve which calls ghq root + ghq list
-		// Then needs to resolve palmux@feature-x which requires worktree list again
 		seqMock := &sequentialMockExecutor{
 			calls: []mockCall{
-				// NewSession → new-session (Ghq.Resolve will be called by ghqResults)
+				// NewSession
 				{output: []byte(sessionOutput), err: nil},
-			},
-		}
-
-		gitMock := &mockGitCommandRunner{
-			results: map[string]mockGitResult{
-				// ListWorktrees check (no feature-x present)
-				repoPath + " worktree list --porcelain": {
-					output: []byte(worktreeOutputNoFeature),
-					err:    nil,
-				},
-				// AddWorktree
-				repoPath + " worktree add " + wtPath + " feature-x": {
-					output: []byte(""),
-					err:    nil,
-				},
 			},
 		}
 
 		m := &Manager{
 			Exec: seqMock,
 			Ghq: &GhqResolver{
-				Cmd:     &mockCommandRunner{results: ghqResults},
-				GitCmd:  gitMock,
+				Cmd: &mockCommandRunner{
+					results: ghqResults,
+					dirResults: map[string]mockResult{
+						repoPath + " gwq list --json":  {output: []byte(gwqJSONNoFeature), err: nil},
+						repoPath + " gwq add feature-x": {output: []byte(""), err: nil},
+					},
+				},
 				HomeDir: "/home/user",
 			},
 		}
@@ -1908,21 +1835,15 @@ func TestManager_NewWorktreeSession(t *testing.T) {
 			},
 		}
 
-		gitMock := &mockGitCommandRunner{
-			results: map[string]mockGitResult{
-				// ListWorktrees check (feature-x already present)
-				repoPath + " worktree list --porcelain": {
-					output: []byte(worktreeOutputWithFeature),
-					err:    nil,
-				},
-			},
-		}
-
 		m := &Manager{
 			Exec: seqMock,
 			Ghq: &GhqResolver{
-				Cmd:     &mockCommandRunner{results: ghqResults},
-				GitCmd:  gitMock,
+				Cmd: &mockCommandRunner{
+					results: ghqResults,
+					dirResults: map[string]mockResult{
+						repoPath + " gwq list --json": {output: []byte(gwqJSONWithFeature), err: nil},
+					},
+				},
 				HomeDir: "/home/user",
 			},
 		}
@@ -1939,7 +1860,6 @@ func TestManager_NewWorktreeSession(t *testing.T) {
 
 	t.Run("正常系: createBranch=true で -b フラグ付き worktree 作成", func(t *testing.T) {
 		sessionOutput := "palmux@new-branch\t1\t0\t1704067200\t1704067200\n"
-		newWtPath := filepath.Join(repoPath, ".palmux-worktrees", "new-branch")
 
 		seqMock := &sequentialMockExecutor{
 			calls: []mockCall{
@@ -1947,26 +1867,16 @@ func TestManager_NewWorktreeSession(t *testing.T) {
 			},
 		}
 
-		gitMock := &mockGitCommandRunner{
-			results: map[string]mockGitResult{
-				// ListWorktrees check (no new-branch)
-				repoPath + " worktree list --porcelain": {
-					output: []byte(worktreeOutputNoFeature),
-					err:    nil,
-				},
-				// AddWorktree with -b flag
-				repoPath + " worktree add -b new-branch " + newWtPath: {
-					output: []byte(""),
-					err:    nil,
-				},
-			},
-		}
-
 		m := &Manager{
 			Exec: seqMock,
 			Ghq: &GhqResolver{
-				Cmd:     &mockCommandRunner{results: ghqResults},
-				GitCmd:  gitMock,
+				Cmd: &mockCommandRunner{
+					results: ghqResults,
+					dirResults: map[string]mockResult{
+						repoPath + " gwq list --json":     {output: []byte(gwqJSONNoFeature), err: nil},
+						repoPath + " gwq add -b new-branch": {output: []byte(""), err: nil},
+					},
+				},
 				HomeDir: "/home/user",
 			},
 		}
@@ -1980,16 +1890,87 @@ func TestManager_NewWorktreeSession(t *testing.T) {
 			t.Errorf("session name = %q, want %q", got.Name, "palmux@new-branch")
 		}
 	})
+
+	t.Run("正常系: gwq add 失敗→再チェックで worktree 存在→セッション作成", func(t *testing.T) {
+		sessionOutput := "palmux@feature-x\t1\t0\t1704067200\t1704067200\n"
+
+		seqMock := &sequentialMockExecutor{
+			calls: []mockCall{
+				// NewSession
+				{output: []byte(sessionOutput), err: nil},
+			},
+		}
+
+		m := &Manager{
+			Exec: seqMock,
+			Ghq: &GhqResolver{
+				Cmd: &sequentialDirMockCommandRunner{
+					results: ghqResults,
+					dirCallResults: map[string][]mockResult{
+						// 1st gwq list: feature-x not found
+						// gwq add: fails
+						// 2nd gwq list: feature-x exists (created by another process)
+						repoPath + " gwq list --json": {
+							{output: []byte(gwqJSONNoFeature), err: nil},
+							{output: []byte(gwqJSONWithFeature), err: nil},
+						},
+						repoPath + " gwq add feature-x": {
+							{output: nil, err: errors.New("worktree already exists")},
+						},
+					},
+				},
+				HomeDir: "/home/user",
+			},
+		}
+
+		got, err := m.NewWorktreeSession("palmux", "feature-x", false)
+		if err != nil {
+			t.Fatalf("NewWorktreeSession() error = %v", err)
+		}
+
+		if got.Name != "palmux@feature-x" {
+			t.Errorf("session name = %q, want %q", got.Name, "palmux@feature-x")
+		}
+	})
+
+	t.Run("異常系: gwq add 失敗→再チェックでも worktree なし→エラー", func(t *testing.T) {
+		seqMock := &sequentialMockExecutor{
+			calls: []mockCall{},
+		}
+
+		m := &Manager{
+			Exec: seqMock,
+			Ghq: &GhqResolver{
+				Cmd: &sequentialDirMockCommandRunner{
+					results: ghqResults,
+					dirCallResults: map[string][]mockResult{
+						repoPath + " gwq list --json": {
+							{output: []byte(gwqJSONNoFeature), err: nil},
+							{output: []byte(gwqJSONNoFeature), err: nil},
+						},
+						repoPath + " gwq add feature-x": {
+							{output: nil, err: errors.New("branch not found")},
+						},
+					},
+				},
+				HomeDir: "/home/user",
+			},
+		}
+
+		_, err := m.NewWorktreeSession("palmux", "feature-x", false)
+		if err == nil {
+			t.Fatal("NewWorktreeSession() expected error, got nil")
+		}
+	})
 }
 
 func TestManager_DeleteWorktreeSession(t *testing.T) {
-	repoPath := "/home/user/ghq/github.com/tjst-t/palmux"
-	wtPath := filepath.Join(repoPath, ".palmux-worktrees", "feature-x")
-
 	ghqResults := map[string]mockResult{
 		"ghq root": {output: []byte("/home/user/ghq\n"), err: nil},
 		"ghq list": {output: []byte("github.com/tjst-t/palmux\n"), err: nil},
 	}
+
+	repoPath := "/home/user/ghq/github.com/tjst-t/palmux"
 
 	t.Run("removeWorktree=true: セッション kill + worktree 削除", func(t *testing.T) {
 		seqMock := &sequentialMockExecutor{
@@ -1999,21 +1980,15 @@ func TestManager_DeleteWorktreeSession(t *testing.T) {
 			},
 		}
 
-		gitMock := &mockGitCommandRunner{
-			results: map[string]mockGitResult{
-				// RemoveWorktree
-				repoPath + " worktree remove " + wtPath: {
-					output: []byte(""),
-					err:    nil,
-				},
-			},
-		}
-
 		m := &Manager{
 			Exec: seqMock,
 			Ghq: &GhqResolver{
-				Cmd:     &mockCommandRunner{results: ghqResults},
-				GitCmd:  gitMock,
+				Cmd: &mockCommandRunner{
+					results: ghqResults,
+					dirResults: map[string]mockResult{
+						repoPath + " gwq remove feature-x": {output: []byte(""), err: nil},
+					},
+				},
 				HomeDir: "/home/user",
 			},
 		}
@@ -2036,7 +2011,6 @@ func TestManager_DeleteWorktreeSession(t *testing.T) {
 			Exec: seqMock,
 			Ghq: &GhqResolver{
 				Cmd:     &mockCommandRunner{results: ghqResults},
-				GitCmd:  &mockGitCommandRunner{results: map[string]mockGitResult{}},
 				HomeDir: "/home/user",
 			},
 		}
@@ -2059,7 +2033,6 @@ func TestManager_DeleteWorktreeSession(t *testing.T) {
 			Exec: seqMock,
 			Ghq: &GhqResolver{
 				Cmd:     &mockCommandRunner{results: ghqResults},
-				GitCmd:  &mockGitCommandRunner{results: map[string]mockGitResult{}},
 				HomeDir: "/home/user",
 			},
 		}
@@ -2067,6 +2040,237 @@ func TestManager_DeleteWorktreeSession(t *testing.T) {
 		err := m.DeleteWorktreeSession("palmux", true)
 		if err != nil {
 			t.Fatalf("DeleteWorktreeSession() error = %v", err)
+		}
+	})
+
+	t.Run("セッション未存在: session not found エラーを許容する", func(t *testing.T) {
+		sessionNotFoundErr := &exec.ExitError{
+			ProcessState: nil,
+			Stderr:       []byte("can't find session: palmux@feature-x"),
+		}
+		seqMock := &sequentialMockExecutor{
+			calls: []mockCall{
+				// KillSession → session not found
+				{output: nil, err: sessionNotFoundErr},
+			},
+		}
+
+		m := &Manager{
+			Exec: seqMock,
+			Ghq: &GhqResolver{
+				Cmd: &mockCommandRunner{
+					results: ghqResults,
+					dirResults: map[string]mockResult{
+						repoPath + " gwq remove feature-x": {output: []byte(""), err: nil},
+					},
+				},
+				HomeDir: "/home/user",
+			},
+		}
+
+		err := m.DeleteWorktreeSession("palmux@feature-x", true)
+		if err != nil {
+			t.Fatalf("DeleteWorktreeSession() error = %v, want nil (session not found should be tolerated)", err)
+		}
+	})
+
+	t.Run("セッション未存在 + no server: エラーを許容する", func(t *testing.T) {
+		noServerErr := &exec.ExitError{
+			ProcessState: nil,
+			Stderr:       []byte("no server running on /tmp/tmux-1000/default"),
+		}
+		seqMock := &sequentialMockExecutor{
+			calls: []mockCall{
+				// KillSession → no server
+				{output: nil, err: noServerErr},
+			},
+		}
+
+		m := &Manager{
+			Exec: seqMock,
+			Ghq: &GhqResolver{
+				Cmd: &mockCommandRunner{
+					results: ghqResults,
+					dirResults: map[string]mockResult{
+						repoPath + " gwq remove feature-x": {output: []byte(""), err: nil},
+					},
+				},
+				HomeDir: "/home/user",
+			},
+		}
+
+		err := m.DeleteWorktreeSession("palmux@feature-x", true)
+		if err != nil {
+			t.Fatalf("DeleteWorktreeSession() error = %v, want nil (no server should be tolerated)", err)
+		}
+	})
+}
+
+func TestManager_IsProjectBranchMerged(t *testing.T) {
+	repoPath := "/home/user/ghq/github.com/tjst-t/palmux"
+
+	ghqResults := map[string]mockResult{
+		"ghq root": {output: []byte("/home/user/ghq\n"), err: nil},
+		"ghq list": {output: []byte("github.com/tjst-t/palmux\n"), err: nil},
+	}
+
+	t.Run("マージ済み: true を返す", func(t *testing.T) {
+		m := &Manager{
+			Exec: &mockExecutor{},
+			Ghq: &GhqResolver{
+				Cmd: &mockCommandRunner{
+					results: ghqResults,
+					dirResults: map[string]mockResult{
+						repoPath + " git branch --merged": {
+							output: []byte("* main\n  feature-x\n"),
+							err:    nil,
+						},
+					},
+				},
+				HomeDir: "/home/user",
+			},
+		}
+
+		got, err := m.IsProjectBranchMerged("palmux", "feature-x")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !got {
+			t.Error("expected merged = true, got false")
+		}
+	})
+
+	t.Run("未マージ: false を返す", func(t *testing.T) {
+		m := &Manager{
+			Exec: &mockExecutor{},
+			Ghq: &GhqResolver{
+				Cmd: &mockCommandRunner{
+					results: ghqResults,
+					dirResults: map[string]mockResult{
+						repoPath + " git branch --merged": {
+							output: []byte("* main\n"),
+							err:    nil,
+						},
+					},
+				},
+				HomeDir: "/home/user",
+			},
+		}
+
+		got, err := m.IsProjectBranchMerged("palmux", "feature-x")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got {
+			t.Error("expected merged = false, got true")
+		}
+	})
+
+	t.Run("Ghq未設定: エラーを返す", func(t *testing.T) {
+		m := &Manager{Exec: &mockExecutor{}}
+
+		_, err := m.IsProjectBranchMerged("palmux", "feature-x")
+		if err == nil {
+			t.Error("expected error when Ghq is nil")
+		}
+	})
+}
+
+func TestManager_DeleteProjectBranch(t *testing.T) {
+	repoPath := "/home/user/ghq/github.com/tjst-t/palmux"
+
+	ghqResults := map[string]mockResult{
+		"ghq root": {output: []byte("/home/user/ghq\n"), err: nil},
+		"ghq list": {output: []byte("github.com/tjst-t/palmux\n"), err: nil},
+	}
+
+	gwqWorktreesJSON := `[{"path":"/home/user/ghq/github.com/tjst-t/palmux","branch":"main","commit_hash":"abc123","is_main":true,"created_at":""},{"path":"/home/user/worktrees/feature-x","branch":"feature-x","commit_hash":"def456","is_main":false,"created_at":""}]`
+	gwqNoWorktreeJSON := `[{"path":"/home/user/ghq/github.com/tjst-t/palmux","branch":"main","commit_hash":"abc123","is_main":true,"created_at":""}]`
+
+	t.Run("worktreeなしブランチ: git branch -d で削除", func(t *testing.T) {
+		m := &Manager{
+			Exec: &mockExecutor{},
+			Ghq: &GhqResolver{
+				Cmd: &mockCommandRunner{
+					results: ghqResults,
+					dirResults: map[string]mockResult{
+						repoPath + " gwq list --json":           {output: []byte(gwqNoWorktreeJSON), err: nil},
+						repoPath + " git branch -d feature-x":   {output: []byte(""), err: nil},
+					},
+				},
+				HomeDir: "/home/user",
+			},
+		}
+
+		err := m.DeleteProjectBranch("palmux", "feature-x", false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("worktreeなし強制削除: git branch -D で削除", func(t *testing.T) {
+		m := &Manager{
+			Exec: &mockExecutor{},
+			Ghq: &GhqResolver{
+				Cmd: &mockCommandRunner{
+					results: ghqResults,
+					dirResults: map[string]mockResult{
+						repoPath + " gwq list --json":           {output: []byte(gwqNoWorktreeJSON), err: nil},
+						repoPath + " git branch -D feature-x":   {output: []byte(""), err: nil},
+					},
+				},
+				HomeDir: "/home/user",
+			},
+		}
+
+		err := m.DeleteProjectBranch("palmux", "feature-x", true)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("worktreeありブランチ: セッションkill → gwq remove -b", func(t *testing.T) {
+		seqExec := &sequentialMockExecutor{
+			calls: []mockCall{
+				// kill-session
+				{output: []byte(""), err: nil},
+			},
+		}
+
+		m := &Manager{
+			Exec: seqExec,
+			Ghq: &GhqResolver{
+				Cmd: &mockCommandRunner{
+					results: ghqResults,
+					dirResults: map[string]mockResult{
+						repoPath + " gwq list --json":                    {output: []byte(gwqWorktreesJSON), err: nil},
+						repoPath + " gwq remove -b feature-x":            {output: []byte(""), err: nil},
+					},
+				},
+				HomeDir: "/home/user",
+			},
+		}
+
+		err := m.DeleteProjectBranch("palmux", "feature-x", false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// kill-session が呼ばれたことを確認
+		if len(seqExec.gotArgs) < 1 {
+			t.Fatal("expected at least 1 call to executor")
+		}
+		if !reflect.DeepEqual(seqExec.gotArgs[0], []string{"kill-session", "-t", "palmux@feature-x"}) {
+			t.Errorf("first call = %v, want kill-session -t palmux@feature-x", seqExec.gotArgs[0])
+		}
+	})
+
+	t.Run("Ghq未設定: エラーを返す", func(t *testing.T) {
+		m := &Manager{Exec: &mockExecutor{}}
+
+		err := m.DeleteProjectBranch("palmux", "feature-x", false)
+		if err == nil {
+			t.Error("expected error when Ghq is nil")
 		}
 	})
 }
@@ -2080,22 +2284,20 @@ func TestManager_GetProjectBranches(t *testing.T) {
 	}
 
 	t.Run("正常系: ブランチ一覧を返す", func(t *testing.T) {
-		branchOutput := "* main\n  feature-x\n  remotes/origin/main\n"
-
-		gitMock := &mockGitCommandRunner{
-			results: map[string]mockGitResult{
-				repoPath + " branch -a --no-color": {
-					output: []byte(branchOutput),
-					err:    nil,
-				},
-			},
-		}
+		branchOutput := "* main\n  feature-x\n  remotes/origin/feature-y\n"
 
 		m := &Manager{
 			Exec: &mockExecutor{},
 			Ghq: &GhqResolver{
-				Cmd:     &mockCommandRunner{results: ghqResults},
-				GitCmd:  gitMock,
+				Cmd: &mockCommandRunner{
+					results: ghqResults,
+					dirResults: map[string]mockResult{
+						repoPath + " git branch -a --no-color": {
+							output: []byte(branchOutput),
+							err:    nil,
+						},
+					},
+				},
 				HomeDir: "/home/user",
 			},
 		}
@@ -2123,7 +2325,6 @@ func TestManager_GetProjectBranches(t *testing.T) {
 			Exec: &mockExecutor{},
 			Ghq: &GhqResolver{
 				Cmd:     &mockCommandRunner{results: ghqResults},
-				GitCmd:  &mockGitCommandRunner{results: map[string]mockGitResult{}},
 				HomeDir: "/home/user",
 			},
 		}
