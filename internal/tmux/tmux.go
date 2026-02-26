@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/creack/pty"
+	"github.com/tjst-t/palmux/internal/git"
 )
 
 // GroupedSessionPrefix は Palmux が作成するグループセッションの名前プレフィクス。
@@ -441,4 +443,188 @@ func (m *Manager) DeleteGhqRepo(fullPath string) error {
 		return fmt.Errorf("ghq is not configured")
 	}
 	return m.Ghq.DeleteRepo(fullPath)
+}
+
+// sanitizeBranch はブランチ名をディレクトリ名に安全な形式に変換する。
+// "/" を "--" に置換する。
+func sanitizeBranch(branch string) string {
+	return strings.ReplaceAll(branch, "/", "--")
+}
+
+// WorktreePath は worktree ディレクトリパスを計算する。
+func WorktreePath(repoPath, branch string) string {
+	return filepath.Join(repoPath, ".palmux-worktrees", sanitizeBranch(branch))
+}
+
+// ProjectWorktree はプロジェクトの worktree 情報とセッション状態を表す。
+type ProjectWorktree struct {
+	Branch      string `json:"branch"`
+	Path        string `json:"path"`
+	Head        string `json:"head"`
+	HasSession  bool   `json:"has_session"`
+	SessionName string `json:"session_name"`
+	IsDefault   bool   `json:"is_default"`
+}
+
+// ListProjectWorktrees はプロジェクトの worktree 一覧とセッション状態を返す。
+// project はプロジェクト名（= ghq repo 名）。
+func (m *Manager) ListProjectWorktrees(project string) ([]ProjectWorktree, error) {
+	if m.Ghq == nil || m.Ghq.GitCmd == nil {
+		return nil, fmt.Errorf("git command runner is not configured")
+	}
+
+	repoPath := m.Ghq.ResolveRepo(project)
+	if repoPath == "" {
+		return nil, fmt.Errorf("project %q not found", project)
+	}
+
+	gitOps := &git.Git{Cmd: m.Ghq.GitCmd}
+	worktrees, err := gitOps.ListWorktrees(repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("list worktrees: %w", err)
+	}
+
+	sessions, err := m.ListSessions()
+	if err != nil {
+		return nil, fmt.Errorf("list sessions: %w", err)
+	}
+
+	// セッション名をセットに変換
+	sessionSet := make(map[string]bool, len(sessions))
+	for _, s := range sessions {
+		sessionSet[s.Name] = true
+	}
+
+	result := make([]ProjectWorktree, 0, len(worktrees))
+	for _, wt := range worktrees {
+		pw := ProjectWorktree{
+			Branch: wt.Branch,
+			Path:   wt.Path,
+			Head:   wt.Head,
+		}
+
+		if wt.Path == repoPath {
+			pw.IsDefault = true
+			pw.SessionName = project
+		} else {
+			pw.IsDefault = false
+			pw.SessionName = project + "@" + wt.Branch
+		}
+
+		pw.HasSession = sessionSet[pw.SessionName]
+		result = append(result, pw)
+	}
+
+	// デフォルトブランチを先頭にソート
+	sorted := make([]ProjectWorktree, 0, len(result))
+	for _, pw := range result {
+		if pw.IsDefault {
+			sorted = append([]ProjectWorktree{pw}, sorted...)
+		} else {
+			sorted = append(sorted, pw)
+		}
+	}
+
+	return sorted, nil
+}
+
+// NewWorktreeSession は worktree を作成し、それに対応する tmux セッションを作成する。
+func (m *Manager) NewWorktreeSession(project, branch string, createBranch bool) (*Session, error) {
+	if m.Ghq == nil || m.Ghq.GitCmd == nil {
+		return nil, fmt.Errorf("git command runner is not configured")
+	}
+
+	repoPath := m.Ghq.ResolveRepo(project)
+	if repoPath == "" {
+		return nil, fmt.Errorf("project %q not found", project)
+	}
+
+	gitOps := &git.Git{Cmd: m.Ghq.GitCmd}
+
+	// 既存 worktree を確認
+	worktrees, err := gitOps.ListWorktrees(repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("list worktrees: %w", err)
+	}
+
+	// 対象ブランチの worktree が存在するか確認
+	found := false
+	for _, wt := range worktrees {
+		if wt.Branch == branch {
+			found = true
+			break
+		}
+	}
+
+	// worktree がなければ作成
+	if !found {
+		wtPath := WorktreePath(repoPath, branch)
+		if err := gitOps.AddWorktree(repoPath, wtPath, branch, createBranch); err != nil {
+			return nil, fmt.Errorf("add worktree: %w", err)
+		}
+	}
+
+	// セッション作成
+	sessionName := project + "@" + branch
+	session, err := m.NewSession(sessionName)
+	if err != nil {
+		return nil, fmt.Errorf("new session: %w", err)
+	}
+
+	return session, nil
+}
+
+// DeleteWorktreeSession は tmux セッションを kill し、オプションで worktree も削除する。
+func (m *Manager) DeleteWorktreeSession(sessionName string, removeWorktree bool) error {
+	if err := m.KillSession(sessionName); err != nil {
+		return fmt.Errorf("delete worktree session: %w", err)
+	}
+
+	if removeWorktree {
+		repo, branch := ParseSessionName(sessionName)
+		if branch == "" {
+			// デフォルトブランチの worktree は削除しない
+			return nil
+		}
+
+		if m.Ghq == nil || m.Ghq.GitCmd == nil {
+			return nil
+		}
+
+		repoPath := m.Ghq.ResolveRepo(repo)
+		if repoPath == "" {
+			return nil
+		}
+
+		gitOps := &git.Git{Cmd: m.Ghq.GitCmd}
+		wtPath := WorktreePath(repoPath, branch)
+		if err := gitOps.RemoveWorktree(repoPath, wtPath); err != nil {
+			return fmt.Errorf("remove worktree: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// GetProjectBranches はプロジェクトのブランチ一覧を返す。
+func (m *Manager) GetProjectBranches(project string) ([]git.Branch, error) {
+	if m.Ghq == nil || m.Ghq.GitCmd == nil {
+		return nil, fmt.Errorf("git command runner is not configured")
+	}
+
+	repoPath := m.Ghq.ResolveRepo(project)
+	if repoPath == "" {
+		return nil, fmt.Errorf("project %q not found", project)
+	}
+
+	gitOps := &git.Git{Cmd: m.Ghq.GitCmd}
+	return gitOps.Branches(repoPath)
+}
+
+// ResolveProject はプロジェクト名に対応する ghq リポジトリパスを返す。
+func (m *Manager) ResolveProject(project string) string {
+	if m.Ghq == nil {
+		return ""
+	}
+	return m.Ghq.ResolveRepo(project)
 }
