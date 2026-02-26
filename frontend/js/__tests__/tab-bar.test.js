@@ -85,7 +85,7 @@ describe('TabBar', () => {
       expect(termTabs[1].dataset.windowName).toBe('vim');
     });
 
-    it('terminal tab labels show index:name', () => {
+    it('terminal tab labels show window name only (no index prefix)', () => {
       const bar = new TabBar({ container, onTabSelect });
       bar.setWindows('main', [
         makeWindow(0, 'zsh'),
@@ -93,8 +93,34 @@ describe('TabBar', () => {
       ], false);
 
       const termTabs = container.querySelectorAll('.tab[data-type="terminal"]');
-      expect(termTabs[0].querySelector('.tab-label').textContent).toBe('0:zsh');
-      expect(termTabs[1].querySelector('.tab-label').textContent).toBe('2:vim');
+      expect(termTabs[0].querySelector('.tab-label').textContent).toBe('zsh');
+      expect(termTabs[1].querySelector('.tab-label').textContent).toBe('vim');
+    });
+
+    it('all terminal tabs have SVG icons', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [
+        makeWindow(0, 'zsh'),
+        makeWindow(1, 'vim'),
+      ], false);
+
+      const termTabs = container.querySelectorAll('.tab[data-type="terminal"]');
+      for (const tab of termTabs) {
+        const icon = tab.querySelector('.tab-icon');
+        expect(icon).not.toBeNull();
+        expect(icon.querySelector('svg')).not.toBeNull();
+      }
+    });
+
+    it('Files and Git tabs have SVG icons', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [makeWindow(0, 'zsh')], false);
+
+      const filesIcon = container.querySelector('.tab[data-type="files"] .tab-icon');
+      expect(filesIcon.querySelector('svg')).not.toBeNull();
+
+      const gitIcon = container.querySelector('.tab[data-type="git"] .tab-icon');
+      expect(gitIcon.querySelector('svg')).not.toBeNull();
     });
 
     it('replaces tabs when called again', () => {
@@ -494,39 +520,47 @@ describe('TabBar', () => {
   });
 
   describe('Claude Code mode', () => {
-    it('shows sparkle icon on claude window in Claude Code mode', () => {
+    it('shows claude sparkle SVG on claude window in Claude Code mode', () => {
       const bar = new TabBar({ container, onTabSelect });
       bar.setWindows('main', [
         makeWindow(0, 'zsh'),
         makeWindow(1, 'claude'),
       ], true);
 
-      const termTabs = container.querySelectorAll('.tab[data-type="terminal"]');
-      // In Claude Code mode, claude tab is first (reordered)
-      // Claude tab (index 1) should have sparkle icon
+      // Claude tab should have sparkle SVG (viewBox 0 0 24 24, filled ellipses)
       const claudeTab = container.querySelector('.tab[data-type="terminal"][data-window="1"]');
       const claudeIcon = claudeTab.querySelector('.tab-icon');
       expect(claudeIcon).not.toBeNull();
-      expect(claudeIcon.textContent).toContain('\u2726'); // sparkle
+      const claudeSvg = claudeIcon.querySelector('svg');
+      expect(claudeSvg).not.toBeNull();
+      expect(claudeSvg.getAttribute('viewBox')).toBe('0 0 24 24');
 
-      // Normal window should not have an icon
+      // Normal window should have terminal prompt SVG (viewBox 0 0 14 14)
       const zshTab = container.querySelector('.tab[data-type="terminal"][data-window="0"]');
-      expect(zshTab.querySelector('.tab-icon')).toBeNull();
+      const zshIcon = zshTab.querySelector('.tab-icon');
+      expect(zshIcon).not.toBeNull();
+      const zshSvg = zshIcon.querySelector('svg');
+      expect(zshSvg).not.toBeNull();
+      expect(zshSvg.getAttribute('viewBox')).toBe('0 0 14 14');
     });
 
-    it('does not show sparkle icon when not in Claude Code mode', () => {
+    it('uses terminal prompt SVG when not in Claude Code mode', () => {
       const bar = new TabBar({ container, onTabSelect });
       bar.setWindows('main', [
         makeWindow(0, 'zsh'),
         makeWindow(1, 'claude'),
       ], false);
 
+      // Both should have terminal prompt SVG (14x14)
       const termTabs = container.querySelectorAll('.tab[data-type="terminal"]');
-      expect(termTabs[0].querySelector('.tab-icon')).toBeNull();
-      expect(termTabs[1].querySelector('.tab-icon')).toBeNull();
+      for (const tab of termTabs) {
+        const svg = tab.querySelector('.tab-icon svg');
+        expect(svg).not.toBeNull();
+        expect(svg.getAttribute('viewBox')).toBe('0 0 14 14');
+      }
     });
 
-    it('does not show sparkle icon on non-claude windows even in Claude Code mode', () => {
+    it('uses terminal prompt SVG on non-claude windows even in Claude Code mode', () => {
       const bar = new TabBar({ container, onTabSelect });
       bar.setWindows('main', [
         makeWindow(0, 'zsh'),
@@ -534,8 +568,11 @@ describe('TabBar', () => {
       ], true);
 
       const termTabs = container.querySelectorAll('.tab[data-type="terminal"]');
-      expect(termTabs[0].querySelector('.tab-icon')).toBeNull();
-      expect(termTabs[1].querySelector('.tab-icon')).toBeNull();
+      for (const tab of termTabs) {
+        const svg = tab.querySelector('.tab-icon svg');
+        expect(svg).not.toBeNull();
+        expect(svg.getAttribute('viewBox')).toBe('0 0 14 14');
+      }
     });
   });
 
