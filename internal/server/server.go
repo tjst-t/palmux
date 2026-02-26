@@ -20,6 +20,7 @@ type TmuxManager interface {
 	ListWindows(session string) ([]tmux.Window, error)
 	NewWindow(session, name, command string) (*tmux.Window, error)
 	KillWindow(session string, index int) error
+	SendKeys(session string, index int, key string) error
 	RenameWindow(session string, index int, name string) error
 	Attach(session string, windowIndex int) (*os.File, *exec.Cmd, error)
 	CreateGroupedSession(target string) (string, error)
@@ -30,6 +31,9 @@ type TmuxManager interface {
 	ListGhqRepos() ([]tmux.GhqRepo, error)
 	CloneGhqRepo(url string) (*tmux.GhqRepo, error)
 	DeleteGhqRepo(fullPath string) error
+	IsGhqSession(session string) bool
+	EnsureClaudeWindow(session, claudePath string) (*tmux.Window, error)
+	ReplaceClaudeWindow(session, name, command string) (*tmux.Window, error)
 }
 
 // Server は Palmux の HTTP サーバーを表す。
@@ -102,6 +106,8 @@ func NewServer(opts Options) *Server {
 	mux.Handle("GET /api/ghq/repos", auth(s.handleListGhqRepos()))
 	mux.Handle("POST /api/ghq/repos", auth(s.handleCloneGhqRepo()))
 	mux.Handle("DELETE /api/ghq/repos", auth(s.handleDeleteGhqRepo()))
+	mux.Handle("GET /api/sessions/{session}/mode", auth(s.handleGetSessionMode()))
+	mux.Handle("POST /api/sessions/{session}/claude/restart", auth(s.handleRestartClaudeWindow()))
 	mux.Handle("GET /api/sessions/{session}/git/status", auth(s.handleGitStatus()))
 	mux.Handle("GET /api/sessions/{session}/git/log", auth(s.handleGitLog()))
 	mux.Handle("GET /api/sessions/{session}/git/diff", auth(s.handleGitDiff()))
@@ -164,6 +170,19 @@ type indexInjector struct {
 
 // ServeHTTP は "/" と "/index.html" へのリクエストを横取りして meta タグを注入する。
 func (h *indexInjector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/sw.js" {
+		data, err := fs.ReadFile(h.fs, "sw.js")
+		if err != nil {
+			http.Error(w, "sw.js not found", http.StatusInternalServerError)
+			return
+		}
+
+		js := strings.Replace(string(data), "__VERSION__", h.version, 1)
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		w.Write([]byte(js))
+		return
+	}
+
 	if r.URL.Path == "/" || r.URL.Path == "/index.html" {
 		data, err := fs.ReadFile(h.fs, "index.html")
 		if err != nil {

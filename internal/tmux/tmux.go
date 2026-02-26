@@ -192,6 +192,17 @@ func (m *Manager) KillWindow(session string, index int) error {
 	return nil
 }
 
+// SendKeys は指定セッションの指定インデックスのウィンドウにキーを送信する。
+func (m *Manager) SendKeys(session string, index int, key string) error {
+	target := fmt.Sprintf("%s:%d", session, index)
+	_, err := m.Exec.Run("send-keys", "-t", target, key)
+	if err != nil {
+		return fmt.Errorf("send keys: %w", err)
+	}
+
+	return nil
+}
+
 // RenameWindow は指定セッションの指定インデックスのウィンドウをリネームする。
 func (m *Manager) RenameWindow(session string, index int, name string) error {
 	target := fmt.Sprintf("%s:%d", session, index)
@@ -267,6 +278,10 @@ func (m *Manager) CreateGroupedSession(target string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("create grouped session for %q: %w", target, err)
 	}
+	// Palmux 経由の接続ではステータスバーを非表示にする。
+	// ユーザーの tmux.conf に関係なく、グループセッション側のみ無効化する。
+	// 失敗してもセッション自体は使えるため、エラーは無視する。
+	m.Exec.Run("set-option", "-t", name, "status", "off")
 	return name, nil
 }
 
@@ -335,6 +350,70 @@ func (m *Manager) Attach(session string, windowIndex int) (*os.File, *exec.Cmd, 
 	}
 
 	return ptmx, cmd, nil
+}
+
+// IsGhqSession はセッション名が ghq リポジトリに対応するかを返す。
+// Ghq が未設定の場合は常に false を返す。
+func (m *Manager) IsGhqSession(session string) bool {
+	if m.Ghq == nil {
+		return false
+	}
+	dir := m.Ghq.Resolve(session)
+	return dir != m.Ghq.HomeDir
+}
+
+// ReplaceClaudeWindow は既存の claude ウィンドウを kill して同名で再作成する。
+// name に一致するウィンドウが存在すれば、まず Ctrl+C を送信してグレースフルに
+// プロセスを終了させてから KillWindow で閉じ、新しいウィンドウを作成する。
+// SendKeys が失敗しても KillWindow にフォールスルーする。
+// 存在しなければ NewWindow のみ実行する。
+func (m *Manager) ReplaceClaudeWindow(session, name, command string) (*Window, error) {
+	windows, err := m.ListWindows(session)
+	if err != nil {
+		return nil, fmt.Errorf("replace claude window: %w", err)
+	}
+
+	for _, w := range windows {
+		if w.Name == name {
+			// グレースフル終了: Ctrl+C を送信してプロセスに終了の機会を与える
+			// SendKeys が失敗しても KillWindow で確実に終了させる
+			_ = m.SendKeys(session, w.Index, "C-c")
+
+			if err := m.KillWindow(session, w.Index); err != nil {
+				return nil, fmt.Errorf("replace claude window: %w", err)
+			}
+			break
+		}
+	}
+
+	win, err := m.NewWindow(session, name, command)
+	if err != nil {
+		return nil, fmt.Errorf("replace claude window: %w", err)
+	}
+
+	return win, nil
+}
+
+// EnsureClaudeWindow は ghq セッションに "claude" ウィンドウが存在することを保証する。
+// 既に存在すればそのウィンドウを返し、なければ新規作成する。
+func (m *Manager) EnsureClaudeWindow(session, claudePath string) (*Window, error) {
+	windows, err := m.ListWindows(session)
+	if err != nil {
+		return nil, fmt.Errorf("ensure claude window: %w", err)
+	}
+
+	for i := range windows {
+		if windows[i].Name == "claude" {
+			return &windows[i], nil
+		}
+	}
+
+	win, err := m.NewWindow(session, "claude", claudePath)
+	if err != nil {
+		return nil, fmt.Errorf("ensure claude window: %w", err)
+	}
+
+	return win, nil
 }
 
 // ListGhqRepos は ghq リポジトリ一覧を返す。

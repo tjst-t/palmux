@@ -59,6 +59,14 @@ type configurableMock struct {
 	calledCloneGhqRepo string
 	deleteGhqRepoErr    error
 	calledDeleteGhqRepo string
+	isGhqSession         bool
+	ensureClaudeWindow   *tmux.Window
+	ensureClaudeWindowErr error
+	calledIsGhqSession    string
+	calledEnsureClaudeWindow struct{ session, claudePath string }
+	replaceClaudeWindow      *tmux.Window
+	replaceClaudeWindowErr   error
+	calledReplaceClaudeWindow struct{ session, name, command string }
 }
 
 func (m *configurableMock) ListSessions() ([]tmux.Session, error) {
@@ -92,6 +100,10 @@ func (m *configurableMock) KillWindow(session string, index int) error {
 		index   int
 	}{session, index}
 	return m.killWinErr
+}
+
+func (m *configurableMock) SendKeys(session string, index int, key string) error {
+	return nil
 }
 
 func (m *configurableMock) RenameWindow(session string, index int, name string) error {
@@ -145,6 +157,21 @@ func (m *configurableMock) DeleteGhqRepo(fullPath string) error {
 
 func (m *configurableMock) GetClientSessionWindow(tty string) (string, int, error) {
 	return "", -1, fmt.Errorf("not implemented")
+}
+
+func (m *configurableMock) IsGhqSession(session string) bool {
+	m.calledIsGhqSession = session
+	return m.isGhqSession
+}
+
+func (m *configurableMock) EnsureClaudeWindow(session, claudePath string) (*tmux.Window, error) {
+	m.calledEnsureClaudeWindow = struct{ session, claudePath string }{session, claudePath}
+	return m.ensureClaudeWindow, m.ensureClaudeWindowErr
+}
+
+func (m *configurableMock) ReplaceClaudeWindow(session, name, command string) (*tmux.Window, error) {
+	m.calledReplaceClaudeWindow = struct{ session, name, command string }{session, name, command}
+	return m.replaceClaudeWindow, m.replaceClaudeWindowErr
 }
 
 // newTestServer はテスト用 Server を作成するヘルパー。
@@ -409,6 +436,56 @@ func TestHandleDeleteSession(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestHandleCreateSession_GhqSession_CreatesClaudeWindow(t *testing.T) {
+	mock := &configurableMock{
+		newSession:         &tmux.Session{Name: "palmux", Windows: 1},
+		isGhqSession:      true,
+		ensureClaudeWindow: &tmux.Window{Index: 1, Name: "claude"},
+	}
+	srv, token := newTestServer(mock)
+	rec := doRequest(t, srv.Handler(), http.MethodPost, "/api/sessions", token, `{"name": "palmux"}`)
+
+	if rec.Code != http.StatusCreated {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusCreated)
+	}
+
+	if mock.calledEnsureClaudeWindow.session != "palmux" {
+		t.Errorf("EnsureClaudeWindow session = %q, want %q", mock.calledEnsureClaudeWindow.session, "palmux")
+	}
+}
+
+func TestHandleCreateSession_NonGhqSession_NoClaudeWindow(t *testing.T) {
+	mock := &configurableMock{
+		newSession:   &tmux.Session{Name: "local", Windows: 1},
+		isGhqSession: false,
+	}
+	srv, token := newTestServer(mock)
+	rec := doRequest(t, srv.Handler(), http.MethodPost, "/api/sessions", token, `{"name": "local"}`)
+
+	if rec.Code != http.StatusCreated {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusCreated)
+	}
+
+	if mock.calledEnsureClaudeWindow.session != "" {
+		t.Errorf("EnsureClaudeWindow should not be called for non-ghq session, got session = %q", mock.calledEnsureClaudeWindow.session)
+	}
+}
+
+func TestHandleCreateSession_GhqSession_ClaudeWindowError_StillCreatesSession(t *testing.T) {
+	mock := &configurableMock{
+		newSession:            &tmux.Session{Name: "palmux", Windows: 1},
+		isGhqSession:         true,
+		ensureClaudeWindowErr: errors.New("failed to create window"),
+	}
+	srv, token := newTestServer(mock)
+	rec := doRequest(t, srv.Handler(), http.MethodPost, "/api/sessions", token, `{"name": "palmux"}`)
+
+	// セッション作成自体は成功する（ベストエフォート）
+	if rec.Code != http.StatusCreated {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusCreated)
 	}
 }
 
