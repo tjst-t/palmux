@@ -72,6 +72,13 @@ func (s *Server) handleCreateSession() http.Handler {
 			return
 		}
 
+		// ghq セッションの場合、claude ウィンドウを自動作成（ベストエフォート）
+		if s.tmux.IsGhqSession(req.Name) {
+			if _, err := s.tmux.EnsureClaudeWindow(req.Name, s.claudePath); err != nil {
+				log.Printf("warning: failed to create claude window for %q: %v", req.Name, err)
+			}
+		}
+
 		writeJSON(w, http.StatusCreated, session)
 	})
 }

@@ -23,6 +23,29 @@ func (m *mockExecutor) Run(args ...string) ([]byte, error) {
 	return m.output, m.err
 }
 
+// sequentialMockExecutor は複数回の Run 呼び出しに対して異なる結果を返すモック。
+// calls に設定した順に結果を返す。
+type sequentialMockExecutor struct {
+	calls   []mockCall
+	callIdx int
+	gotArgs [][]string
+}
+
+type mockCall struct {
+	output []byte
+	err    error
+}
+
+func (m *sequentialMockExecutor) Run(args ...string) ([]byte, error) {
+	m.gotArgs = append(m.gotArgs, args)
+	if m.callIdx >= len(m.calls) {
+		return nil, fmt.Errorf("unexpected call #%d: %v", m.callIdx, args)
+	}
+	c := m.calls[m.callIdx]
+	m.callIdx++
+	return c.output, c.err
+}
+
 // assertArgs はモックに渡された引数が期待通りか検証する。
 func assertArgs(t *testing.T, mock *mockExecutor, wantArgs []string) {
 	t.Helper()
@@ -1179,6 +1202,305 @@ func TestManager_ListGhqRepos(t *testing.T) {
 	}
 }
 
+func TestManager_IsGhqSession(t *testing.T) {
+	tests := []struct {
+		name    string
+		ghq     *GhqResolver
+		session string
+		want    bool
+	}{
+		{
+			name: "ghq マッチあり → true",
+			ghq: &GhqResolver{
+				Cmd: &mockCommandRunner{results: map[string]mockResult{
+					"ghq root": {output: []byte("/home/user/ghq\n")},
+					"ghq list": {output: []byte("github.com/tjst-t/palmux\n")},
+				}},
+				HomeDir: "/home/user",
+			},
+			session: "palmux",
+			want:    true,
+		},
+		{
+			name: "ghq マッチなし → false",
+			ghq: &GhqResolver{
+				Cmd: &mockCommandRunner{results: map[string]mockResult{
+					"ghq root": {output: []byte("/home/user/ghq\n")},
+					"ghq list": {output: []byte("github.com/tjst-t/palmux\n")},
+				}},
+				HomeDir: "/home/user",
+			},
+			session: "unknown",
+			want:    false,
+		},
+		{
+			name:    "ghq nil → false",
+			ghq:     nil,
+			session: "palmux",
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockExecutor{output: nil, err: nil}
+			m := &Manager{Exec: mock, Ghq: tt.ghq}
+
+			got := m.IsGhqSession(tt.session)
+			if got != tt.want {
+				t.Errorf("IsGhqSession(%q) = %v, want %v", tt.session, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestManager_EnsureClaudeWindow(t *testing.T) {
+	t.Run("既存の claude ウィンドウがある場合: 作成しない", func(t *testing.T) {
+		mock := &sequentialMockExecutor{
+			calls: []mockCall{
+				{output: []byte("0\tbash\t1\n1\tclaude\t0\n")}, // ListWindows
+			},
+		}
+		m := &Manager{Exec: mock}
+
+		win, err := m.EnsureClaudeWindow("palmux", "claude")
+		if err != nil {
+			t.Fatalf("EnsureClaudeWindow() unexpected error: %v", err)
+		}
+		if win.Index != 1 {
+			t.Errorf("window.Index = %d, want 1", win.Index)
+		}
+		if win.Name != "claude" {
+			t.Errorf("window.Name = %q, want %q", win.Name, "claude")
+		}
+		if mock.callIdx != 1 {
+			t.Errorf("expected 1 call (ListWindows only), got %d", mock.callIdx)
+		}
+	})
+
+	t.Run("claude ウィンドウがない場合: 新規作成", func(t *testing.T) {
+		mock := &sequentialMockExecutor{
+			calls: []mockCall{
+				{output: []byte("0\tbash\t1\n")},            // ListWindows
+				{output: []byte("1\tclaude\t1\n")},           // NewWindow
+			},
+		}
+		m := &Manager{Exec: mock}
+
+		win, err := m.EnsureClaudeWindow("palmux", "claude")
+		if err != nil {
+			t.Fatalf("EnsureClaudeWindow() unexpected error: %v", err)
+		}
+		if win.Index != 1 {
+			t.Errorf("window.Index = %d, want 1", win.Index)
+		}
+		if win.Name != "claude" {
+			t.Errorf("window.Name = %q, want %q", win.Name, "claude")
+		}
+		if mock.callIdx != 2 {
+			t.Errorf("expected 2 calls (ListWindows + NewWindow), got %d", mock.callIdx)
+		}
+	})
+
+	t.Run("ListWindows エラー", func(t *testing.T) {
+		mock := &sequentialMockExecutor{
+			calls: []mockCall{
+				{err: errors.New("session not found")},
+			},
+		}
+		m := &Manager{Exec: mock}
+
+		_, err := m.EnsureClaudeWindow("palmux", "claude")
+		if err == nil {
+			t.Fatal("EnsureClaudeWindow() expected error, got nil")
+		}
+	})
+
+	t.Run("NewWindow エラー", func(t *testing.T) {
+		mock := &sequentialMockExecutor{
+			calls: []mockCall{
+				{output: []byte("0\tbash\t1\n")},                // ListWindows
+				{err: errors.New("failed to create window")},     // NewWindow
+			},
+		}
+		m := &Manager{Exec: mock}
+
+		_, err := m.EnsureClaudeWindow("palmux", "claude")
+		if err == nil {
+			t.Fatal("EnsureClaudeWindow() expected error, got nil")
+		}
+	})
+}
+
+func TestManager_ReplaceClaudeWindow(t *testing.T) {
+	t.Run("正常系: 既存の claude ウィンドウに Ctrl+C を送信してから kill して再作成", func(t *testing.T) {
+		mock := &sequentialMockExecutor{
+			calls: []mockCall{
+				{output: []byte("0\tbash\t1\n1\tclaude\t0\n")},   // ListWindows
+				{output: nil, err: nil},                           // SendKeys (C-c)
+				{output: nil, err: nil},                           // KillWindow
+				{output: []byte("2\tclaude\t1\n")},                // NewWindow
+			},
+		}
+		m := &Manager{Exec: mock}
+
+		win, err := m.ReplaceClaudeWindow("palmux", "claude", "claude --model opus")
+		if err != nil {
+			t.Fatalf("ReplaceClaudeWindow() unexpected error: %v", err)
+		}
+		if win.Index != 2 {
+			t.Errorf("window.Index = %d, want 2", win.Index)
+		}
+		if win.Name != "claude" {
+			t.Errorf("window.Name = %q, want %q", win.Name, "claude")
+		}
+		if mock.callIdx != 4 {
+			t.Errorf("expected 4 calls (ListWindows + SendKeys + KillWindow + NewWindow), got %d", mock.callIdx)
+		}
+		// SendKeys (C-c) の引数を検証
+		sendKeysArgs := mock.gotArgs[1]
+		wantSendKeysArgs := []string{"send-keys", "-t", "palmux:1", "C-c"}
+		if !reflect.DeepEqual(sendKeysArgs, wantSendKeysArgs) {
+			t.Errorf("SendKeys args = %v, want %v", sendKeysArgs, wantSendKeysArgs)
+		}
+		// KillWindow の引数を検証
+		killArgs := mock.gotArgs[2]
+		wantKillArgs := []string{"kill-window", "-t", "palmux:1"}
+		if !reflect.DeepEqual(killArgs, wantKillArgs) {
+			t.Errorf("KillWindow args = %v, want %v", killArgs, wantKillArgs)
+		}
+	})
+
+	t.Run("正常系: claude ウィンドウが存在しない場合は新規作成のみ", func(t *testing.T) {
+		mock := &sequentialMockExecutor{
+			calls: []mockCall{
+				{output: []byte("0\tbash\t1\n")},    // ListWindows
+				{output: []byte("1\tclaude\t1\n")},   // NewWindow
+			},
+		}
+		m := &Manager{Exec: mock}
+
+		win, err := m.ReplaceClaudeWindow("palmux", "claude", "claude --model sonnet")
+		if err != nil {
+			t.Fatalf("ReplaceClaudeWindow() unexpected error: %v", err)
+		}
+		if win.Index != 1 {
+			t.Errorf("window.Index = %d, want 1", win.Index)
+		}
+		if mock.callIdx != 2 {
+			t.Errorf("expected 2 calls (ListWindows + NewWindow), got %d", mock.callIdx)
+		}
+	})
+
+	t.Run("異常系: ListWindows エラー", func(t *testing.T) {
+		mock := &sequentialMockExecutor{
+			calls: []mockCall{
+				{err: errors.New("session not found")},
+			},
+		}
+		m := &Manager{Exec: mock}
+
+		_, err := m.ReplaceClaudeWindow("palmux", "claude", "claude")
+		if err == nil {
+			t.Fatal("ReplaceClaudeWindow() expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "replace claude window") {
+			t.Errorf("error message should contain context, got: %q", err.Error())
+		}
+	})
+
+	t.Run("異常系: SendKeys エラーでも KillWindow にフォールスルー", func(t *testing.T) {
+		mock := &sequentialMockExecutor{
+			calls: []mockCall{
+				{output: []byte("0\tbash\t1\n1\tclaude\t0\n")},   // ListWindows
+				{err: errors.New("send failed")},                   // SendKeys (ignored)
+				{output: nil, err: nil},                           // KillWindow
+				{output: []byte("2\tclaude\t1\n")},                // NewWindow
+			},
+		}
+		m := &Manager{Exec: mock}
+
+		win, err := m.ReplaceClaudeWindow("palmux", "claude", "claude")
+		if err != nil {
+			t.Fatalf("ReplaceClaudeWindow() unexpected error: %v", err)
+		}
+		if win.Index != 2 {
+			t.Errorf("window.Index = %d, want 2", win.Index)
+		}
+		if mock.callIdx != 4 {
+			t.Errorf("expected 4 calls, got %d", mock.callIdx)
+		}
+	})
+
+	t.Run("異常系: KillWindow エラー", func(t *testing.T) {
+		mock := &sequentialMockExecutor{
+			calls: []mockCall{
+				{output: []byte("0\tbash\t1\n1\tclaude\t0\n")},   // ListWindows
+				{output: nil, err: nil},                           // SendKeys
+				{err: errors.New("kill failed")},                   // KillWindow
+			},
+		}
+		m := &Manager{Exec: mock}
+
+		_, err := m.ReplaceClaudeWindow("palmux", "claude", "claude")
+		if err == nil {
+			t.Fatal("ReplaceClaudeWindow() expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "replace claude window") {
+			t.Errorf("error message should contain context, got: %q", err.Error())
+		}
+	})
+
+	t.Run("異常系: NewWindow エラー", func(t *testing.T) {
+		mock := &sequentialMockExecutor{
+			calls: []mockCall{
+				{output: []byte("0\tbash\t1\n1\tclaude\t0\n")},   // ListWindows
+				{output: nil, err: nil},                           // SendKeys
+				{output: nil, err: nil},                           // KillWindow
+				{err: errors.New("create failed")},                 // NewWindow
+			},
+		}
+		m := &Manager{Exec: mock}
+
+		_, err := m.ReplaceClaudeWindow("palmux", "claude", "claude")
+		if err == nil {
+			t.Fatal("ReplaceClaudeWindow() expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "replace claude window") {
+			t.Errorf("error message should contain context, got: %q", err.Error())
+		}
+	})
+}
+
+func TestManager_SendKeys(t *testing.T) {
+	t.Run("正常系: send-keys でキーを送信する", func(t *testing.T) {
+		mock := &mockExecutor{}
+		m := &Manager{Exec: mock}
+
+		err := m.SendKeys("mysession", 1, "C-c")
+		if err != nil {
+			t.Fatalf("SendKeys() unexpected error: %v", err)
+		}
+		wantArgs := []string{"send-keys", "-t", "mysession:1", "C-c"}
+		if !reflect.DeepEqual(mock.gotArgs, wantArgs) {
+			t.Errorf("args = %v, want %v", mock.gotArgs, wantArgs)
+		}
+	})
+
+	t.Run("異常系: tmux エラー", func(t *testing.T) {
+		mock := &mockExecutor{err: errors.New("pane not found")}
+		m := &Manager{Exec: mock}
+
+		err := m.SendKeys("mysession", 0, "C-c")
+		if err == nil {
+			t.Fatal("SendKeys() expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "send keys") {
+			t.Errorf("error message should contain context, got: %q", err.Error())
+		}
+	})
+}
+
 func TestManager_GetClientSessionWindow(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -1247,4 +1569,75 @@ func TestManager_GetClientSessionWindow(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestManager_CreateGroupedSession(t *testing.T) {
+	t.Run("正常系: グループセッション作成後にステータスバーを無効化する", func(t *testing.T) {
+		mock := &sequentialMockExecutor{
+			calls: []mockCall{
+				{output: nil, err: nil}, // new-session
+				{output: nil, err: nil}, // set-option status off
+			},
+		}
+		m := &Manager{Exec: mock}
+
+		name, err := m.CreateGroupedSession("main")
+		if err != nil {
+			t.Fatalf("CreateGroupedSession() error = %v", err)
+		}
+
+		if !strings.HasPrefix(name, GroupedSessionPrefix) {
+			t.Errorf("name = %q, want prefix %q", name, GroupedSessionPrefix)
+		}
+
+		// 2回の呼び出しを検証
+		if len(mock.gotArgs) != 2 {
+			t.Fatalf("expected 2 calls, got %d", len(mock.gotArgs))
+		}
+
+		// 1回目: new-session
+		wantFirst := []string{"new-session", "-d", "-t", "main", "-s", name}
+		if !reflect.DeepEqual(mock.gotArgs[0], wantFirst) {
+			t.Errorf("call 0 args = %v, want %v", mock.gotArgs[0], wantFirst)
+		}
+
+		// 2回目: set-option status off
+		wantSecond := []string{"set-option", "-t", name, "status", "off"}
+		if !reflect.DeepEqual(mock.gotArgs[1], wantSecond) {
+			t.Errorf("call 1 args = %v, want %v", mock.gotArgs[1], wantSecond)
+		}
+	})
+
+	t.Run("異常系: new-session が失敗した場合", func(t *testing.T) {
+		mock := &sequentialMockExecutor{
+			calls: []mockCall{
+				{output: nil, err: fmt.Errorf("session not found")},
+			},
+		}
+		m := &Manager{Exec: mock}
+
+		_, err := m.CreateGroupedSession("nonexistent")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("正常系: set-option が失敗してもエラーにならない", func(t *testing.T) {
+		mock := &sequentialMockExecutor{
+			calls: []mockCall{
+				{output: nil, err: nil},                          // new-session OK
+				{output: nil, err: fmt.Errorf("option failed")}, // set-option fails
+			},
+		}
+		m := &Manager{Exec: mock}
+
+		name, err := m.CreateGroupedSession("main")
+		if err != nil {
+			t.Fatalf("CreateGroupedSession() should not fail when set-option fails, got error = %v", err)
+		}
+
+		if !strings.HasPrefix(name, GroupedSessionPrefix) {
+			t.Errorf("name = %q, want prefix %q", name, GroupedSessionPrefix)
+		}
+	})
 }

@@ -8,6 +8,39 @@ import (
 	"github.com/tjst-t/palmux/internal/tmux"
 )
 
+// handleGetSessionMode は GET /api/sessions/{session}/mode のハンドラ。
+// セッションが Claude Code モード（ghq セッション）かどうかを返す。
+// ghq セッションの場合、claude ウィンドウの存在を保証して index を返す。
+func (s *Server) handleGetSessionMode() http.Handler {
+	type sessionModeResponse struct {
+		ClaudeCode   bool `json:"claude_code"`
+		ClaudeWindow int  `json:"claude_window"`
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		session := r.PathValue("session")
+
+		if !s.tmux.IsGhqSession(session) {
+			writeJSON(w, http.StatusOK, sessionModeResponse{
+				ClaudeCode:   false,
+				ClaudeWindow: -1,
+			})
+			return
+		}
+
+		win, err := s.tmux.EnsureClaudeWindow(session, s.claudePath)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, sessionModeResponse{
+			ClaudeCode:   true,
+			ClaudeWindow: win.Index,
+		})
+	})
+}
+
 // handleListWindows は GET /api/sessions/{session}/windows のハンドラ。
 // 指定セッションのウィンドウ一覧を JSON 配列で返す。
 func (s *Server) handleListWindows() http.Handler {
@@ -48,6 +81,12 @@ func (s *Server) handleCreateWindow() http.Handler {
 				writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 				return
 			}
+		}
+
+		// Claude Code モード: shell のみ許可（コマンド付きウィンドウ不可）
+		if s.tmux.IsGhqSession(session) && req.Command != "" {
+			writeError(w, http.StatusForbidden, "only shell windows can be created in Claude Code mode")
+			return
 		}
 
 		window, err := s.tmux.NewWindow(session, req.Name, req.Command)
@@ -94,6 +133,19 @@ func (s *Server) handleRenameWindow() http.Handler {
 			return
 		}
 
+		// Claude Code モード: claude ウィンドウのリネームを禁止
+		if s.tmux.IsGhqSession(session) {
+			windows, err := s.tmux.ListWindows(session)
+			if err == nil {
+				for _, win := range windows {
+					if win.Index == index && win.Name == "claude" {
+						writeError(w, http.StatusForbidden, "cannot rename claude window in Claude Code mode")
+						return
+					}
+				}
+			}
+		}
+
 		if err := s.tmux.RenameWindow(session, index, req.Name); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -118,6 +170,43 @@ func (s *Server) handleRenameWindow() http.Handler {
 	})
 }
 
+// handleRestartClaudeWindow は POST /api/sessions/{session}/claude/restart のハンドラ。
+// claude ウィンドウを kill して指定コマンドで再作成する。
+// ghq セッションのみ許可。
+func (s *Server) handleRestartClaudeWindow() http.Handler {
+	type restartRequest struct {
+		Command string `json:"command"`
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		session := r.PathValue("session")
+
+		if !s.tmux.IsGhqSession(session) {
+			writeError(w, http.StatusForbidden, "claude restart is only available for ghq sessions")
+			return
+		}
+
+		var req restartRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+			return
+		}
+
+		if req.Command == "" {
+			writeError(w, http.StatusBadRequest, "command is required")
+			return
+		}
+
+		win, err := s.tmux.ReplaceClaudeWindow(session, "claude", req.Command)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, win)
+	})
+}
+
 // handleDeleteWindow は DELETE /api/sessions/{session}/windows/{index} のハンドラ。
 // パスパラメータの session と index で指定されたウィンドウを削除し、204 No Content を返す。
 func (s *Server) handleDeleteWindow() http.Handler {
@@ -134,6 +223,19 @@ func (s *Server) handleDeleteWindow() http.Handler {
 		if index < 0 {
 			writeError(w, http.StatusBadRequest, "window index must be non-negative")
 			return
+		}
+
+		// Claude Code モード: claude ウィンドウの削除を禁止
+		if s.tmux.IsGhqSession(session) {
+			windows, err := s.tmux.ListWindows(session)
+			if err == nil {
+				for _, win := range windows {
+					if win.Index == index && win.Name == "claude" {
+						writeError(w, http.StatusForbidden, "cannot delete claude window in Claude Code mode")
+						return
+					}
+				}
+			}
 		}
 
 		if err := s.tmux.KillWindow(session, index); err != nil {

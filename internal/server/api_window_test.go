@@ -10,6 +10,76 @@ import (
 	"github.com/tjst-t/palmux/internal/tmux"
 )
 
+func TestHandleGetSessionMode(t *testing.T) {
+	t.Run("ghq セッション: claude_code true を返す", func(t *testing.T) {
+		mock := &configurableMock{
+			isGhqSession:       true,
+			ensureClaudeWindow: &tmux.Window{Index: 1, Name: "claude", Active: false},
+		}
+		srv, token := newTestServer(mock)
+		rec := doRequest(t, srv.Handler(), http.MethodGet, "/api/sessions/palmux/mode", token, "")
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+		}
+
+		var result struct {
+			ClaudeCode   bool `json:"claude_code"`
+			ClaudeWindow int  `json:"claude_window"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if !result.ClaudeCode {
+			t.Error("claude_code should be true")
+		}
+		if result.ClaudeWindow != 1 {
+			t.Errorf("claude_window = %d, want 1", result.ClaudeWindow)
+		}
+	})
+
+	t.Run("非 ghq セッション: claude_code false を返す", func(t *testing.T) {
+		mock := &configurableMock{
+			isGhqSession: false,
+		}
+		srv, token := newTestServer(mock)
+		rec := doRequest(t, srv.Handler(), http.MethodGet, "/api/sessions/local/mode", token, "")
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+		}
+
+		var result struct {
+			ClaudeCode   bool `json:"claude_code"`
+			ClaudeWindow int  `json:"claude_window"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if result.ClaudeCode {
+			t.Error("claude_code should be false")
+		}
+		if result.ClaudeWindow != -1 {
+			t.Errorf("claude_window = %d, want -1", result.ClaudeWindow)
+		}
+	})
+
+	t.Run("EnsureClaudeWindow エラー: 500 を返す", func(t *testing.T) {
+		mock := &configurableMock{
+			isGhqSession:          true,
+			ensureClaudeWindowErr: errors.New("failed to create window"),
+		}
+		srv, token := newTestServer(mock)
+		rec := doRequest(t, srv.Handler(), http.MethodGet, "/api/sessions/palmux/mode", token, "")
+
+		if rec.Code != http.StatusInternalServerError {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+		}
+	})
+}
+
 func TestHandleListWindows(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -478,6 +548,227 @@ func TestHandleRenameWindow(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandleRestartClaudeWindow(t *testing.T) {
+	t.Run("正常系: ghq セッションで claude ウィンドウを再起動", func(t *testing.T) {
+		mock := &configurableMock{
+			isGhqSession:        true,
+			replaceClaudeWindow: &tmux.Window{Index: 2, Name: "claude", Active: true},
+		}
+		srv, token := newTestServer(mock)
+		rec := doRequest(t, srv.Handler(), http.MethodPost, "/api/sessions/palmux/claude/restart", token, `{"command": "claude --model opus"}`)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+
+		var result tmux.Window
+		if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if result.Index != 2 {
+			t.Errorf("result.Index = %d, want 2", result.Index)
+		}
+		if result.Name != "claude" {
+			t.Errorf("result.Name = %q, want %q", result.Name, "claude")
+		}
+
+		if mock.calledReplaceClaudeWindow.session != "palmux" {
+			t.Errorf("ReplaceClaudeWindow session = %q, want %q", mock.calledReplaceClaudeWindow.session, "palmux")
+		}
+		if mock.calledReplaceClaudeWindow.name != "claude" {
+			t.Errorf("ReplaceClaudeWindow name = %q, want %q", mock.calledReplaceClaudeWindow.name, "claude")
+		}
+		if mock.calledReplaceClaudeWindow.command != "claude --model opus" {
+			t.Errorf("ReplaceClaudeWindow command = %q, want %q", mock.calledReplaceClaudeWindow.command, "claude --model opus")
+		}
+	})
+
+	t.Run("非 ghq セッション: 403 を返す", func(t *testing.T) {
+		mock := &configurableMock{
+			isGhqSession: false,
+		}
+		srv, token := newTestServer(mock)
+		rec := doRequest(t, srv.Handler(), http.MethodPost, "/api/sessions/local/claude/restart", token, `{"command": "claude --model opus"}`)
+
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("status = %d, want %d, body = %s", rec.Code, http.StatusForbidden, rec.Body.String())
+		}
+	})
+
+	t.Run("command が空: 400 を返す", func(t *testing.T) {
+		mock := &configurableMock{
+			isGhqSession: true,
+		}
+		srv, token := newTestServer(mock)
+		rec := doRequest(t, srv.Handler(), http.MethodPost, "/api/sessions/palmux/claude/restart", token, `{"command": ""}`)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want %d, body = %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+		}
+	})
+
+	t.Run("不正 JSON: 400 を返す", func(t *testing.T) {
+		mock := &configurableMock{
+			isGhqSession: true,
+		}
+		srv, token := newTestServer(mock)
+		rec := doRequest(t, srv.Handler(), http.MethodPost, "/api/sessions/palmux/claude/restart", token, `{invalid`)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("ReplaceClaudeWindow エラー: 500 を返す", func(t *testing.T) {
+		mock := &configurableMock{
+			isGhqSession:           true,
+			replaceClaudeWindowErr: errors.New("replace failed"),
+		}
+		srv, token := newTestServer(mock)
+		rec := doRequest(t, srv.Handler(), http.MethodPost, "/api/sessions/palmux/claude/restart", token, `{"command": "claude --model opus"}`)
+
+		if rec.Code != http.StatusInternalServerError {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+		}
+	})
+}
+
+func TestHandleDeleteWindow_ClaudeCodeMode(t *testing.T) {
+	t.Run("ghq セッションで claude ウィンドウ削除: 403", func(t *testing.T) {
+		mock := &configurableMock{
+			isGhqSession: true,
+			windows: []tmux.Window{
+				{Index: 0, Name: "bash", Active: true},
+				{Index: 1, Name: "claude", Active: false},
+			},
+		}
+		srv, token := newTestServer(mock)
+		rec := doRequest(t, srv.Handler(), http.MethodDelete, "/api/sessions/palmux/windows/1", token, "")
+
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("status = %d, want %d, body = %s", rec.Code, http.StatusForbidden, rec.Body.String())
+		}
+	})
+
+	t.Run("ghq セッションで bash ウィンドウ削除: 許可", func(t *testing.T) {
+		mock := &configurableMock{
+			isGhqSession: true,
+			windows: []tmux.Window{
+				{Index: 0, Name: "bash", Active: true},
+				{Index: 1, Name: "claude", Active: false},
+			},
+		}
+		srv, token := newTestServer(mock)
+		rec := doRequest(t, srv.Handler(), http.MethodDelete, "/api/sessions/palmux/windows/0", token, "")
+
+		if rec.Code != http.StatusNoContent {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusNoContent)
+		}
+	})
+
+	t.Run("非 ghq セッションでの claude ウィンドウ削除: 許可", func(t *testing.T) {
+		mock := &configurableMock{
+			isGhqSession: false,
+		}
+		srv, token := newTestServer(mock)
+		rec := doRequest(t, srv.Handler(), http.MethodDelete, "/api/sessions/local/windows/1", token, "")
+
+		if rec.Code != http.StatusNoContent {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusNoContent)
+		}
+	})
+}
+
+func TestHandleCreateWindow_ClaudeCodeMode(t *testing.T) {
+	t.Run("ghq セッションでコマンド付きウィンドウ作成: 403", func(t *testing.T) {
+		mock := &configurableMock{
+			isGhqSession: true,
+		}
+		srv, token := newTestServer(mock)
+		rec := doRequest(t, srv.Handler(), http.MethodPost, "/api/sessions/palmux/windows", token, `{"command": "vim"}`)
+
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("status = %d, want %d, body = %s", rec.Code, http.StatusForbidden, rec.Body.String())
+		}
+	})
+
+	t.Run("ghq セッションで shell ウィンドウ作成: 許可", func(t *testing.T) {
+		mock := &configurableMock{
+			isGhqSession: true,
+			newWindow:    &tmux.Window{Index: 2, Name: "bash", Active: true},
+		}
+		srv, token := newTestServer(mock)
+		rec := doRequest(t, srv.Handler(), http.MethodPost, "/api/sessions/palmux/windows", token, `{}`)
+
+		if rec.Code != http.StatusCreated {
+			t.Errorf("status = %d, want %d, body = %s", rec.Code, http.StatusCreated, rec.Body.String())
+		}
+	})
+
+	t.Run("非 ghq セッションでコマンド付きウィンドウ作成: 許可", func(t *testing.T) {
+		mock := &configurableMock{
+			isGhqSession: false,
+			newWindow:    &tmux.Window{Index: 2, Name: "vim", Active: true},
+		}
+		srv, token := newTestServer(mock)
+		rec := doRequest(t, srv.Handler(), http.MethodPost, "/api/sessions/local/windows", token, `{"command": "vim"}`)
+
+		if rec.Code != http.StatusCreated {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusCreated)
+		}
+	})
+}
+
+func TestHandleRenameWindow_ClaudeCodeMode(t *testing.T) {
+	t.Run("ghq セッションで claude ウィンドウリネーム: 403", func(t *testing.T) {
+		mock := &configurableMock{
+			isGhqSession: true,
+			windows: []tmux.Window{
+				{Index: 0, Name: "bash", Active: true},
+				{Index: 1, Name: "claude", Active: false},
+			},
+		}
+		srv, token := newTestServer(mock)
+		rec := doRequest(t, srv.Handler(), http.MethodPatch, "/api/sessions/palmux/windows/1", token, `{"name": "renamed"}`)
+
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("status = %d, want %d, body = %s", rec.Code, http.StatusForbidden, rec.Body.String())
+		}
+	})
+
+	t.Run("ghq セッションで bash ウィンドウリネーム: 許可", func(t *testing.T) {
+		mock := &configurableMock{
+			isGhqSession: true,
+			windows: []tmux.Window{
+				{Index: 0, Name: "renamed", Active: true},
+				{Index: 1, Name: "claude", Active: false},
+			},
+		}
+		srv, token := newTestServer(mock)
+		rec := doRequest(t, srv.Handler(), http.MethodPatch, "/api/sessions/palmux/windows/0", token, `{"name": "renamed"}`)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+	})
+
+	t.Run("非 ghq セッションでの claude ウィンドウリネーム: 許可", func(t *testing.T) {
+		mock := &configurableMock{
+			isGhqSession: false,
+			windows: []tmux.Window{
+				{Index: 1, Name: "renamed", Active: false},
+			},
+		}
+		srv, token := newTestServer(mock)
+		rec := doRequest(t, srv.Handler(), http.MethodPatch, "/api/sessions/local/windows/1", token, `{"name": "renamed"}`)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+	})
 }
 
 func TestHandleRenameWindow_WithBasePath(t *testing.T) {

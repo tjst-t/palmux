@@ -27,6 +27,9 @@ func (m *mockTmuxManager) NewWindow(session, name, command string) (*tmux.Window
 	return &tmux.Window{}, nil
 }
 func (m *mockTmuxManager) KillWindow(session string, index int) error { return nil }
+func (m *mockTmuxManager) SendKeys(session string, index int, key string) error {
+	return nil
+}
 func (m *mockTmuxManager) RenameWindow(session string, index int, name string) error {
 	return nil
 }
@@ -48,6 +51,13 @@ func (m *mockTmuxManager) CloneGhqRepo(url string) (*tmux.GhqRepo, error) {
 func (m *mockTmuxManager) DeleteGhqRepo(fullPath string) error { return nil }
 func (m *mockTmuxManager) GetClientSessionWindow(tty string) (string, int, error) {
 	return "", -1, fmt.Errorf("not implemented")
+}
+func (m *mockTmuxManager) IsGhqSession(session string) bool { return false }
+func (m *mockTmuxManager) EnsureClaudeWindow(session, claudePath string) (*tmux.Window, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *mockTmuxManager) ReplaceClaudeWindow(session, name, command string) (*tmux.Window, error) {
+	return nil, fmt.Errorf("not implemented")
 }
 
 func TestNormalizeBasePath(t *testing.T) {
@@ -121,11 +131,18 @@ const testIndexHTML = `<!DOCTYPE html>
 <body>Palmux</body>
 </html>`
 
+// testSwJS は テスト用の sw.js テンプレート。
+// 実際のフロントエンドと同じプレースホルダーを持つ。
+const testSwJS = `const CACHE_NAME = 'palmux-__VERSION__';`
+
 // newTestFrontendFS は テスト用の静的ファイル FS を返す。
 func newTestFrontendFS() fs.FS {
 	return fstest.MapFS{
 		"index.html": &fstest.MapFile{
 			Data: []byte(testIndexHTML),
+		},
+		"sw.js": &fstest.MapFile{
+			Data: []byte(testSwJS),
 		},
 	}
 }
@@ -957,6 +974,85 @@ func TestServer_TLS_IndexHTMLInjectionOverTLS(t *testing.T) {
 	}
 	if !strings.Contains(body, `content="tls-test-token"`) {
 		t.Errorf("body should contain injected token, got %q", body)
+	}
+}
+
+func TestServer_SwJSVersionInjection(t *testing.T) {
+	tests := []struct {
+		name        string
+		basePath    string
+		version     string
+		requestPath string
+		wantVersion string
+	}{
+		{
+			name:        "ルートパス: バージョンが注入される",
+			basePath:    "/",
+			version:     "v0.5.2-1-g31b4ac3",
+			requestPath: "/sw.js",
+			wantVersion: "palmux-v0.5.2-1-g31b4ac3",
+		},
+		{
+			name:        "バージョン未指定: プレースホルダーが空文字に置換される",
+			basePath:    "/",
+			version:     "",
+			requestPath: "/sw.js",
+			wantVersion: "palmux-",
+		},
+		{
+			name:        "basePath付き: バージョンが注入される",
+			basePath:    "/palmux/",
+			version:     "v1.0.0",
+			requestPath: "/palmux/sw.js",
+			wantVersion: "palmux-v1.0.0",
+		},
+		{
+			name:        "深いネストパス: バージョンが注入される",
+			basePath:    "/deep/nested/path/",
+			version:     "v2.0.0-rc1",
+			requestPath: "/deep/nested/path/sw.js",
+			wantVersion: "palmux-v2.0.0-rc1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := NewServer(Options{
+				Tmux:     &mockTmuxManager{},
+				Token:    "test-token",
+				BasePath: tt.basePath,
+				Version:  tt.version,
+				Frontend: newTestFrontendFS(),
+			})
+
+			handler := srv.Handler()
+
+			req := httptest.NewRequest(http.MethodGet, tt.requestPath, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+			}
+
+			body := rec.Body.String()
+
+			// バージョンが注入されている
+			if !strings.Contains(body, tt.wantVersion) {
+				t.Errorf("body should contain %q, got %q", tt.wantVersion, body)
+			}
+
+			// プレースホルダーが残っていない
+			if strings.Contains(body, "__VERSION__") {
+				t.Errorf("body should not contain __VERSION__ placeholder, got %q", body)
+			}
+
+			// Content-Type が application/javascript
+			ct := rec.Header().Get("Content-Type")
+			if !strings.Contains(ct, "application/javascript") {
+				t.Errorf("Content-Type = %q, want application/javascript", ct)
+			}
+		})
 	}
 }
 
