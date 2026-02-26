@@ -248,17 +248,21 @@ export class TabBar {
     btn.dataset.window = String(win.index);
     btn.dataset.windowName = win.name;
 
-    // Claude Code mode: add sparkle icon for claude windows
-    if (isClaudeCodeMode && win.name === 'claude') {
-      const icon = document.createElement('span');
-      icon.className = 'tab-icon';
-      icon.textContent = '\u2726'; // ✦
-      btn.appendChild(icon);
+    const isClaude = isClaudeCodeMode && win.name === 'claude';
+
+    // Icon: Claude sparkle SVG or terminal prompt SVG
+    const icon = document.createElement('span');
+    icon.className = 'tab-icon';
+    if (isClaude) {
+      icon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5"/><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5" transform="rotate(45 12 12)"/><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5" transform="rotate(90 12 12)"/><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5" transform="rotate(135 12 12)"/><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5" transform="rotate(180 12 12)"/><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5" transform="rotate(225 12 12)"/><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5" transform="rotate(270 12 12)"/><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5" transform="rotate(315 12 12)"/></svg>';
+    } else {
+      icon.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><polyline points="2,4 6,7 2,10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><line x1="7" y1="10" x2="12" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
     }
+    btn.appendChild(icon);
 
     const label = document.createElement('span');
     label.className = 'tab-label';
-    label.textContent = `${win.index}:${win.name}`;
+    label.textContent = win.name;
     btn.appendChild(label);
 
     return btn;
@@ -275,7 +279,7 @@ export class TabBar {
     btn.dataset.type = 'files';
     const icon = document.createElement('span');
     icon.className = 'tab-icon';
-    icon.textContent = '\uD83D\uDCC1'; // folder emoji
+    icon.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M1.5 3.5h4l1.5 1.5h5.5v6.5h-11z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>';
     btn.appendChild(icon);
     const label = document.createElement('span');
     label.className = 'tab-label';
@@ -295,7 +299,7 @@ export class TabBar {
     btn.dataset.type = 'git';
     const icon = document.createElement('span');
     icon.className = 'tab-icon';
-    icon.textContent = '\u2442'; // ⑂ branch symbol
+    icon.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="4" cy="4" r="1.5" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="4" r="1.5" stroke="currentColor" stroke-width="1.3"/><circle cx="7" cy="11" r="1.5" stroke="currentColor" stroke-width="1.3"/><line x1="4" y1="5.5" x2="7" y2="9.5" stroke="currentColor" stroke-width="1.3"/><line x1="10" y1="5.5" x2="7" y2="9.5" stroke="currentColor" stroke-width="1.3"/></svg>';
     btn.appendChild(icon);
     const label = document.createElement('span');
     label.className = 'tab-label';
