@@ -2,7 +2,7 @@
 // ハンバーガーメニューからスライドインし、セッション/ウィンドウの切り替えを行う
 // セッション作成・削除機能を含む
 
-import { listSessions, listWindows, createSession, deleteSession, createWindow, deleteWindow, renameWindow, listGhqRepos, cloneGhqRepo, deleteGhqRepo } from './api.js';
+import { listSessions, listWindows, createSession, deleteSession, createWindow, deleteWindow, renameWindow, listGhqRepos, cloneGhqRepo, deleteGhqRepo, getSessionMode, restartClaudeWindow } from './api.js';
 
 /**
  * Drawer はセッション/ウィンドウ切り替え用のスライドインパネル。
@@ -32,6 +32,8 @@ export class Drawer {
     this._claudePath = options.claudePath || 'claude';
     this._onSelectWindow = options.onSelectWindow;
     this._onSelectSession = options.onSelectSession;
+    this._onSelectFiles = options.onSelectFiles || null;
+    this._onSelectGit = options.onSelectGit || null;
     this._onCreateSession = options.onCreateSession || null;
     this._onDeleteSession = options.onDeleteSession || null;
     this._onCreateWindow = options.onCreateWindow || null;
@@ -41,12 +43,16 @@ export class Drawer {
     this._visible = false;
     this._currentSession = null;
     this._currentWindowIndex = null;
+    /** @type {'terminal'|'filebrowser'|'gitbrowser'} 現在の viewMode */
+    this._currentViewMode = 'terminal';
     /** @type {Set<string>} 展開中のセッション名 */
     this._expandedSessions = new Set();
     /** @type {Array} キャッシュ済みセッションデータ */
     this._sessions = [];
     /** @type {Object<string, Array>} セッション名 -> ウィンドウ一覧 */
     this._windowsCache = {};
+    /** @type {Object<string, {claude_code: boolean, claude_window: number}>} セッション名 -> モード情報 */
+    this._modeCache = {};
 
     /** @type {number|null} 長押しタイマー ID */
     this._longPressTimer = null;
@@ -424,10 +430,11 @@ export class Drawer {
    * @param {number} windowIndex - ウィンドウインデックス
    * @param {{ sessionChanged?: boolean }} [opts]
    */
-  setCurrent(session, windowIndex, { sessionChanged = false } = {}) {
-    const changed = (this._currentSession !== session || this._currentWindowIndex !== windowIndex);
+  setCurrent(session, windowIndex, { sessionChanged = false, viewMode = 'terminal' } = {}) {
+    const changed = (this._currentSession !== session || this._currentWindowIndex !== windowIndex || this._currentViewMode !== viewMode);
     this._currentSession = session;
     this._currentWindowIndex = windowIndex;
+    this._currentViewMode = viewMode;
 
     if (!changed || !this._visible) return;
 
@@ -473,6 +480,34 @@ export class Drawer {
     const windows = await listWindows(sessionName) || [];
     this._windowsCache[sessionName] = windows;
     return windows;
+  }
+
+  /**
+   * セッションのモード情報をロード（キャッシュ済みならそれを返す）。
+   * @param {string} sessionName - セッション名
+   * @returns {Promise<{claude_code: boolean, claude_window: number}|null>}
+   */
+  async _loadMode(sessionName) {
+    if (this._modeCache[sessionName]) {
+      return this._modeCache[sessionName];
+    }
+    try {
+      const mode = await getSessionMode(sessionName);
+      this._modeCache[sessionName] = mode;
+      return mode;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * セッションが Claude Code モードかどうかを返す（キャッシュベース）。
+   * @param {string} sessionName - セッション名
+   * @returns {boolean}
+   */
+  _isClaudeCodeMode(sessionName) {
+    const mode = this._modeCache[sessionName];
+    return mode ? mode.claude_code : false;
   }
 
   /**
@@ -1302,10 +1337,13 @@ export class Drawer {
         // 他のセッションを閉じて、このセッションだけ展開（アコーディオン）
         this._expandedSessions.clear();
         this._expandedSessions.add(session.name);
-        // ウィンドウ一覧をロード
+        // ウィンドウ一覧とモード情報をロード
         let windows = [];
         try {
-          windows = await this._loadWindows(session.name);
+          [windows] = await Promise.all([
+            this._loadWindows(session.name),
+            this._loadMode(session.name),
+          ]);
         } catch (err) {
           console.error('Failed to load windows:', err);
         }
@@ -1345,7 +1383,32 @@ export class Drawer {
           console.error('Failed to load windows:', err);
         });
       } else {
-        for (const win of windows) {
+        // 仮想アイテム: Files, Git（実ウィンドウの前に挿入）
+        const filesItem = this._createVirtualItem(
+          session.name,
+          'filebrowser',
+          'Files',
+          '<path d="M1.5 3.5h4l1.5 1.5h5.5v6.5h-11z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>',
+        );
+        windowsList.appendChild(filesItem);
+
+        const gitItem = this._createVirtualItem(
+          session.name,
+          'gitbrowser',
+          'Git',
+          '<circle cx="4" cy="4" r="1.5" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="4" r="1.5" stroke="currentColor" stroke-width="1.3"/><circle cx="7" cy="11" r="1.5" stroke="currentColor" stroke-width="1.3"/><line x1="4" y1="5.5" x2="7" y2="9.5" stroke="currentColor" stroke-width="1.3"/><line x1="10" y1="5.5" x2="7" y2="9.5" stroke="currentColor" stroke-width="1.3"/>',
+        );
+        windowsList.appendChild(gitItem);
+
+        // Claude Code モードの場合、claude ウィンドウを先頭にソート
+        let sortedWindows = windows;
+        if (this._isClaudeCodeMode(session.name)) {
+          sortedWindows = [...windows].sort((a, b) =>
+            a.name === 'claude' ? -1 : b.name === 'claude' ? 1 : 0
+          );
+        }
+
+        for (const win of sortedWindows) {
           const winEl = this._createWindowElement(session.name, win, windows.length);
           windowsList.appendChild(winEl);
         }
@@ -1575,6 +1638,54 @@ export class Drawer {
   }
 
   /**
+   * 仮想アイテム（Files / Git）を作成する。
+   * @param {string} sessionName - セッション名
+   * @param {'filebrowser'|'gitbrowser'} mode - ビューモード
+   * @param {string} label - 表示ラベル
+   * @param {string} svgContent - SVG の内部コンテンツ
+   * @returns {HTMLElement}
+   */
+  _createVirtualItem(sessionName, mode, label, svgContent) {
+    const el = document.createElement('div');
+    el.className = 'drawer-virtual-item';
+
+    const isCurrent = sessionName === this._currentSession &&
+                      this._currentViewMode === mode;
+    if (isCurrent) {
+      el.classList.add('drawer-virtual-item--current');
+    }
+
+    const icon = document.createElement('span');
+    icon.className = 'drawer-virtual-item-icon';
+    icon.innerHTML = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">${svgContent}</svg>`;
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'drawer-virtual-item-name';
+    nameEl.textContent = label;
+
+    el.appendChild(icon);
+    el.appendChild(nameEl);
+
+    el.addEventListener('click', () => {
+      if (this._longPressDetected) {
+        this._longPressDetected = false;
+        return;
+      }
+      if (mode === 'filebrowser' && this._onSelectFiles) {
+        this._onSelectFiles(sessionName);
+      } else if (mode === 'gitbrowser' && this._onSelectGit) {
+        this._onSelectGit(sessionName);
+      }
+      this._currentViewMode = mode;
+      this._currentSession = sessionName;
+      this._renderContent();
+      this.close();
+    });
+
+    return el;
+  }
+
+  /**
    * ウィンドウ要素を作成する。
    * @param {string} sessionName - セッション名
    * @param {Object} win - ウィンドウ情報
@@ -1586,14 +1697,28 @@ export class Drawer {
     el.className = 'drawer-window-item';
 
     const isCurrent = sessionName === this._currentSession &&
-                      win.index === this._currentWindowIndex;
+                      win.index === this._currentWindowIndex &&
+                      this._currentViewMode === 'terminal';
     if (isCurrent) {
       el.classList.add('drawer-window-item--current');
     }
 
+    // ウィンドウアイコン（claude ウィンドウは Claude スパークル、それ以外はターミナル）
+    const isClaude = this._isClaudeCodeMode(sessionName) && win.name === 'claude';
+    const iconEl = document.createElement('span');
+    iconEl.className = 'drawer-window-icon' + (isClaude ? ' drawer-window-icon--claude' : '');
+    if (isClaude) {
+      iconEl.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5"/><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5" transform="rotate(45 12 12)"/><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5" transform="rotate(90 12 12)"/><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5" transform="rotate(135 12 12)"/><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5" transform="rotate(180 12 12)"/><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5" transform="rotate(225 12 12)"/><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5" transform="rotate(270 12 12)"/><ellipse cx="12" cy="5.5" rx="1.5" ry="4.5" transform="rotate(315 12 12)"/></svg>';
+    } else {
+      iconEl.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><polyline points="2,4 6,7 2,10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><line x1="7" y1="10" x2="12" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+    }
+
+    // claude ウィンドウはインデックス番号を非表示
     const indexEl = document.createElement('span');
     indexEl.className = 'drawer-window-index';
-    indexEl.textContent = `${win.index}: `;
+    if (!isClaude) {
+      indexEl.textContent = `${win.index}: `;
+    }
 
     const nameEl = document.createElement('span');
     nameEl.className = 'drawer-window-name';
@@ -1613,6 +1738,7 @@ export class Drawer {
       badge.classList.add('drawer-window-badge--active');
     }
 
+    el.appendChild(iconEl);
     el.appendChild(indexEl);
     el.appendChild(nameEl);
     el.appendChild(badge);
@@ -1638,6 +1764,7 @@ export class Drawer {
       }
       this._currentSession = sessionName;
       this._currentWindowIndex = win.index;
+      this._currentViewMode = 'terminal';
       this.close();
     });
 
@@ -1826,25 +1953,50 @@ export class Drawer {
     title.textContent = `${win.index}: ${win.name}`;
     menu.appendChild(title);
 
-    // Rename
-    const renameBtn = document.createElement('button');
-    renameBtn.className = 'drawer-context-menu-item';
-    renameBtn.textContent = 'Rename';
-    renameBtn.addEventListener('click', () => {
-      closeMenu();
-      this._startWindowRename(el, indexEl, nameEl, sessionName, win);
-    });
-    menu.appendChild(renameBtn);
+    // Claude Code モードの claude ウィンドウは保護
+    const isProtected = this._isClaudeCodeMode(sessionName) && win.name === 'claude';
 
-    // Delete
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'drawer-context-menu-item drawer-context-menu-item--danger';
-    deleteBtn.textContent = 'Delete';
-    deleteBtn.addEventListener('click', () => {
-      closeMenu();
-      this._doDeleteWindow(sessionName, win, windowCount);
-    });
-    menu.appendChild(deleteBtn);
+    if (isProtected) {
+      // Restart: 新しい claude セッションで再起動
+      const restartBtn = document.createElement('button');
+      restartBtn.className = 'drawer-context-menu-item';
+      restartBtn.textContent = 'Restart';
+      restartBtn.addEventListener('click', () => {
+        closeMenu();
+        this._showClaudeRestartModelDialog(sessionName, this._claudePath);
+      });
+      menu.appendChild(restartBtn);
+
+      // Resume: --continue 付きで再起動
+      const resumeBtn = document.createElement('button');
+      resumeBtn.className = 'drawer-context-menu-item';
+      resumeBtn.textContent = 'Resume';
+      resumeBtn.addEventListener('click', () => {
+        closeMenu();
+        this._showClaudeRestartModelDialog(sessionName, `${this._claudePath} --continue`);
+      });
+      menu.appendChild(resumeBtn);
+    } else {
+      // Rename
+      const renameBtn = document.createElement('button');
+      renameBtn.className = 'drawer-context-menu-item';
+      renameBtn.textContent = 'Rename';
+      renameBtn.addEventListener('click', () => {
+        closeMenu();
+        this._startWindowRename(el, indexEl, nameEl, sessionName, win);
+      });
+      menu.appendChild(renameBtn);
+
+      // Delete
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'drawer-context-menu-item drawer-context-menu-item--danger';
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.addEventListener('click', () => {
+        closeMenu();
+        this._doDeleteWindow(sessionName, win, windowCount);
+      });
+      menu.appendChild(deleteBtn);
+    }
 
     overlay.appendChild(menu);
     document.body.appendChild(overlay);
@@ -1939,6 +2091,12 @@ export class Drawer {
    * @param {string} sessionName - セッション名
    */
   _showNewWindowDialog(sessionName) {
+    // Claude Code モード: shell のみ許可なのでダイアログをスキップ
+    if (this._isClaudeCodeMode(sessionName)) {
+      this._handleCreateWindow(sessionName, '');
+      return;
+    }
+
     // 既にダイアログが表示中なら除去
     const existing = document.querySelector('.drawer-context-menu-overlay');
     if (existing) {
@@ -2058,6 +2216,90 @@ export class Drawer {
         closeDialog();
       }
     });
+  }
+
+  /**
+   * claude ウィンドウのリスタート/レジューム用モデル選択ダイアログを表示する。
+   * @param {string} sessionName - セッション名
+   * @param {string} baseCommand - ベースコマンド（'claude' or 'claude --continue'）
+   */
+  _showClaudeRestartModelDialog(sessionName, baseCommand) {
+    const existing = document.querySelector('.drawer-context-menu-overlay');
+    if (existing) {
+      existing.remove();
+    }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'drawer-context-menu-overlay';
+
+    const menu = document.createElement('div');
+    menu.className = 'drawer-context-menu';
+
+    const title = document.createElement('div');
+    title.className = 'drawer-context-menu-title';
+    title.textContent = 'Select Model';
+    menu.appendChild(title);
+
+    const models = [
+      { label: 'opus', flag: 'opus' },
+      { label: 'sonnet', flag: 'sonnet' },
+      { label: 'haiku', flag: 'haiku' },
+    ];
+
+    for (const model of models) {
+      const btn = document.createElement('button');
+      btn.className = 'drawer-context-menu-item';
+      btn.textContent = model.label;
+      btn.addEventListener('click', () => {
+        closeDialog();
+        const command = `${baseCommand} --model ${model.flag}`;
+        this._handleRestartClaudeWindow(sessionName, command);
+      });
+      menu.appendChild(btn);
+    }
+
+    overlay.appendChild(menu);
+    document.body.appendChild(overlay);
+
+    requestAnimationFrame(() => {
+      overlay.classList.add('drawer-context-menu-overlay--visible');
+    });
+
+    const closeDialog = () => {
+      overlay.classList.remove('drawer-context-menu-overlay--visible');
+      setTimeout(() => {
+        overlay.remove();
+      }, 200);
+    };
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        closeDialog();
+      }
+    });
+  }
+
+  /**
+   * claude ウィンドウを再起動して切り替える。
+   * @param {string} sessionName - セッション名
+   * @param {string} command - 起動コマンド（例: 'claude --model opus'）
+   */
+  async _handleRestartClaudeWindow(sessionName, command) {
+    try {
+      const win = await restartClaudeWindow(sessionName, command);
+
+      // ウィンドウキャッシュクリア → 再取得
+      delete this._windowsCache[sessionName];
+      await this._loadWindows(sessionName);
+      this._renderContent();
+
+      // 新しいウィンドウに切り替え
+      this._currentWindowIndex = win.index;
+      this._onSelectWindow(sessionName, win.index);
+    } catch (err) {
+      console.error('Failed to restart claude window:', err);
+      this._showDeleteError(`Failed to restart claude window: ${err.message}`);
+    }
   }
 
   /**

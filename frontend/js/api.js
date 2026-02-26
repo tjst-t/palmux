@@ -265,6 +265,30 @@ export async function getCommands(session) {
   return fetchAPI(`api/sessions/${encodeURIComponent(session)}/commands`);
 }
 
+/**
+ * セッションのモード情報を取得する。
+ * ghq セッションの場合は claude ウィンドウの存在を保証して index を返す。
+ * @param {string} session - セッション名
+ * @returns {Promise<{claude_code: boolean, claude_window: number}>}
+ */
+export async function getSessionMode(session) {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/mode`);
+}
+
+/**
+ * claude ウィンドウを再起動する（kill して再作成）。
+ * ghq セッションのみ使用可能。
+ * @param {string} session - セッション名
+ * @param {string} command - 起動コマンド（例: "claude --model opus"）
+ * @returns {Promise<{index: number, name: string, active: boolean}>}
+ */
+export async function restartClaudeWindow(session, command) {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/claude/restart`, {
+    method: 'POST',
+    body: JSON.stringify({ command }),
+  });
+}
+
 // --- Git API ---
 
 /**
