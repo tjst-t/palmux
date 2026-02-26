@@ -3,7 +3,7 @@
 // Drawer による セッション/ウィンドウ切り替え
 // PanelManager による分割画面サポート
 
-import { listSessions, listWindows, listNotifications, deleteNotification, getSessionMode } from './api.js';
+import { listSessions, listWindows, listNotifications, deleteNotification, getSessionMode, createWindow } from './api.js';
 import { Drawer } from './drawer.js';
 import { PanelManager } from './panel-manager.js';
 import { TabBar } from './tab-bar.js';
@@ -727,6 +727,20 @@ document.addEventListener('DOMContentLoaded', () => {
         showFileBrowser(currentSession);
       } else if (type === 'git') {
         showGitBrowser(currentSession);
+      }
+    },
+    onCreateWindow: async () => {
+      const currentSession = panelManager?.getCurrentSession();
+      if (!currentSession) return;
+      try {
+        const result = await createWindow(currentSession, '', '');
+        connectToWindow(currentSession, result.index);
+        _refreshTabBar(currentSession, { type: 'terminal', windowIndex: result.index });
+        if (drawer) {
+          drawer.refreshWindowList?.(currentSession);
+        }
+      } catch (err) {
+        console.error('Failed to create window:', err);
       }
     },
   });

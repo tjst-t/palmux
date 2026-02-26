@@ -72,6 +72,19 @@
   right: 4px;
 }
 
+.tab-add {
+  color: #666;
+  font-size: 18px;
+  font-weight: bold;
+  padding: 0 10px;
+  min-width: 32px;
+  justify-content: center;
+}
+
+.tab-add:hover {
+  color: #7ec8e3;
+}
+
 /* Mobile adjustments */
 @media (max-width: 600px) {
   .tab {
@@ -88,5 +101,11 @@
     height: 5px;
     top: 6px;
     right: 2px;
+  }
+
+  .tab-add {
+    font-size: 16px;
+    padding: 0 8px;
+    min-width: 28px;
   }
 }
