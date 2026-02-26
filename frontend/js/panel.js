@@ -1,6 +1,7 @@
 // panel.js - Panel クラス
 // 1つのパネル（左/右）の状態と DOM をカプセル化する。
 // Terminal, FileBrowser, GitBrowser, Toolbar, IME, Touch, Connection を保持。
+// タブキャッシュにより、同一セッション内のタブ切り替え時にリソースを再作成しない。
 
 import { getWebSocketURL, getCommands, listNotifications, deleteNotification } from './api.js';
 import { PalmuxTerminal } from './terminal.js';
@@ -12,8 +13,25 @@ import { FileBrowser } from './filebrowser.js';
 import { GitBrowser } from './gitbrowser.js';
 
 /**
+ * TabState はタブキャッシュ内の1タブの状態を保持する。
+ * @typedef {object} TabState
+ * @property {'terminal'|'files'|'git'} type
+ * @property {number|null} windowIndex - terminal タブのみ
+ * @property {HTMLElement} rootEl - タブのルート要素
+ * @property {PalmuxTerminal|null} terminal
+ * @property {Toolbar|null} toolbar
+ * @property {IMEInput|null} imeInput
+ * @property {TouchHandler|null} touchHandler
+ * @property {ConnectionManager|null} connectionManager
+ * @property {HTMLElement|null} reconnectOverlayEl
+ * @property {FileBrowser|null} fileBrowser
+ * @property {GitBrowser|null} gitBrowser
+ */
+
+/**
  * Panel は左右いずれかのパネルの全状態をカプセル化する。
  * Terminal / FileBrowser / GitBrowser / Toolbar / IME / Touch / Connection を独立に管理する。
+ * タブキャッシュにより、同一セッション内の複数ウィンドウ・Files・Git を高速に切り替える。
  */
 export class Panel {
   /**
@@ -42,7 +60,7 @@ export class Panel {
     /** @type {'terminal'|'filebrowser'|'gitbrowser'} 現在の表示モード */
     this.viewMode = 'terminal';
 
-    /** @type {PalmuxTerminal|null} */
+    /** @type {PalmuxTerminal|null} アクティブターミナルタブの terminal（files/git 表示時は最後のターミナルを保持） */
     this._terminal = null;
     /** @type {Toolbar|null} */
     this._toolbar = null;
@@ -53,12 +71,10 @@ export class Panel {
     /** @type {ConnectionManager|null} */
     this._connectionManager = null;
 
-    /** @type {Map<string, {wrapper: HTMLElement, browser: FileBrowser}>} */
-    this._fileBrowsers = new Map();
-    /** @type {Map<string, {wrapper: HTMLElement, browser: GitBrowser}>} */
-    this._gitBrowsers = new Map();
-    /** @type {Map<string, string>} セッションごとの表示モード */
-    this._sessionViewModes = new Map();
+    /** @type {Map<string, TabState>} タブキャッシュ (key: "terminal:0", "files", "git") */
+    this._tabCache = new Map();
+    /** @type {string|null} 現在アクティブなタブキー */
+    this._activeTabKey = null;
 
     /** @type {boolean} フォーカス状態 */
     this._focused = false;
@@ -68,25 +84,13 @@ export class Panel {
     this._headerEl = null;
     this._headerTitleEl = null;
     this._contentEl = null;
-    this._terminalViewEl = null;
-    this._terminalWrapperEl = null;
-    this._terminalContainerEl = null;
-    this._reconnectOverlayEl = null;
-    this._imeContainerEl = null;
-    this._toolbarContainerEl = null;
-    this._filebrowserViewEl = null;
-    this._filebrowserContainerEl = null;
-    this._gitbrowserViewEl = null;
-    this._gitbrowserContainerEl = null;
-    this._tabTerminalEl = null;
-    this._tabFilesEl = null;
-    this._tabGitEl = null;
 
     this._buildDOM();
   }
 
   /**
    * パネルの DOM 構造を動的に生成する。
+   * タブの DOM は switchToTab() 経由で動的に生成される。
    */
   _buildDOM() {
     this._el = document.createElement('div');
@@ -114,105 +118,12 @@ export class Panel {
     this._headerTitleEl.className = 'panel-header-title';
     this._headerTitleEl.textContent = '';
     this._headerEl.appendChild(this._headerTitleEl);
-
-    // Tab buttons [T] [F] [G]
-    this._tabTerminalEl = this._createTabButton('Terminal', true,
-      '<polyline points="2,4 6,7 2,10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><line x1="7" y1="10" x2="12" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>');
-    this._tabFilesEl = this._createTabButton('Files', false,
-      '<path d="M1.5 3.5h4l1.5 1.5h5.5v6.5h-11z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>');
-    this._tabGitEl = this._createTabButton('Git', false,
-      '<circle cx="4" cy="4" r="1.5" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="4" r="1.5" stroke="currentColor" stroke-width="1.3"/><circle cx="7" cy="11" r="1.5" stroke="currentColor" stroke-width="1.3"/><line x1="4" y1="5.5" x2="7" y2="9.5" stroke="currentColor" stroke-width="1.3"/><line x1="10" y1="5.5" x2="7" y2="9.5" stroke="currentColor" stroke-width="1.3"/>');
-
-    this._headerEl.appendChild(this._tabTerminalEl);
-    this._headerEl.appendChild(this._tabFilesEl);
-    this._headerEl.appendChild(this._tabGitEl);
     this._el.appendChild(this._headerEl);
 
-    // Tab click handlers
-    this._tabTerminalEl.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (this.viewMode !== 'terminal' && this.session) {
-        this.showTerminalView();
-      }
-    });
-    this._tabFilesEl.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (this.viewMode !== 'filebrowser' && this.session) {
-        this.showFileBrowser(this.session);
-      }
-    });
-    this._tabGitEl.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (this.viewMode !== 'gitbrowser' && this.session) {
-        this.showGitBrowser(this.session);
-      }
-    });
-
-    // Content area
+    // Content area (tabs are added dynamically)
     this._contentEl = document.createElement('div');
     this._contentEl.className = 'panel-content';
-
-    // Terminal view
-    this._terminalViewEl = document.createElement('div');
-    this._terminalViewEl.className = 'panel-terminal-view';
-
-    this._terminalWrapperEl = document.createElement('div');
-    this._terminalWrapperEl.className = 'panel-terminal-wrapper';
-
-    this._terminalContainerEl = document.createElement('div');
-    this._terminalContainerEl.className = 'panel-terminal-container';
-
-    this._reconnectOverlayEl = document.createElement('div');
-    this._reconnectOverlayEl.className = 'panel-reconnect-overlay hidden';
-    const reconnectText = document.createElement('span');
-    reconnectText.className = 'reconnect-overlay-text';
-    reconnectText.textContent = 'Reconnecting...';
-    this._reconnectOverlayEl.appendChild(reconnectText);
-
-    this._terminalWrapperEl.appendChild(this._terminalContainerEl);
-    this._terminalWrapperEl.appendChild(this._reconnectOverlayEl);
-
-    this._imeContainerEl = document.createElement('div');
-    this._toolbarContainerEl = document.createElement('div');
-
-    this._terminalViewEl.appendChild(this._terminalWrapperEl);
-    this._terminalViewEl.appendChild(this._imeContainerEl);
-    this._terminalViewEl.appendChild(this._toolbarContainerEl);
-
-    // File browser view
-    this._filebrowserViewEl = document.createElement('div');
-    this._filebrowserViewEl.className = 'panel-filebrowser-view hidden';
-    this._filebrowserContainerEl = document.createElement('div');
-    this._filebrowserContainerEl.style.height = '100%';
-    this._filebrowserViewEl.appendChild(this._filebrowserContainerEl);
-
-    // Git browser view
-    this._gitbrowserViewEl = document.createElement('div');
-    this._gitbrowserViewEl.className = 'panel-gitbrowser-view hidden';
-    this._gitbrowserContainerEl = document.createElement('div');
-    this._gitbrowserContainerEl.style.height = '100%';
-    this._gitbrowserContainerEl.style.position = 'relative';
-    this._gitbrowserViewEl.appendChild(this._gitbrowserContainerEl);
-
-    this._contentEl.appendChild(this._terminalViewEl);
-    this._contentEl.appendChild(this._filebrowserViewEl);
-    this._contentEl.appendChild(this._gitbrowserViewEl);
     this._el.appendChild(this._contentEl);
-  }
-
-  /**
-   * パネルヘッダーのタブボタンを作成する。
-   * @param {string} label - aria-label
-   * @param {boolean} active - 初期アクティブ状態
-   * @param {string} svgContent - SVG の内部コンテンツ
-   * @returns {HTMLButtonElement}
-   */
-  _createTabButton(label, active, svgContent) {
-    const btn = document.createElement('button');
-    btn.className = 'panel-tab-btn' + (active ? ' panel-tab-btn--active' : '');
-    btn.setAttribute('aria-label', label);
-    btn.innerHTML = `<svg class="panel-tab-icon" width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">${svgContent}</svg>`;
-    return btn;
   }
 
   /**
@@ -231,28 +142,113 @@ export class Panel {
     this._headerEl.style.display = visible ? '' : 'none';
   }
 
+  // ───────── タブキャッシュ ─────────
+
   /**
-   * 指定セッション/ウィンドウに接続する。
-   * @param {string} sessionName
+   * 指定タブに切り替える。キャッシュヒット時は show/hide のみ。
+   * @param {string} tabKey - "terminal:0", "files", "git"
+   */
+  switchToTab(tabKey) {
+    if (this._activeTabKey === tabKey) return;
+
+    // 現在のタブを非表示
+    if (this._activeTabKey && this._tabCache.has(this._activeTabKey)) {
+      this._hideTab(this._tabCache.get(this._activeTabKey));
+    }
+
+    // キャッシュにない場合は新規作成
+    if (!this._tabCache.has(tabKey)) {
+      const colonIdx = tabKey.indexOf(':');
+      const type = colonIdx >= 0 ? tabKey.substring(0, colonIdx) : tabKey;
+      const indexStr = colonIdx >= 0 ? tabKey.substring(colonIdx + 1) : null;
+
+      switch (type) {
+        case 'terminal':
+          this._createTerminalTab(parseInt(indexStr, 10));
+          break;
+        case 'files':
+          this._createFilesTab();
+          break;
+        case 'git':
+          this._createGitTab();
+          break;
+      }
+    }
+
+    // 新しいタブを表示
+    const tabState = this._tabCache.get(tabKey);
+    this._showTab(tabState);
+    this._activeTabKey = tabKey;
+
+    // Panel の公開参照を更新
+    if (tabState.type === 'terminal') {
+      this._terminal = tabState.terminal;
+      this._toolbar = tabState.toolbar;
+      this._imeInput = tabState.imeInput;
+      this._touchHandler = tabState.touchHandler;
+      this._connectionManager = tabState.connectionManager;
+      this.windowIndex = tabState.windowIndex;
+      this.viewMode = 'terminal';
+    } else if (tabState.type === 'files') {
+      this.viewMode = 'filebrowser';
+      // _terminal 等は最後のターミナルタブのものを保持（isConnected 等で使用）
+    } else if (tabState.type === 'git') {
+      this.viewMode = 'gitbrowser';
+    }
+  }
+
+  /**
+   * アクティブなタブキーを返す。
+   * @returns {string|null}
+   */
+  getActiveTabKey() {
+    return this._activeTabKey;
+  }
+
+  /**
+   * ターミナルタブを新規作成してキャッシュに追加する。
    * @param {number} windowIdx
    */
-  connectToWindow(sessionName, windowIdx) {
-    // 状態を保存してからクリーンアップ
-    this._saveToolbarState();
-    this._cleanupCurrent();
+  _createTerminalTab(windowIdx) {
+    const tabKey = `terminal:${windowIdx}`;
 
-    this.session = sessionName;
-    this.windowIndex = windowIdx;
-    this.viewMode = 'terminal';
+    // DOM 構造
+    const rootEl = document.createElement('div');
+    rootEl.className = 'panel-terminal-view hidden';
 
-    this._updateHeaderTitle();
-    this._updateTabState();
+    const terminalWrapperEl = document.createElement('div');
+    terminalWrapperEl.className = 'panel-terminal-wrapper';
+
+    const terminalContainerEl = document.createElement('div');
+    terminalContainerEl.className = 'panel-terminal-container';
+
+    const reconnectOverlayEl = document.createElement('div');
+    reconnectOverlayEl.className = 'panel-reconnect-overlay hidden';
+    const reconnectText = document.createElement('span');
+    reconnectText.className = 'reconnect-overlay-text';
+    reconnectText.textContent = 'Reconnecting...';
+    reconnectOverlayEl.appendChild(reconnectText);
+
+    terminalWrapperEl.appendChild(terminalContainerEl);
+    terminalWrapperEl.appendChild(reconnectOverlayEl);
+
+    const imeContainerEl = document.createElement('div');
+    const toolbarContainerEl = document.createElement('div');
+
+    rootEl.appendChild(terminalWrapperEl);
+    rootEl.appendChild(imeContainerEl);
+    rootEl.appendChild(toolbarContainerEl);
+
+    this._contentEl.appendChild(rootEl);
 
     // Terminal
-    this._terminal = new PalmuxTerminal(this._terminalContainerEl);
+    const terminal = new PalmuxTerminal(terminalContainerEl);
 
     // Client status handler
-    this._terminal.setOnClientStatus((session, window) => {
+    terminal.setOnClientStatus((session, window) => {
+      // アクティブタブのみ Panel 状態を更新
+      if (this._activeTabKey !== tabKey) return;
+
       const sessionChanged = session !== this.session;
       const windowChanged = window !== this.windowIndex;
       if (!sessionChanged && !windowChanged) return;
@@ -266,44 +262,44 @@ export class Panel {
     });
 
     // Notification handler
-    this._terminal.setOnNotificationUpdate((notifications) => {
+    terminal.setOnNotificationUpdate((notifications) => {
       if (this._onNotificationUpdateCb) {
         this._onNotificationUpdateCb(notifications);
       }
     });
 
     // IME
-    this._imeInput = new IMEInput(this._imeContainerEl, {
-      onSend: (text) => this._terminal.sendInput(text),
+    const imeInput = new IMEInput(imeContainerEl, {
+      onSend: (text) => terminal.sendInput(text),
       onToggle: (visible) => {
-        this._terminal.setIMEMode(visible);
-        requestAnimationFrame(() => this._terminal.fit());
+        terminal.setIMEMode(visible);
+        requestAnimationFrame(() => terminal.fit());
       },
     });
 
     // Toolbar
-    this._toolbar = new Toolbar(this._toolbarContainerEl, {
-      onSendKey: (key) => this._terminal.sendInput(key),
+    const toolbar = new Toolbar(toolbarContainerEl, {
+      onSendKey: (key) => terminal.sendInput(key),
       onFetchCommands: (session) => getCommands(session),
       onKeyboardMode: (mode) => {
-        this._terminal.setKeyboardMode(mode);
+        terminal.setKeyboardMode(mode);
         if (mode === 'ime') {
-          if (this._imeInput) this._imeInput.show();
+          imeInput.show();
         } else {
-          if (this._imeInput) this._imeInput.hide();
+          imeInput.hide();
         }
-        requestAnimationFrame(() => this._terminal.fit());
+        requestAnimationFrame(() => terminal.fit());
       },
     });
-    this._terminal.setToolbar(this._toolbar);
-    this._imeInput.setToolbar(this._toolbar);
-    this._toolbar.setCurrentSession(sessionName);
-    this._toolbar.restoreState(this._globalUIState);
+    terminal.setToolbar(toolbar);
+    imeInput.setToolbar(toolbar);
+    toolbar.setCurrentSession(this.session);
+    toolbar.restoreState(this._globalUIState);
 
     // Toolbar visibility
     if (this._globalUIState.toolbarVisible === null) {
       if (!this._isMobileDevice()) {
-        this._toolbar.toggleVisibility();
+        toolbar.toggleVisibility();
         this._globalUIState.toolbarVisible = false;
       } else {
         this._globalUIState.toolbarVisible = true;
@@ -312,28 +308,35 @@ export class Panel {
 
     // Keyboard mode restoration
     if (this._globalUIState.keyboardMode !== 'none') {
-      this._terminal.setKeyboardMode(this._globalUIState.keyboardMode);
-      if (this._globalUIState.keyboardMode === 'ime' && this._imeInput) {
-        this._imeInput.show();
+      terminal.setKeyboardMode(this._globalUIState.keyboardMode);
+      if (this._globalUIState.keyboardMode === 'ime') {
+        imeInput.show();
       }
     }
 
     // Touch
-    this._touchHandler = new TouchHandler(this._terminalContainerEl, {
-      terminal: this._terminal,
+    const touchHandler = new TouchHandler(terminalContainerEl, {
+      terminal,
       onPinchZoom: (delta) => {
-        if (delta > 0) this._terminal.increaseFontSize();
-        else this._terminal.decreaseFontSize();
+        if (delta > 0) terminal.increaseFontSize();
+        else terminal.decreaseFontSize();
       },
     });
 
     // Connection
-    this._connectionManager = new ConnectionManager({
-      getWSUrl: () => getWebSocketURL(this.session, this.windowIndex),
+    const connectionManager = new ConnectionManager({
+      getWSUrl: () => getWebSocketURL(this.session, windowIdx),
       onStateChange: (state) => {
-        this._updateConnectionUI(state);
+        // このタブ自身の再接続オーバーレイを更新
         if (state === 'connected') {
-          deleteNotification(this.session, this.windowIndex)
+          reconnectOverlayEl.classList.add('hidden');
+        } else if (state === 'connecting') {
+          reconnectOverlayEl.classList.remove('hidden');
+        } else {
+          reconnectOverlayEl.classList.add('hidden');
+        }
+        if (state === 'connected') {
+          deleteNotification(this.session, windowIdx)
             .then(() => listNotifications())
             .then((notifications) => {
               if (this._onNotificationUpdateCb && notifications) {
@@ -342,53 +345,204 @@ export class Panel {
             })
             .catch(() => {});
         }
-        if (this._onConnectionStateChangeCb) {
+        // アクティブタブのみヘッダーの接続状態を更新
+        if (this._activeTabKey === tabKey && this._onConnectionStateChangeCb) {
           this._onConnectionStateChangeCb(state);
         }
       },
-      terminal: this._terminal,
+      terminal,
     });
-    this._connectionManager.connect();
+    connectionManager.connect();
 
-    // グローバルキーハンドラの制御（フォーカス中のパネルのみ有効）
-    this._terminal.setGlobalKeyHandlerEnabled(this._focused);
+    // グローバルキーハンドラは無効で作成（_showTab で有効化）
+    terminal.setGlobalKeyHandlerEnabled(false);
 
-    // View mode restoration
-    const savedViewMode = this._sessionViewModes.get(sessionName) || 'terminal';
-    if (savedViewMode === 'filebrowser') {
-      this.showFileBrowser(sessionName);
-    } else if (savedViewMode === 'gitbrowser') {
-      this.showGitBrowser(sessionName);
-    } else {
-      this.viewMode = 'terminal';
-      this._terminalViewEl.classList.remove('hidden');
-      this._filebrowserViewEl.classList.add('hidden');
-      this._gitbrowserViewEl.classList.add('hidden');
-      if (this._focused) {
-        this._terminal.focus();
-      }
+    /** @type {TabState} */
+    const tabState = {
+      type: 'terminal',
+      windowIndex: windowIdx,
+      rootEl,
+      terminal,
+      toolbar,
+      imeInput,
+      touchHandler,
+      connectionManager,
+      reconnectOverlayEl,
+      fileBrowser: null,
+      gitBrowser: null,
+    };
+
+    this._tabCache.set(tabKey, tabState);
+  }
+
+  /**
+   * ファイルブラウザタブを新規作成してキャッシュに追加する。
+   * @param {string|null} [initialPath] - 初期パス
+   */
+  _createFilesTab(initialPath = null) {
+    const rootEl = document.createElement('div');
+    rootEl.className = 'panel-filebrowser-view hidden';
+
+    const wrapper = document.createElement('div');
+    wrapper.style.height = '100%';
+
+    const browser = new FileBrowser(wrapper, {
+      onFileSelect: () => {},
+      onNavigate: () => {},
+    });
+
+    rootEl.appendChild(wrapper);
+    this._contentEl.appendChild(rootEl);
+
+    browser.open(this.session, initialPath || '.');
+
+    /** @type {TabState} */
+    const tabState = {
+      type: 'files',
+      windowIndex: null,
+      rootEl,
+      terminal: null,
+      toolbar: null,
+      imeInput: null,
+      touchHandler: null,
+      connectionManager: null,
+      reconnectOverlayEl: null,
+      fileBrowser: browser,
+      gitBrowser: null,
+    };
+
+    this._tabCache.set('files', tabState);
+  }
+
+  /**
+   * Git ブラウザタブを新規作成してキャッシュに追加する。
+   */
+  _createGitTab() {
+    const rootEl = document.createElement('div');
+    rootEl.className = 'panel-gitbrowser-view hidden';
+
+    const wrapper = document.createElement('div');
+    wrapper.style.height = '100%';
+    wrapper.style.position = 'relative';
+
+    const browser = new GitBrowser(wrapper, {
+      onNavigate: () => {},
+    });
+
+    rootEl.appendChild(wrapper);
+    this._contentEl.appendChild(rootEl);
+
+    browser.open(this.session);
+
+    /** @type {TabState} */
+    const tabState = {
+      type: 'git',
+      windowIndex: null,
+      rootEl,
+      terminal: null,
+      toolbar: null,
+      imeInput: null,
+      touchHandler: null,
+      connectionManager: null,
+      reconnectOverlayEl: null,
+      fileBrowser: null,
+      gitBrowser: browser,
+    };
+
+    this._tabCache.set('git', tabState);
+  }
+
+  /**
+   * タブを非表示にする。
+   * @param {TabState} tabState
+   */
+  _hideTab(tabState) {
+    if (tabState.type === 'terminal') {
+      this._saveToolbarState();
     }
+    tabState.rootEl.classList.add('hidden');
+    if (tabState.type === 'terminal' && tabState.terminal) {
+      tabState.terminal.setFitEnabled(false);
+      tabState.terminal.setGlobalKeyHandlerEnabled(false);
+    }
+  }
+
+  /**
+   * タブを表示する。
+   * @param {TabState} tabState
+   */
+  _showTab(tabState) {
+    tabState.rootEl.classList.remove('hidden');
+    if (tabState.type === 'terminal' && tabState.terminal) {
+      tabState.terminal.setFitEnabled(true);
+      tabState.terminal.setGlobalKeyHandlerEnabled(this._focused);
+      requestAnimationFrame(() => {
+        tabState.terminal.fit();
+        if (this._focused) tabState.terminal.focus();
+      });
+    }
+  }
+
+  /**
+   * 全タブの WebSocket 切断・ターミナル破棄・DOM 削除を行う。
+   */
+  clearTabCache() {
+    for (const [, tabState] of this._tabCache) {
+      this._destroyTabState(tabState);
+    }
+    this._tabCache.clear();
+    this._activeTabKey = null;
+    this._terminal = null;
+    this._toolbar = null;
+    this._imeInput = null;
+    this._touchHandler = null;
+    this._connectionManager = null;
+  }
+
+  /**
+   * 1つのタブの全リソースを破棄する。
+   * @param {TabState} tabState
+   */
+  _destroyTabState(tabState) {
+    if (tabState.type === 'terminal') {
+      if (tabState.touchHandler) tabState.touchHandler.destroy();
+      if (tabState.imeInput) tabState.imeInput.destroy();
+      if (tabState.toolbar) tabState.toolbar.dispose();
+      if (tabState.connectionManager) tabState.connectionManager.disconnect();
+      if (tabState.terminal) tabState.terminal.disconnect();
+    } else if (tabState.type === 'files') {
+      if (tabState.fileBrowser) tabState.fileBrowser.dispose();
+    } else if (tabState.type === 'git') {
+      if (tabState.gitBrowser) tabState.gitBrowser.dispose();
+    }
+    tabState.rootEl.remove();
+  }
+
+  // ───────── 接続・ビュー切り替え ─────────
+
+  /**
+   * 指定セッション/ウィンドウに接続する。
+   * @param {string} sessionName
+   * @param {number} windowIdx
+   */
+  connectToWindow(sessionName, windowIdx) {
+    if (sessionName !== this.session) {
+      // セッション変更時はキャッシュをクリア
+      this._saveToolbarState();
+      this.clearTabCache();
+    }
+
+    this.session = sessionName;
+    this.switchToTab(`terminal:${windowIdx}`);
+    this._updateHeaderTitle();
   }
 
   /**
    * ターミナル表示に切り替える。
    */
   showTerminalView() {
-    this._terminalViewEl.classList.remove('hidden');
-    this._filebrowserViewEl.classList.add('hidden');
-    this._gitbrowserViewEl.classList.add('hidden');
-    this.viewMode = 'terminal';
-    if (this.session) {
-      this._sessionViewModes.set(this.session, 'terminal');
-    }
-    this._updateTabState();
-    if (this._terminal) {
-      // fit を再有効化してからリサイズ
-      this._terminal.setFitEnabled(true);
-      requestAnimationFrame(() => {
-        this._terminal.fit();
-        if (this._focused) this._terminal.focus();
-      });
+    if (this.windowIndex !== null) {
+      this.switchToTab(`terminal:${this.windowIndex}`);
     }
   }
 
@@ -398,41 +552,15 @@ export class Panel {
    * @param {{ path?: string|null }} [opts]
    */
   showFileBrowser(sessionName, { path = null } = {}) {
-    // ターミナルの fit を無効化（非表示時に 0 サイズへのリサイズを防止）
-    if (this._terminal) {
-      this._terminal.setFitEnabled(false);
-    }
-    this._terminalViewEl.classList.add('hidden');
-    this._filebrowserViewEl.classList.remove('hidden');
-    this._gitbrowserViewEl.classList.add('hidden');
-    this.viewMode = 'filebrowser';
-    this._sessionViewModes.set(sessionName, 'filebrowser');
-    this._updateTabState();
-
-    // Clear container
-    while (this._filebrowserContainerEl.firstChild) {
-      this._filebrowserContainerEl.removeChild(this._filebrowserContainerEl.firstChild);
-    }
-
-    if (!this._fileBrowsers.has(sessionName)) {
-      const wrapper = document.createElement('div');
-      wrapper.style.height = '100%';
-      const browser = new FileBrowser(wrapper, {
-        onFileSelect: () => {},
-        onNavigate: () => {},
-      });
-      this._fileBrowsers.set(sessionName, { wrapper, browser });
-      const initialPath = path !== null ? path : '.';
-      browser.open(sessionName, initialPath);
-    } else {
-      const fb = this._fileBrowsers.get(sessionName);
-      if (path !== null) {
-        fb.browser.navigateTo(path);
+    if (!this._tabCache.has('files')) {
+      this._createFilesTab(path);
+    } else if (path !== null) {
+      const tabState = this._tabCache.get('files');
+      if (tabState.fileBrowser) {
+        tabState.fileBrowser.navigateTo(path);
       }
     }
-
-    const entry = this._fileBrowsers.get(sessionName);
-    this._filebrowserContainerEl.appendChild(entry.wrapper);
+    this.switchToTab('files');
   }
 
   /**
@@ -440,36 +568,13 @@ export class Panel {
    * @param {string} sessionName
    */
   showGitBrowser(sessionName) {
-    // ターミナルの fit を無効化（非表示時に 0 サイズへのリサイズを防止）
-    if (this._terminal) {
-      this._terminal.setFitEnabled(false);
+    if (!this._tabCache.has('git')) {
+      this._createGitTab();
     }
-    this._terminalViewEl.classList.add('hidden');
-    this._filebrowserViewEl.classList.add('hidden');
-    this._gitbrowserViewEl.classList.remove('hidden');
-    this.viewMode = 'gitbrowser';
-    this._sessionViewModes.set(sessionName, 'gitbrowser');
-    this._updateTabState();
-
-    // Clear container
-    while (this._gitbrowserContainerEl.firstChild) {
-      this._gitbrowserContainerEl.removeChild(this._gitbrowserContainerEl.firstChild);
-    }
-
-    if (!this._gitBrowsers.has(sessionName)) {
-      const wrapper = document.createElement('div');
-      wrapper.style.height = '100%';
-      wrapper.style.position = 'relative';
-      const browser = new GitBrowser(wrapper, {
-        onNavigate: () => {},
-      });
-      this._gitBrowsers.set(sessionName, { wrapper, browser });
-      browser.open(sessionName);
-    }
-
-    const entry = this._gitBrowsers.get(sessionName);
-    this._gitbrowserContainerEl.appendChild(entry.wrapper);
+    this.switchToTab('git');
   }
+
+  // ───────── フォーカス ─────────
 
   /**
    * フォーカス状態を設定する。
@@ -483,10 +588,10 @@ export class Panel {
       this._el.classList.remove('panel--focused');
     }
 
-    // Global key handler control
-    if (this._terminal) {
+    // アクティブなターミナルタブのみキーハンドラを制御
+    if (this._terminal && this.viewMode === 'terminal') {
       this._terminal.setGlobalKeyHandlerEnabled(focused);
-      if (focused && this.viewMode === 'terminal') {
+      if (focused) {
         this._terminal.focus();
       }
     }
@@ -501,6 +606,8 @@ export class Panel {
       this._terminal.fit();
     }
   }
+
+  // ───────── アクセサ ─────────
 
   /**
    * パネル内のターミナルを返す。
@@ -520,18 +627,30 @@ export class Panel {
 
   /**
    * パネル内のファイルブラウザ Map を返す。
+   * タブキャッシュから動的に構築する。
    * @returns {Map<string, {wrapper: HTMLElement, browser: FileBrowser}>}
    */
   getFileBrowsers() {
-    return this._fileBrowsers;
+    const map = new Map();
+    const tabState = this._tabCache.get('files');
+    if (tabState && tabState.fileBrowser && this.session) {
+      map.set(this.session, { wrapper: tabState.rootEl, browser: tabState.fileBrowser });
+    }
+    return map;
   }
 
   /**
    * パネル内の Git ブラウザ Map を返す。
+   * タブキャッシュから動的に構築する。
    * @returns {Map<string, {wrapper: HTMLElement, browser: GitBrowser}>}
    */
   getGitBrowsers() {
-    return this._gitBrowsers;
+    const map = new Map();
+    const tabState = this._tabCache.get('git');
+    if (tabState && tabState.gitBrowser && this.session) {
+      map.set(this.session, { wrapper: tabState.rootEl, browser: tabState.gitBrowser });
+    }
+    return map;
   }
 
   /**
@@ -564,19 +683,27 @@ export class Panel {
    */
   getCurrentFilePath() {
     if (this.viewMode !== 'filebrowser' || !this.session) return null;
-    const fb = this._fileBrowsers.get(this.session);
-    if (!fb) return null;
-    return fb.browser.getCurrentPath() || '.';
+    const tabState = this._tabCache.get('files');
+    if (!tabState || !tabState.fileBrowser) return null;
+    return tabState.fileBrowser.getCurrentPath() || '.';
   }
+
+  // ───────── フォントサイズ ─────────
 
   /**
    * フォントサイズを大きくする。
    */
   increaseFontSize() {
-    if (this.viewMode === 'filebrowser' && this.session && this._fileBrowsers.has(this.session)) {
-      this._fileBrowsers.get(this.session).browser.increaseFontSize();
-    } else if (this.viewMode === 'gitbrowser' && this.session && this._gitBrowsers.has(this.session)) {
-      this._gitBrowsers.get(this.session).browser.increaseFontSize();
+    if (this.viewMode === 'filebrowser') {
+      const tabState = this._tabCache.get('files');
+      if (tabState && tabState.fileBrowser) {
+        tabState.fileBrowser.increaseFontSize();
+      }
+    } else if (this.viewMode === 'gitbrowser') {
+      const tabState = this._tabCache.get('git');
+      if (tabState && tabState.gitBrowser) {
+        tabState.gitBrowser.increaseFontSize();
+      }
     } else if (this._terminal) {
       this._terminal.increaseFontSize();
     }
@@ -586,14 +713,22 @@ export class Panel {
    * フォントサイズを小さくする。
    */
   decreaseFontSize() {
-    if (this.viewMode === 'filebrowser' && this.session && this._fileBrowsers.has(this.session)) {
-      this._fileBrowsers.get(this.session).browser.decreaseFontSize();
-    } else if (this.viewMode === 'gitbrowser' && this.session && this._gitBrowsers.has(this.session)) {
-      this._gitBrowsers.get(this.session).browser.decreaseFontSize();
+    if (this.viewMode === 'filebrowser') {
+      const tabState = this._tabCache.get('files');
+      if (tabState && tabState.fileBrowser) {
+        tabState.fileBrowser.decreaseFontSize();
+      }
+    } else if (this.viewMode === 'gitbrowser') {
+      const tabState = this._tabCache.get('git');
+      if (tabState && tabState.gitBrowser) {
+        tabState.gitBrowser.decreaseFontSize();
+      }
     } else if (this._terminal) {
       this._terminal.decreaseFontSize();
     }
   }
+
+  // ───────── ツールバー ─────────
 
   /**
    * ツールバーの表示/非表示を切り替える。
@@ -617,58 +752,19 @@ export class Panel {
     }
   }
 
+  // ───────── クリーンアップ ─────────
+
   /**
    * パネル内リソースをクリーンアップする。
    */
   cleanup() {
     this._saveToolbarState();
-    this._cleanupCurrent();
-    this._cleanupBrowsers();
-    this._sessionViewModes.clear();
-  }
-
-  /**
-   * 現在の接続をクリーンアップする（ブラウザキャッシュは保持）。
-   */
-  _cleanupCurrent() {
-    if (this._touchHandler) {
-      this._touchHandler.destroy();
-      this._touchHandler = null;
-    }
-    if (this._imeInput) {
-      this._imeInput.destroy();
-      this._imeInput = null;
-    }
-    if (this._toolbar) {
-      this._toolbar.dispose();
-      this._toolbar = null;
-    }
-    if (this._connectionManager) {
-      this._connectionManager.disconnect();
-      this._connectionManager = null;
-    }
-    if (this._terminal) {
-      this._terminal.disconnect();
-      this._terminal = null;
-    }
+    this.clearTabCache();
     this.session = null;
     this.windowIndex = null;
   }
 
-  /**
-   * ファイルブラウザ・Git ブラウザをクリーンアップする。
-   */
-  _cleanupBrowsers() {
-    for (const [, entry] of this._fileBrowsers) {
-      entry.browser.dispose();
-    }
-    this._fileBrowsers.clear();
-
-    for (const [, entry] of this._gitBrowsers) {
-      entry.browser.dispose();
-    }
-    this._gitBrowsers.clear();
-  }
+  // ───────── 内部ユーティリティ ─────────
 
   /**
    * ツールバー状態を globalUIState に保存する。
@@ -683,20 +779,6 @@ export class Panel {
   }
 
   /**
-   * 接続状態に応じて再接続オーバーレイを更新する。
-   * @param {string} state - 'connected' | 'connecting' | 'disconnected'
-   */
-  _updateConnectionUI(state) {
-    if (state === 'connected') {
-      this._reconnectOverlayEl.classList.add('hidden');
-    } else if (state === 'connecting') {
-      this._reconnectOverlayEl.classList.remove('hidden');
-    } else {
-      this._reconnectOverlayEl.classList.add('hidden');
-    }
-  }
-
-  /**
    * パネルヘッダーのタイトルを更新する。
    */
   _updateHeaderTitle() {
@@ -705,13 +787,4 @@ export class Panel {
     }
   }
 
-  /**
-   * パネルヘッダーのタブ状態を更新する。
-   */
-  _updateTabState() {
-    if (!this._tabTerminalEl) return;
-    this._tabTerminalEl.classList.toggle('panel-tab-btn--active', this.viewMode === 'terminal');
-    this._tabFilesEl.classList.toggle('panel-tab-btn--active', this.viewMode === 'filebrowser');
-    this._tabGitEl.classList.toggle('panel-tab-btn--active', this.viewMode === 'gitbrowser');
-  }
 }

@@ -277,6 +277,14 @@ export class PanelManager {
   }
 
   /**
+   * フォーカスパネルのタブを切り替える。
+   * @param {string} tabKey - "terminal:0", "files", "git"
+   */
+  switchTab(tabKey) {
+    this._focusedPanel.switchToTab(tabKey);
+  }
+
+  /**
    * フォーカスパネルのセッション/ウィンドウに接続する。
    * @param {string} session
    * @param {number} windowIndex
