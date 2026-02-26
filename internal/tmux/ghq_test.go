@@ -9,6 +9,27 @@ import (
 	"testing"
 )
 
+// mockGitCommandRunner は git.CommandRunner のモック実装。
+type mockGitCommandRunner struct {
+	results map[string]mockGitResult
+}
+
+type mockGitResult struct {
+	output []byte
+	err    error
+}
+
+func (m *mockGitCommandRunner) RunInDir(dir string, args ...string) ([]byte, error) {
+	key := dir
+	for _, a := range args {
+		key += " " + a
+	}
+	if r, ok := m.results[key]; ok {
+		return r.output, r.err
+	}
+	return nil, errors.New("unexpected git command: " + key)
+}
+
 // mockCommandRunner は CommandRunner のモック実装。
 type mockCommandRunner struct {
 	// results はコマンド名+引数のキーに対するレスポンスを保持する。
@@ -29,6 +50,111 @@ func (m *mockCommandRunner) RunCommand(name string, args ...string) ([]byte, err
 		return r.output, r.err
 	}
 	return nil, errors.New("unexpected command: " + key)
+}
+
+func TestParseSessionName(t *testing.T) {
+	tests := []struct {
+		name        string
+		sessionName string
+		wantRepo    string
+		wantBranch  string
+	}{
+		{
+			name:        "リポジトリ名のみ",
+			sessionName: "palmux",
+			wantRepo:    "palmux",
+			wantBranch:  "",
+		},
+		{
+			name:        "repo@branch 形式",
+			sessionName: "palmux@feature-x",
+			wantRepo:    "palmux",
+			wantBranch:  "feature-x",
+		},
+		{
+			name:        "スラッシュ含むブランチ名",
+			sessionName: "palmux@feature/login",
+			wantRepo:    "palmux",
+			wantBranch:  "feature/login",
+		},
+		{
+			name:        "空文字列",
+			sessionName: "",
+			wantRepo:    "",
+			wantBranch:  "",
+		},
+		{
+			name:        "複数の @ を含む: 最初の @ でのみ分割",
+			sessionName: "repo@a@b",
+			wantRepo:    "repo",
+			wantBranch:  "a@b",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo, branch := ParseSessionName(tt.sessionName)
+			if repo != tt.wantRepo {
+				t.Errorf("ParseSessionName(%q) repo = %q, want %q", tt.sessionName, repo, tt.wantRepo)
+			}
+			if branch != tt.wantBranch {
+				t.Errorf("ParseSessionName(%q) branch = %q, want %q", tt.sessionName, branch, tt.wantBranch)
+			}
+		})
+	}
+}
+
+func TestGhqResolver_ResolveRepo(t *testing.T) {
+	ghqResults := map[string]mockResult{
+		"ghq root": {output: []byte("/home/user/ghq\n"), err: nil},
+		"ghq list": {output: []byte("github.com/tjst-t/palmux\ngithub.com/golang/go\ngithub.com/alice/utils\n"), err: nil},
+	}
+
+	tests := []struct {
+		name     string
+		repoName string
+		results  map[string]mockResult
+		want     string
+	}{
+		{
+			name:     "マッチあり: basename 完全一致",
+			repoName: "palmux",
+			results:  ghqResults,
+			want:     "/home/user/ghq/github.com/tjst-t/palmux",
+		},
+		{
+			name:     "マッチなし: 空文字列を返す",
+			repoName: "unknown",
+			results:  ghqResults,
+			want:     "",
+		},
+		{
+			name:     "空文字列: 空文字列を返す",
+			repoName: "",
+			results:  ghqResults,
+			want:     "",
+		},
+		{
+			name:     "org-basename マッチ",
+			repoName: "alice-utils",
+			results:  ghqResults,
+			want:     "/home/user/ghq/github.com/alice/utils",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver := &GhqResolver{
+				Cmd:     &mockCommandRunner{results: tt.results},
+				HomeDir: "/home/user",
+			}
+
+			got := resolver.ResolveRepo(tt.repoName)
+			if got != tt.want {
+				t.Errorf("ResolveRepo(%q) = %q, want %q", tt.repoName, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestGhqResolver_Resolve(t *testing.T) {
@@ -185,6 +311,84 @@ func TestGhqResolver_Resolve(t *testing.T) {
 			resolver := &GhqResolver{
 				Cmd:     &mockCommandRunner{results: tt.results},
 				HomeDir: tt.homeDir,
+			}
+
+			got := resolver.Resolve(tt.sessionName)
+			if got != tt.want {
+				t.Errorf("Resolve(%q) = %q, want %q", tt.sessionName, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGhqResolver_Resolve_WithBranch(t *testing.T) {
+	ghqResults := map[string]mockResult{
+		"ghq root": {output: []byte("/home/user/ghq\n"), err: nil},
+		"ghq list": {output: []byte("github.com/tjst-t/palmux\ngithub.com/golang/go\n"), err: nil},
+	}
+
+	worktreeOutput := "worktree /home/user/ghq/github.com/tjst-t/palmux\n" +
+		"HEAD abc1234def5678901234567890123456789abcde\n" +
+		"branch refs/heads/main\n\n" +
+		"worktree /home/user/worktrees/palmux-feature-x\n" +
+		"HEAD def5678abc1234567890123456789012345678901\n" +
+		"branch refs/heads/feature-x\n\n"
+
+	tests := []struct {
+		name        string
+		sessionName string
+		gitResults  map[string]mockGitResult
+		useGitCmd   bool
+		want        string
+	}{
+		{
+			name:        "repo@branch: worktree マッチあり → worktree パス",
+			sessionName: "palmux@feature-x",
+			gitResults: map[string]mockGitResult{
+				"/home/user/ghq/github.com/tjst-t/palmux worktree list --porcelain": {
+					output: []byte(worktreeOutput),
+					err:    nil,
+				},
+			},
+			useGitCmd: true,
+			want:      "/home/user/worktrees/palmux-feature-x",
+		},
+		{
+			name:        "repo@branch: worktree マッチなし → リポジトリパスにフォールバック",
+			sessionName: "palmux@nonexistent-branch",
+			gitResults: map[string]mockGitResult{
+				"/home/user/ghq/github.com/tjst-t/palmux worktree list --porcelain": {
+					output: []byte(worktreeOutput),
+					err:    nil,
+				},
+			},
+			useGitCmd: true,
+			want:      "/home/user/ghq/github.com/tjst-t/palmux",
+		},
+		{
+			name:        "repo@branch: GitCmd が nil → リポジトリパスにフォールバック",
+			sessionName: "palmux@feature-x",
+			gitResults:  nil,
+			useGitCmd:   false,
+			want:        "/home/user/ghq/github.com/tjst-t/palmux",
+		},
+		{
+			name:        "repo@branch: リポジトリが見つからない → ホームディレクトリ",
+			sessionName: "nonexistent@feature-x",
+			gitResults: map[string]mockGitResult{},
+			useGitCmd:   true,
+			want:        "/home/user",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver := &GhqResolver{
+				Cmd:     &mockCommandRunner{results: ghqResults},
+				HomeDir: "/home/user",
+			}
+			if tt.useGitCmd {
+				resolver.GitCmd = &mockGitCommandRunner{results: tt.gitResults}
 			}
 
 			got := resolver.Resolve(tt.sessionName)
