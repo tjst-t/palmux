@@ -58,6 +58,15 @@ export class TabBar {
 
     /** @type {function} bound click handler for cleanup */
     this._handleClick = this._onClick.bind(this);
+
+    /** @type {number|null} long press timer ID */
+    this._longPressTimer = null;
+
+    /** @type {boolean} whether a long press was detected (suppresses click) */
+    this._longPressDetected = false;
+
+    /** @type {function} bound contextmenu handler for cleanup */
+    this._handleContextMenu = this._onContextMenu.bind(this);
   }
 
   /**
@@ -76,9 +85,10 @@ export class TabBar {
     this._isClaudeCodeMode = isClaudeCodeMode;
     this._windows = windows;
 
-    // Clear previous content and remove old listener
+    // Clear previous content and remove old listeners
     if (this._scrollEl) {
       this._scrollEl.removeEventListener('click', this._handleClick);
+      this._scrollEl.removeEventListener('contextmenu', this._handleContextMenu);
     }
     this._container.innerHTML = '';
 
@@ -100,7 +110,9 @@ export class TabBar {
 
     // 1. Claude windows (only in Claude Code mode)
     for (const win of claudeWindows) {
-      scrollEl.appendChild(this._createTerminalTab(win, isClaudeCodeMode));
+      const btn = this._createTerminalTab(win, isClaudeCodeMode);
+      this._setupLongPress(btn);
+      scrollEl.appendChild(btn);
     }
 
     // 2. Files tab
@@ -111,14 +123,17 @@ export class TabBar {
 
     // 4. Non-claude terminal windows
     for (const win of nonClaudeWindows) {
-      scrollEl.appendChild(this._createTerminalTab(win, isClaudeCodeMode));
+      const btn = this._createTerminalTab(win, isClaudeCodeMode);
+      this._setupLongPress(btn);
+      scrollEl.appendChild(btn);
     }
 
     // 5. + button
     scrollEl.appendChild(this._createAddButton());
 
-    // Attach click handler via event delegation
+    // Attach click and contextmenu handlers via event delegation
     scrollEl.addEventListener('click', this._handleClick);
+    scrollEl.addEventListener('contextmenu', this._handleContextMenu);
 
     this._container.appendChild(scrollEl);
   }
@@ -209,8 +224,10 @@ export class TabBar {
   dispose() {
     if (this._scrollEl) {
       this._scrollEl.removeEventListener('click', this._handleClick);
+      this._scrollEl.removeEventListener('contextmenu', this._handleContextMenu);
       this._scrollEl = null;
     }
+    this._clearLongPressTimer();
     this._container.innerHTML = '';
     this._sessionName = null;
   }
@@ -323,6 +340,11 @@ export class TabBar {
    * @private
    */
   _onClick(e) {
+    if (this._longPressDetected) {
+      this._longPressDetected = false;
+      return;
+    }
+
     const tab = e.target.closest('.tab');
     if (!tab) return;
 
@@ -340,5 +362,175 @@ export class TabBar {
     } else if (type === 'git') {
       this._onTabSelect({ type: 'git' });
     }
+  }
+
+  /**
+   * Set up long press detection on a tab element (mobile).
+   * Long press (500ms) opens a context menu instead of navigating.
+   * @param {HTMLElement} btn - Tab button element
+   * @private
+   */
+  _setupLongPress(btn) {
+    let startX = 0;
+    let startY = 0;
+
+    btn.addEventListener('touchstart', (e) => {
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      this._longPressDetected = false;
+      this._longPressTimer = setTimeout(() => {
+        this._longPressDetected = true;
+        const info = this._getTabInfo(btn);
+        this._showContextMenu(btn, info.type, info.windowIndex, info.windowName);
+      }, 500);
+    }, { passive: true });
+
+    btn.addEventListener('touchmove', (e) => {
+      if (this._longPressTimer !== null) {
+        const moveX = e.touches[0].clientX;
+        const moveY = e.touches[0].clientY;
+        if (Math.abs(moveX - startX) > 10 || Math.abs(moveY - startY) > 10) {
+          this._clearLongPressTimer();
+        }
+      }
+    }, { passive: true });
+
+    btn.addEventListener('touchend', () => {
+      this._clearLongPressTimer();
+    }, { passive: true });
+
+    btn.addEventListener('touchcancel', () => {
+      this._clearLongPressTimer();
+    }, { passive: true });
+  }
+
+  /**
+   * Cancel an active long press timer.
+   * @private
+   */
+  _clearLongPressTimer() {
+    if (this._longPressTimer !== null) {
+      clearTimeout(this._longPressTimer);
+      this._longPressTimer = null;
+    }
+  }
+
+  /**
+   * Context menu event handler using delegation on the scroll container.
+   * Only terminal tabs get a context menu.
+   * @param {MouseEvent} e
+   * @private
+   */
+  _onContextMenu(e) {
+    const tab = e.target.closest('.tab');
+    if (!tab || tab.dataset.type === 'add') return;
+    // Only terminal tabs get context menus
+    if (tab.dataset.type !== 'terminal') return;
+    e.preventDefault();
+
+    const info = this._getTabInfo(tab);
+    this._showContextMenu(tab, info.type, info.windowIndex, info.windowName);
+  }
+
+  /**
+   * Show a context menu modal overlay for a tab.
+   * Reuses the existing drawer-context-menu CSS classes.
+   * @param {HTMLElement} tab - Tab element
+   * @param {string} type - Tab type ('terminal')
+   * @param {number} windowIndex - Window index
+   * @param {string} windowName - Window name
+   * @private
+   */
+  _showContextMenu(tab, type, windowIndex, windowName) {
+    // Only terminal tabs get context menus
+    if (type !== 'terminal') return;
+
+    const isProtected = this._isClaudeCodeMode && windowName === 'claude';
+
+    // Remove existing menu if any
+    const existing = document.querySelector('.drawer-context-menu-overlay');
+    if (existing) existing.remove();
+
+    // Create overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'drawer-context-menu-overlay';
+
+    // Create menu
+    const menu = document.createElement('div');
+    menu.className = 'drawer-context-menu';
+
+    // Title
+    const title = document.createElement('div');
+    title.className = 'drawer-context-menu-title';
+    title.textContent = `${windowIndex}: ${windowName}`;
+    menu.appendChild(title);
+
+    const closeMenu = () => {
+      overlay.classList.remove('drawer-context-menu-overlay--visible');
+      setTimeout(() => overlay.remove(), 200);
+    };
+
+    if (isProtected) {
+      // Restart button
+      const restartBtn = document.createElement('button');
+      restartBtn.className = 'drawer-context-menu-item';
+      restartBtn.textContent = 'Restart';
+      restartBtn.addEventListener('click', () => {
+        closeMenu();
+        if (this._onContextAction) {
+          this._onContextAction({ action: 'restart', windowIndex, windowName });
+        }
+      });
+      menu.appendChild(restartBtn);
+
+      // Resume button
+      const resumeBtn = document.createElement('button');
+      resumeBtn.className = 'drawer-context-menu-item';
+      resumeBtn.textContent = 'Resume';
+      resumeBtn.addEventListener('click', () => {
+        closeMenu();
+        if (this._onContextAction) {
+          this._onContextAction({ action: 'resume', windowIndex, windowName });
+        }
+      });
+      menu.appendChild(resumeBtn);
+    } else {
+      // Rename button
+      const renameBtn = document.createElement('button');
+      renameBtn.className = 'drawer-context-menu-item';
+      renameBtn.textContent = 'Rename';
+      renameBtn.addEventListener('click', () => {
+        closeMenu();
+        if (this._onContextAction) {
+          this._onContextAction({ action: 'rename', windowIndex, windowName });
+        }
+      });
+      menu.appendChild(renameBtn);
+
+      // Delete button
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'drawer-context-menu-item drawer-context-menu-item--danger';
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.addEventListener('click', () => {
+        closeMenu();
+        if (this._onContextAction) {
+          this._onContextAction({ action: 'delete', windowIndex, windowName });
+        }
+      });
+      menu.appendChild(deleteBtn);
+    }
+
+    overlay.appendChild(menu);
+    document.body.appendChild(overlay);
+
+    // Fade in
+    requestAnimationFrame(() => {
+      overlay.classList.add('drawer-context-menu-overlay--visible');
+    });
+
+    // Click overlay to close
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) closeMenu();
+    });
   }
 }
