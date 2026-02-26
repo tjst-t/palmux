@@ -1,0 +1,12 @@
+worktree /home/user/projects/myapp
+HEAD abc1234def5678901234567890123456789abcde
+branch refs/heads/main
+
+worktree /home/user/projects/myapp-feature
+HEAD def5678abc1234567890123456789012345678901
+branch refs/heads/feature/login
+
+worktree /home/user/projects/myapp-fix
+HEAD 1234567890abcdef1234567890abcdef12345678
+branch refs/heads/fix-typo
+

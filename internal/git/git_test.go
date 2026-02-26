@@ -373,6 +373,217 @@ func TestGit_Branches(t *testing.T) {
 	}
 }
 
+func TestGit_ListWorktrees(t *testing.T) {
+	tests := []struct {
+		name      string
+		output    string
+		err       error
+		wantCount int
+		wantErr   bool
+	}{
+		{
+			name: "正常系: 複数の worktree",
+			output: "worktree /home/user/projects/myapp\n" +
+				"HEAD abc1234def5678901234567890123456789abcde\n" +
+				"branch refs/heads/main\n\n" +
+				"worktree /home/user/projects/myapp-feature\n" +
+				"HEAD def5678abc1234567890123456789012345678901\n" +
+				"branch refs/heads/feature/login\n\n",
+			wantCount: 2,
+		},
+		{
+			name:      "正常系: 空の出力",
+			output:    "",
+			wantCount: 0,
+		},
+		{
+			name:    "異常系: コマンドエラー",
+			err:     errors.New("git error"),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockCommandRunner{
+				output: []byte(tt.output),
+				err:    tt.err,
+			}
+			g := &Git{Cmd: mock}
+
+			worktrees, err := g.ListWorktrees("/test/dir")
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if len(worktrees) != tt.wantCount {
+				t.Errorf("len(worktrees) = %d, want %d", len(worktrees), tt.wantCount)
+			}
+
+			// コマンド引数の確認
+			if mock.calledDir != "/test/dir" {
+				t.Errorf("dir = %q, want %q", mock.calledDir, "/test/dir")
+			}
+			if !containsAll(mock.calledArgs, "worktree", "list", "--porcelain") {
+				t.Errorf("args = %v, want to contain worktree list --porcelain", mock.calledArgs)
+			}
+		})
+	}
+}
+
+func TestGit_AddWorktree(t *testing.T) {
+	tests := []struct {
+		name       string
+		path       string
+		branch     string
+		create     bool
+		err        error
+		wantErr    bool
+		wantArgs   []string
+		noWantArgs []string
+	}{
+		{
+			name:     "正常系: 既存ブランチで worktree 追加",
+			path:     "/home/user/projects/myapp-feature",
+			branch:   "feature/login",
+			create:   false,
+			wantArgs: []string{"worktree", "add", "/home/user/projects/myapp-feature", "feature/login"},
+		},
+		{
+			name:     "正常系: 新規ブランチ作成で worktree 追加",
+			path:     "/home/user/projects/myapp-new",
+			branch:   "feature/new",
+			create:   true,
+			wantArgs: []string{"worktree", "add", "-b", "feature/new", "/home/user/projects/myapp-new"},
+		},
+		{
+			name:    "異常系: コマンドエラー",
+			path:    "/home/user/projects/myapp-err",
+			branch:  "main",
+			err:     errors.New("git error"),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockCommandRunner{
+				output: []byte(""),
+				err:    tt.err,
+			}
+			g := &Git{Cmd: mock}
+
+			err := g.AddWorktree("/test/dir", tt.path, tt.branch, tt.create)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			// コマンド引数の確認
+			if mock.calledDir != "/test/dir" {
+				t.Errorf("dir = %q, want %q", mock.calledDir, "/test/dir")
+			}
+			if tt.wantArgs != nil {
+				for _, wantArg := range tt.wantArgs {
+					if !containsStr(mock.calledArgs, wantArg) {
+						t.Errorf("args = %v, should contain %q", mock.calledArgs, wantArg)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestGit_AddWorktree_CreateFlagArgs(t *testing.T) {
+	// create=true の場合: git worktree add -b <branch> <path>
+	mock := &mockCommandRunner{output: []byte(""), err: nil}
+	g := &Git{Cmd: mock}
+
+	err := g.AddWorktree("/test/dir", "/tmp/wt", "new-branch", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// -b フラグが含まれていることを確認
+	if !containsExact(mock.calledArgs, "-b") {
+		t.Errorf("args = %v, should contain -b for create=true", mock.calledArgs)
+	}
+
+	// create=false の場合: git worktree add <path> <branch>
+	mock2 := &mockCommandRunner{output: []byte(""), err: nil}
+	g2 := &Git{Cmd: mock2}
+
+	err = g2.AddWorktree("/test/dir", "/tmp/wt", "mybranch", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// -b フラグが含まれていないことを確認
+	if containsExact(mock2.calledArgs, "-b") {
+		t.Errorf("args = %v, should not contain -b for create=false", mock2.calledArgs)
+	}
+}
+
+func TestGit_RemoveWorktree(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		err     error
+		wantErr bool
+	}{
+		{
+			name: "正常系: worktree 削除",
+			path: "/home/user/projects/myapp-feature",
+		},
+		{
+			name:    "異常系: コマンドエラー",
+			path:    "/home/user/projects/myapp-err",
+			err:     errors.New("git error"),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockCommandRunner{
+				output: []byte(""),
+				err:    tt.err,
+			}
+			g := &Git{Cmd: mock}
+
+			err := g.RemoveWorktree("/test/dir", tt.path)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			// コマンド引数の確認
+			if mock.calledDir != "/test/dir" {
+				t.Errorf("dir = %q, want %q", mock.calledDir, "/test/dir")
+			}
+			if !containsAll(mock.calledArgs, "worktree", "remove", tt.path) {
+				t.Errorf("args = %v, want to contain worktree remove %s", mock.calledArgs, tt.path)
+			}
+		})
+	}
+}
+
 func TestErrNotGitRepo(t *testing.T) {
 	if !errors.Is(ErrNotGitRepo, ErrNotGitRepo) {
 		t.Error("ErrNotGitRepo should be detectable with errors.Is")
@@ -389,10 +600,20 @@ func containsAll(slice []string, targets ...string) bool {
 	return true
 }
 
-// containsStr はスライスに文字列が含まれるか確認する。
+// containsStr はスライスに文字列が含まれるか確認する（部分一致）。
 func containsStr(slice []string, target string) bool {
 	for _, s := range slice {
 		if strings.Contains(s, target) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsExact はスライスに文字列が完全一致で含まれるか確認する。
+func containsExact(slice []string, target string) bool {
+	for _, s := range slice {
+		if s == target {
 			return true
 		}
 	}
