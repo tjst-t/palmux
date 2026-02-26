@@ -318,6 +318,40 @@
   text-overflow: ellipsis;
 }
 
+.gb-log-refs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.gb-log-ref {
+  display: inline-block;
+  font-size: calc(var(--gb-font-size, 14px) - 3px);
+  font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gb-log-ref--branch {
+  background: rgba(126, 200, 227, 0.18);
+  color: #7ec8e3;
+}
+
+.gb-log-ref--tag {
+  background: rgba(129, 199, 132, 0.18);
+  color: #81c784;
+}
+
+.gb-log-ref--remote {
+  background: rgba(136, 136, 170, 0.15);
+  color: #8888aa;
+}
+
 .gb-log-date {
   font-size: calc(var(--gb-font-size, 14px) - 2px);
   color: #8888aa;
@@ -622,6 +656,12 @@
 
   .gb-log-subject {
     font-size: var(--gb-font-size, 13px);
+  }
+
+  .gb-log-ref {
+    font-size: calc(var(--gb-font-size, 13px) - 3px);
+    max-width: 80px;
+    padding: 1px 4px;
   }
 
   .gb-log-date {

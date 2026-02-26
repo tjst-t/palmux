@@ -127,7 +127,7 @@ func TestGit_Log(t *testing.T) {
 		{
 			name:      "正常系: デフォルトブランチ",
 			limit:     50,
-			output:    "abc1234\tJohn\t2025-01-15T10:30:00+09:00\tFix bug\n",
+			output:    "abc1234\tJohn\t2025-01-15T10:30:00+09:00\tFix bug\tHEAD -> main\n",
 			wantCount: 1,
 			wantArgs:  []string{"log", "-n", "50"},
 		},
@@ -135,7 +135,7 @@ func TestGit_Log(t *testing.T) {
 			name:      "正常系: ブランチ指定",
 			branch:    "feature/login",
 			limit:     10,
-			output:    "abc1234\tJohn\t2025-01-15T10:30:00+09:00\tFix bug\n",
+			output:    "abc1234\tJohn\t2025-01-15T10:30:00+09:00\tFix bug\t\n",
 			wantCount: 1,
 			wantArgs:  []string{"log", "-n", "10", "feature/login"},
 		},
