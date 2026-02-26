@@ -3,7 +3,7 @@
 // Drawer による セッション/ウィンドウ切り替え
 // PanelManager による分割画面サポート
 
-import { listSessions, listWindows, listNotifications, deleteNotification, getSessionMode, createWindow } from './api.js';
+import { listSessions, listWindows, listNotifications, deleteNotification, getSessionMode, createWindow, deleteWindow, renameWindow, restartClaudeWindow } from './api.js';
 import { Drawer } from './drawer.js';
 import { PanelManager } from './panel-manager.js';
 import { TabBar } from './tab-bar.js';
@@ -743,7 +743,212 @@ document.addEventListener('DOMContentLoaded', () => {
         console.error('Failed to create window:', err);
       }
     },
+    onContextAction: async ({ action, windowIndex, windowName }) => {
+      const currentSession = panelManager?.getCurrentSession();
+      if (!currentSession) return;
+
+      switch (action) {
+        case 'restart':
+          _showTabModelSelectDialog(currentSession, claudePath);
+          break;
+        case 'resume':
+          _showTabModelSelectDialog(currentSession, `${claudePath} --continue`);
+          break;
+        case 'rename':
+          _showTabRenameDialog(currentSession, windowIndex, windowName);
+          break;
+        case 'delete':
+          await _handleTabDeleteWindow(currentSession, windowIndex);
+          break;
+      }
+    },
   });
+
+  /**
+   * タブバーのコンテキストメニューから「Restart」「Resume」が選択されたとき、
+   * モデル選択ダイアログを表示する。
+   * @param {string} sessionName
+   * @param {string} baseCommand - claude コマンドのベース（例: "claude" or "claude --continue"）
+   */
+  function _showTabModelSelectDialog(sessionName, baseCommand) {
+    const existing = document.querySelector('.drawer-context-menu-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'drawer-context-menu-overlay';
+
+    const menu = document.createElement('div');
+    menu.className = 'drawer-context-menu';
+
+    const title = document.createElement('div');
+    title.className = 'drawer-context-menu-title';
+    title.textContent = 'Select Model';
+    menu.appendChild(title);
+
+    const closeDialog = () => {
+      overlay.classList.remove('drawer-context-menu-overlay--visible');
+      setTimeout(() => overlay.remove(), 200);
+    };
+
+    const models = [
+      { label: 'opus', flag: 'opus' },
+      { label: 'sonnet', flag: 'sonnet' },
+      { label: 'haiku', flag: 'haiku' },
+    ];
+
+    for (const model of models) {
+      const btn = document.createElement('button');
+      btn.className = 'drawer-context-menu-item';
+      btn.textContent = model.label;
+      btn.addEventListener('click', async () => {
+        closeDialog();
+        const command = `${baseCommand} --model ${model.flag}`;
+        try {
+          const win = await restartClaudeWindow(sessionName, command);
+          connectToWindow(sessionName, win.index);
+          _refreshTabBar(sessionName, { type: 'terminal', windowIndex: win.index });
+          if (drawer) {
+            drawer.refreshWindowList?.(sessionName);
+          }
+        } catch (err) {
+          console.error('Failed to restart claude window:', err);
+        }
+      });
+      menu.appendChild(btn);
+    }
+
+    overlay.appendChild(menu);
+    document.body.appendChild(overlay);
+
+    requestAnimationFrame(() => {
+      overlay.classList.add('drawer-context-menu-overlay--visible');
+    });
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) closeDialog();
+    });
+  }
+
+  /**
+   * タブバーのコンテキストメニューから「Rename」が選択されたとき、
+   * リネームダイアログを表示する。
+   * @param {string} sessionName
+   * @param {number} windowIndex
+   * @param {string} currentName
+   */
+  function _showTabRenameDialog(sessionName, windowIndex, currentName) {
+    const existing = document.querySelector('.drawer-context-menu-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'drawer-context-menu-overlay';
+
+    const menu = document.createElement('div');
+    menu.className = 'drawer-context-menu';
+
+    const title = document.createElement('div');
+    title.className = 'drawer-context-menu-title';
+    title.textContent = 'Rename Window';
+    menu.appendChild(title);
+
+    const inputWrapper = document.createElement('div');
+    inputWrapper.style.padding = '12px 16px';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = currentName;
+    input.className = 'drawer-window-rename-input';
+    input.style.width = '100%';
+    input.style.boxSizing = 'border-box';
+    input.autocomplete = 'off';
+    input.autocapitalize = 'off';
+    input.spellcheck = false;
+    inputWrapper.appendChild(input);
+    menu.appendChild(inputWrapper);
+
+    const closeDialog = () => {
+      overlay.classList.remove('drawer-context-menu-overlay--visible');
+      setTimeout(() => overlay.remove(), 200);
+    };
+
+    const doRename = async () => {
+      const newName = input.value.trim();
+      if (!newName || newName === currentName) {
+        closeDialog();
+        return;
+      }
+      try {
+        await renameWindow(sessionName, windowIndex, newName);
+        closeDialog();
+        _refreshTabBar(sessionName, _getActiveTabDescriptor());
+        if (drawer) {
+          drawer.refreshWindowList?.(sessionName);
+        }
+      } catch (err) {
+        console.error('Failed to rename window:', err);
+        closeDialog();
+      }
+    };
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        doRename();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        closeDialog();
+      }
+    });
+
+    overlay.appendChild(menu);
+    document.body.appendChild(overlay);
+
+    requestAnimationFrame(() => {
+      overlay.classList.add('drawer-context-menu-overlay--visible');
+      input.focus();
+      input.select();
+    });
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) closeDialog();
+    });
+  }
+
+  /**
+   * タブバーのコンテキストメニューから「Delete」が選択されたとき、
+   * ウィンドウを削除する。
+   * @param {string} sessionName
+   * @param {number} windowIndex
+   */
+  async function _handleTabDeleteWindow(sessionName, windowIndex) {
+    try {
+      await deleteWindow(sessionName, windowIndex);
+
+      const currentWindowIndex = panelManager?.getCurrentWindowIndex();
+
+      // If deleted window was the current one, switch to another
+      if (currentWindowIndex === windowIndex) {
+        const windows = await listWindows(sessionName);
+        if (!windows || windows.length === 0) {
+          showSessionList({ replace: true });
+          return;
+        }
+        // Find previous window or first available
+        const prevWindow = windows.reduce((prev, w) => {
+          if (w.index < windowIndex && (prev === null || w.index > prev.index)) return w;
+          return prev;
+        }, null) || windows[0];
+        connectToWindow(sessionName, prevWindow.index);
+      }
+
+      _refreshTabBar(sessionName, _getActiveTabDescriptor());
+      if (drawer) {
+        drawer.refreshWindowList?.(sessionName);
+      }
+    } catch (err) {
+      console.error('Failed to delete window:', err);
+    }
+  }
 
   // PanelManager 初期化
   panelManager = new PanelManager({

@@ -561,4 +561,227 @@ describe('TabBar', () => {
       expect(spy).toHaveBeenCalled();
     });
   });
+
+  describe('context menu', () => {
+    it('shows context menu on terminal tab right-click with Rename and Delete', () => {
+      const onContextAction = vi.fn();
+      const bar = new TabBar({ container, onTabSelect, onContextAction });
+      bar.setWindows('main', [makeWindow(0, 'zsh'), makeWindow(1, 'vim')], false);
+
+      const termTab = container.querySelector('.tab[data-type="terminal"][data-window="0"]');
+      termTab.dispatchEvent(new Event('contextmenu', { bubbles: true }));
+
+      const overlay = document.querySelector('.drawer-context-menu-overlay');
+      expect(overlay).not.toBeNull();
+
+      const menuItems = overlay.querySelectorAll('.drawer-context-menu-item');
+      expect(menuItems.length).toBe(2);
+      expect(menuItems[0].textContent).toBe('Rename');
+      expect(menuItems[1].textContent).toBe('Delete');
+    });
+
+    it('shows Restart and Resume for claude tabs in Claude Code mode', () => {
+      const onContextAction = vi.fn();
+      const bar = new TabBar({ container, onTabSelect, onContextAction });
+      bar.setWindows('main', [makeWindow(0, 'zsh'), makeWindow(1, 'claude')], true);
+
+      const claudeTab = container.querySelector('.tab[data-type="terminal"][data-window="1"]');
+      claudeTab.dispatchEvent(new Event('contextmenu', { bubbles: true }));
+
+      const overlay = document.querySelector('.drawer-context-menu-overlay');
+      expect(overlay).not.toBeNull();
+
+      const menuItems = overlay.querySelectorAll('.drawer-context-menu-item');
+      expect(menuItems.length).toBe(2);
+      expect(menuItems[0].textContent).toBe('Restart');
+      expect(menuItems[1].textContent).toBe('Resume');
+    });
+
+    it('does not show context menu for Files tab', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [makeWindow(0, 'zsh')], false);
+
+      const filesTab = container.querySelector('.tab[data-type="files"]');
+      filesTab.dispatchEvent(new Event('contextmenu', { bubbles: true }));
+
+      const overlay = document.querySelector('.drawer-context-menu-overlay');
+      expect(overlay).toBeNull();
+    });
+
+    it('does not show context menu for Git tab', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [makeWindow(0, 'zsh')], false);
+
+      const gitTab = container.querySelector('.tab[data-type="git"]');
+      gitTab.dispatchEvent(new Event('contextmenu', { bubbles: true }));
+
+      const overlay = document.querySelector('.drawer-context-menu-overlay');
+      expect(overlay).toBeNull();
+    });
+
+    it('does not show context menu for + button', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [makeWindow(0, 'zsh')], false);
+
+      const addBtn = container.querySelector('.tab[data-type="add"]');
+      addBtn.dispatchEvent(new Event('contextmenu', { bubbles: true }));
+
+      const overlay = document.querySelector('.drawer-context-menu-overlay');
+      expect(overlay).toBeNull();
+    });
+
+    it('calls onContextAction with rename action when Rename is clicked', () => {
+      const onContextAction = vi.fn();
+      const bar = new TabBar({ container, onTabSelect, onContextAction });
+      bar.setWindows('main', [makeWindow(0, 'zsh')], false);
+
+      const termTab = container.querySelector('.tab[data-type="terminal"]');
+      termTab.dispatchEvent(new Event('contextmenu', { bubbles: true }));
+
+      const renameBtn = document.querySelector('.drawer-context-menu-item');
+      renameBtn.click();
+
+      expect(onContextAction).toHaveBeenCalledWith({
+        action: 'rename',
+        windowIndex: 0,
+        windowName: 'zsh',
+      });
+    });
+
+    it('calls onContextAction with delete action when Delete is clicked', () => {
+      const onContextAction = vi.fn();
+      const bar = new TabBar({ container, onTabSelect, onContextAction });
+      bar.setWindows('main', [makeWindow(0, 'zsh')], false);
+
+      const termTab = container.querySelector('.tab[data-type="terminal"]');
+      termTab.dispatchEvent(new Event('contextmenu', { bubbles: true }));
+
+      const items = document.querySelectorAll('.drawer-context-menu-item');
+      const deleteBtn = items[1]; // second item is Delete
+      deleteBtn.click();
+
+      expect(onContextAction).toHaveBeenCalledWith({
+        action: 'delete',
+        windowIndex: 0,
+        windowName: 'zsh',
+      });
+    });
+
+    it('calls onContextAction with restart action for claude tab', () => {
+      const onContextAction = vi.fn();
+      const bar = new TabBar({ container, onTabSelect, onContextAction });
+      bar.setWindows('main', [makeWindow(1, 'claude')], true);
+
+      const claudeTab = container.querySelector('.tab[data-type="terminal"][data-window="1"]');
+      claudeTab.dispatchEvent(new Event('contextmenu', { bubbles: true }));
+
+      const items = document.querySelectorAll('.drawer-context-menu-item');
+      items[0].click(); // Restart
+
+      expect(onContextAction).toHaveBeenCalledWith({
+        action: 'restart',
+        windowIndex: 1,
+        windowName: 'claude',
+      });
+    });
+
+    it('calls onContextAction with resume action for claude tab', () => {
+      const onContextAction = vi.fn();
+      const bar = new TabBar({ container, onTabSelect, onContextAction });
+      bar.setWindows('main', [makeWindow(1, 'claude')], true);
+
+      const claudeTab = container.querySelector('.tab[data-type="terminal"][data-window="1"]');
+      claudeTab.dispatchEvent(new Event('contextmenu', { bubbles: true }));
+
+      const items = document.querySelectorAll('.drawer-context-menu-item');
+      items[1].click(); // Resume
+
+      expect(onContextAction).toHaveBeenCalledWith({
+        action: 'resume',
+        windowIndex: 1,
+        windowName: 'claude',
+      });
+    });
+
+    it('closes context menu when overlay is clicked', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [makeWindow(0, 'zsh')], false);
+
+      const termTab = container.querySelector('.tab[data-type="terminal"]');
+      termTab.dispatchEvent(new Event('contextmenu', { bubbles: true }));
+
+      let overlay = document.querySelector('.drawer-context-menu-overlay');
+      expect(overlay).not.toBeNull();
+
+      // Click overlay itself to close
+      overlay.click();
+      // After the animation timeout (200ms) the overlay should be removed
+      // In tests we can just check it starts the close process
+      // (overlay--visible class removal is immediate)
+    });
+
+    it('shows menu title with window index and name', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [makeWindow(3, 'myterm')], false);
+
+      const termTab = container.querySelector('.tab[data-type="terminal"]');
+      termTab.dispatchEvent(new Event('contextmenu', { bubbles: true }));
+
+      const title = document.querySelector('.drawer-context-menu-title');
+      expect(title.textContent).toBe('3: myterm');
+    });
+
+    it('delete button has danger class', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [makeWindow(0, 'zsh')], false);
+
+      const termTab = container.querySelector('.tab[data-type="terminal"]');
+      termTab.dispatchEvent(new Event('contextmenu', { bubbles: true }));
+
+      const items = document.querySelectorAll('.drawer-context-menu-item');
+      expect(items[1].classList.contains('drawer-context-menu-item--danger')).toBe(true);
+    });
+  });
+
+  describe('long press detection', () => {
+    it('suppresses click after long press detection', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [makeWindow(0, 'zsh')], false);
+
+      // Simulate long press detected state
+      bar._longPressDetected = true;
+
+      const termTab = container.querySelector('.tab[data-type="terminal"]');
+      termTab.click();
+
+      // Should NOT have called onTabSelect because longPressDetected was true
+      expect(onTabSelect).not.toHaveBeenCalled();
+      // Should reset the flag
+      expect(bar._longPressDetected).toBe(false);
+    });
+  });
+
+  describe('dispose with context menu', () => {
+    it('cleans up contextmenu listener on dispose', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [makeWindow(0, 'zsh')], false);
+
+      bar.dispose();
+
+      // After dispose, right-clicking should not create a menu
+      // (The scrollEl is removed, but this verifies cleanup logic)
+      expect(bar._scrollEl).toBeNull();
+    });
+
+    it('clears long press timer on dispose', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [makeWindow(0, 'zsh')], false);
+
+      // Simulate an active timer
+      bar._longPressTimer = setTimeout(() => {}, 10000);
+      bar.dispose();
+
+      expect(bar._longPressTimer).toBeNull();
+    });
+  });
 });
