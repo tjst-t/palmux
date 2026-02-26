@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/tjst-t/palmux/internal/git"
 	"github.com/tjst-t/palmux/internal/server"
 	"github.com/tjst-t/palmux/internal/tmux"
 )
@@ -78,6 +79,7 @@ func main() {
 		},
 		Ghq: &tmux.GhqResolver{
 			Cmd:     &tmux.RealCommandRunner{},
+			GitCmd:  &git.RealCommandRunner{},
 			HomeDir: homeDir,
 		},
 	}
