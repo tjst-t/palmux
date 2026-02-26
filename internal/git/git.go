@@ -62,6 +62,14 @@ type Branch struct {
 	Remote  bool   `json:"remote"`
 }
 
+// Worktree は git worktree の情報を表す。
+type Worktree struct {
+	Path   string `json:"path"`
+	Branch string `json:"branch"` // refs/heads/ を除いた名前
+	Head   string `json:"head"`
+	Bare   bool   `json:"bare"`
+}
+
 // Git は git 操作を提供する。
 type Git struct {
 	Cmd CommandRunner
@@ -156,4 +164,32 @@ func (g *Git) Branches(dir string) ([]Branch, error) {
 		return nil, err
 	}
 	return ParseBranches(string(out)), nil
+}
+
+// ListWorktrees は git worktree list --porcelain の結果を返す。
+func (g *Git) ListWorktrees(dir string) ([]Worktree, error) {
+	out, err := g.Cmd.RunInDir(dir, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+	return ParseWorktrees(string(out)), nil
+}
+
+// AddWorktree は git worktree add を実行する。
+// create が true の場合は -b フラグで新しいブランチを作成する。
+func (g *Git) AddWorktree(dir, path, branch string, create bool) error {
+	var args []string
+	if create {
+		args = []string{"worktree", "add", "-b", branch, path}
+	} else {
+		args = []string{"worktree", "add", path, branch}
+	}
+	_, err := g.Cmd.RunInDir(dir, args...)
+	return err
+}
+
+// RemoveWorktree は git worktree remove を実行する。
+func (g *Git) RemoveWorktree(dir, path string) error {
+	_, err := g.Cmd.RunInDir(dir, "worktree", "remove", path)
+	return err
 }

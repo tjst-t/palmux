@@ -152,6 +152,48 @@ func ParseDiffTree(output string) []StatusFile {
 	return files
 }
 
+// ParseWorktrees は git worktree list --porcelain の出力をパースする。
+func ParseWorktrees(output string) []Worktree {
+	worktrees := []Worktree{}
+	if output == "" {
+		return worktrees
+	}
+
+	// エントリは空行で区切られる
+	blocks := strings.Split(output, "\n\n")
+	for _, block := range blocks {
+		block = strings.TrimSpace(block)
+		if block == "" {
+			continue
+		}
+
+		var wt Worktree
+		lines := strings.Split(block, "\n")
+		for _, line := range lines {
+			switch {
+			case strings.HasPrefix(line, "worktree "):
+				wt.Path = strings.TrimPrefix(line, "worktree ")
+			case strings.HasPrefix(line, "HEAD "):
+				wt.Head = strings.TrimPrefix(line, "HEAD ")
+			case strings.HasPrefix(line, "branch "):
+				ref := strings.TrimPrefix(line, "branch ")
+				// refs/heads/ プレフィックスを除去
+				wt.Branch = strings.TrimPrefix(ref, "refs/heads/")
+			case line == "bare":
+				wt.Bare = true
+			case line == "detached":
+				// detached HEAD: branch は空のまま
+			}
+		}
+
+		if wt.Path != "" {
+			worktrees = append(worktrees, wt)
+		}
+	}
+
+	return worktrees
+}
+
 // ParseBranches は git branch -a --no-color の出力をパースする。
 func ParseBranches(output string) []Branch {
 	branches := []Branch{}
