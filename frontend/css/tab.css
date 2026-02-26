@@ -1,0 +1,92 @@
+/* tab.css - Tab bar styles for horizontal window/tab switching */
+
+/* Tab bar fits in header, takes remaining space */
+.tab-bar {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+}
+
+.tab-bar-scroll {
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  gap: 0;
+  height: 100%;
+}
+
+.tab-bar-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 12px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: #8888aa;
+  font-size: 13px;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.tab:hover {
+  color: #c0c0d0;
+}
+
+.tab--active {
+  color: #7ec8e3;
+  border-bottom-color: #7ec8e3;
+}
+
+.tab-icon {
+  font-size: 14px;
+}
+
+.tab-label {
+  /* no special styling needed */
+}
+
+.tab-notification {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ffc107;
+  position: absolute;
+  top: 8px;
+  right: 4px;
+}
+
+/* Mobile adjustments */
+@media (max-width: 600px) {
+  .tab {
+    padding: 0 8px;
+    font-size: 11px;
+  }
+
+  .tab-icon {
+    font-size: 12px;
+  }
+
+  .tab-notification {
+    width: 5px;
+    height: 5px;
+    top: 6px;
+    right: 2px;
+  }
+}
