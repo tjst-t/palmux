@@ -1,4 +1,4 @@
-const CACHE_NAME = 'palmux-v3';
+const CACHE_NAME = 'palmux-__VERSION__';  // サーバーが実際のバージョンに置換
 const STATIC_ASSETS = [
   './app.js',
   './style.css',
