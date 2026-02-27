@@ -710,3 +710,87 @@
     padding: 0 8px;
   }
 }
+
+/* 3-pane wide layout (1024px+) */
+@media (min-width: 1024px) {
+  .gb-body--wide {
+    flex-direction: row;
+  }
+
+  .gb-left-pane {
+    min-width: 280px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .gb-right-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-width: 0;
+  }
+
+  .gb-right-pane-placeholder {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #8888aa;
+    font-size: 14px;
+  }
+
+  /* 左右ヘッダーの高さを揃える */
+  .gb-body--wide .gb-file-header,
+  .gb-diff-header--pane {
+    box-sizing: border-box;
+    height: 44px;
+    min-height: 44px;
+  }
+
+  .gb-diff-header--pane {
+    border-bottom: 1px solid #2a2a4a;
+  }
+
+  .gb-file-entry--selected {
+    background: rgba(126, 200, 227, 0.12);
+    border-left: 3px solid #7ec8e3;
+  }
+
+  /* 横分割ドラッグハンドル */
+  .gb-hdivider {
+    width: 8px;
+    background: #2a2a4a;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: col-resize;
+    touch-action: none;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.15s;
+  }
+
+  .gb-hdivider:hover {
+    background: #3a3a5a;
+  }
+
+  .gb-hdivider--dragging {
+    background: #4a4a6a;
+  }
+
+  .gb-hdivider-handle {
+    width: 4px;
+    height: 32px;
+    border-radius: 2px;
+    background: #5a5a7a;
+    transition: background 0.15s;
+  }
+
+  .gb-hdivider:hover .gb-hdivider-handle,
+  .gb-hdivider--dragging .gb-hdivider-handle {
+    background: #7ec8e3;
+  }
+}

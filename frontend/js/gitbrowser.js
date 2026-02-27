@@ -110,6 +110,31 @@ export class GitBrowser {
     this._onDragMove = this._handleDragMove.bind(this);
     this._onDragEnd = this._handleDragEnd.bind(this);
 
+    /** @type {HTMLElement|null} 右ペイン（ワイドレイアウト時のみ） */
+    this._rightPaneEl = null;
+
+    /** @type {HTMLElement|null} 左ペイン参照 */
+    this._leftPaneEl = null;
+
+    /** @type {HTMLElement|null} ドラッグ基準コンテナ */
+    this._dragContainerEl = null;
+
+    /** @type {number} 横分割比率（左ペインの割合 0-1、デフォルト 0.4） */
+    this._horizontalSplitRatio = 0.4;
+
+    /** @type {boolean} 横ドラッグ中フラグ */
+    this._hDragging = false;
+
+    this._onHDragMove = this._handleHDragMove.bind(this);
+    this._onHDragEnd = this._handleHDragEnd.bind(this);
+
+    /** @type {boolean} 前回のワイドレイアウト状態 */
+    this._wasWideLayout = false;
+
+    /** @type {function} resize ハンドラ */
+    this._onResize = this._handleResize.bind(this);
+    window.addEventListener('resize', this._onResize);
+
     this._render();
     this._applyFontSize();
   }
@@ -193,6 +218,8 @@ export class GitBrowser {
     if (state.diff) {
       // diff ビューを復元
       this._selectedCommit = state.commit || null;
+      this._showingDiff = true;
+      this._diffPath = state.diff;
       if (this._selectedCommit && !this._commitFiles) {
         try {
           const files = await getGitCommitFiles(this._session, this._selectedCommit);
@@ -201,7 +228,11 @@ export class GitBrowser {
           this._commitFiles = [];
         }
       }
-      this._showDiff(state.diff, { push: false });
+      if (this._isWideLayout()) {
+        this._renderMain();
+      } else {
+        this._showDiff(state.diff, { push: false });
+      }
     } else if (state.commit) {
       // コミット選択を復元
       this._showingDiff = false;
@@ -236,6 +267,33 @@ export class GitBrowser {
     if (!push) return;
     if (this._onNavigate) {
       this._onNavigate(this.getState());
+    }
+  }
+
+  // --- レイアウト判定 ---
+
+  /**
+   * ワイドレイアウト（3ペイン）かどうかを判定する。
+   * @returns {boolean}
+   */
+  _isWideLayout() {
+    return window.innerWidth >= 1024;
+  }
+
+  /**
+   * ウィンドウリサイズ時のハンドラ。レイアウトが変わったら再描画する。
+   */
+  _handleResize() {
+    if (!this._session || !this._status) return;
+    const isWide = this._isWideLayout();
+    if (isWide === this._wasWideLayout) return;
+
+    if (this._showingDiff && !isWide) {
+      // ワイド → ナロー（diff 表示中）: フルスクリーン diff に切り替え
+      this._wasWideLayout = isWide;
+      this._showDiff(this._diffPath, { push: false });
+    } else {
+      this._renderMain();
     }
   }
 
@@ -296,15 +354,33 @@ export class GitBrowser {
 
   /**
    * メインビュー（ステータス + ログ + ブランチ）をレンダリングする。
+   * ワイドレイアウト（1024px以上）では左ペイン+右ペインの3ペイン構成。
    */
   _renderMain() {
     if (!this._wrapper) this._render();
     this._wrapper.innerHTML = '';
+    this._wasWideLayout = this._isWideLayout();
 
-    // splitRatio に基づいたコンテンツラッパー（ブランチバーを除いた領域）
     const body = document.createElement('div');
     body.className = 'gb-body';
+    if (this._wasWideLayout) {
+      body.classList.add('gb-body--wide');
+    }
     this._bodyEl = body;
+
+    // ワイド時は左ペインでラップ、ナロー時は body 直下
+    const leftContainer = this._wasWideLayout
+      ? document.createElement('div')
+      : body;
+    if (this._wasWideLayout) {
+      leftContainer.className = 'gb-left-pane';
+      leftContainer.style.width = `${this._horizontalSplitRatio * 100}%`;
+      this._leftPaneEl = leftContainer;
+      body.appendChild(leftContainer);
+    } else {
+      this._leftPaneEl = null;
+    }
+    this._dragContainerEl = leftContainer;
 
     // ファイルセクション（上部）
     const fileSection = document.createElement('div');
@@ -312,7 +388,7 @@ export class GitBrowser {
     fileSection.style.flex = `0 0 ${this._splitRatio * 100}%`;
     this._fileSectionEl = fileSection;
     this._renderFileSection(fileSection);
-    body.appendChild(fileSection);
+    leftContainer.appendChild(fileSection);
 
     // ドラッグ可能な区切り線
     const divider = document.createElement('div');
@@ -321,7 +397,7 @@ export class GitBrowser {
     handle.className = 'gb-divider-handle';
     divider.appendChild(handle);
     this._setupDividerDrag(divider);
-    body.appendChild(divider);
+    leftContainer.appendChild(divider);
 
     // ログセクション（下部）
     const logSection = document.createElement('div');
@@ -329,7 +405,35 @@ export class GitBrowser {
     logSection.style.flex = '1';
     this._logSectionEl = logSection;
     this._renderLogSection(logSection);
-    body.appendChild(logSection);
+    leftContainer.appendChild(logSection);
+
+    // 横分割ドラッグ区切り線 + 右ペイン（ワイドレイアウト時のみ）
+    if (this._wasWideLayout) {
+      const hDivider = document.createElement('div');
+      hDivider.className = 'gb-hdivider';
+      const hHandle = document.createElement('div');
+      hHandle.className = 'gb-hdivider-handle';
+      hDivider.appendChild(hHandle);
+      this._setupHorizontalDividerDrag(hDivider);
+      body.appendChild(hDivider);
+
+      const rightPane = document.createElement('div');
+      rightPane.className = 'gb-right-pane';
+      this._rightPaneEl = rightPane;
+
+      if (this._showingDiff && this._diffPath) {
+        this._populateRightPane(this._diffPath);
+      } else {
+        const placeholder = document.createElement('div');
+        placeholder.className = 'gb-right-pane-placeholder';
+        placeholder.textContent = 'Select a file to view diff';
+        rightPane.appendChild(placeholder);
+      }
+
+      body.appendChild(rightPane);
+    } else {
+      this._rightPaneEl = null;
+    }
 
     this._wrapper.appendChild(body);
 
@@ -366,11 +470,14 @@ export class GitBrowser {
    * @param {MouseEvent|TouchEvent} e
    */
   _handleDragMove(e) {
-    if (!this._dragging || !this._bodyEl) return;
+    if (!this._dragging) return;
     e.preventDefault();
 
+    const container = this._dragContainerEl || this._bodyEl;
+    if (!container) return;
+
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    const rect = this._bodyEl.getBoundingClientRect();
+    const rect = container.getBoundingClientRect();
     const totalHeight = rect.height;
     if (totalHeight <= 0) return;
 
@@ -400,6 +507,64 @@ export class GitBrowser {
     document.removeEventListener('touchend', this._onDragEnd);
   }
 
+  // --- 横分割ドラッグ（左右ペイン幅変更） ---
+
+  /**
+   * 横分割区切り線のドラッグイベントを設定する。
+   * @param {HTMLElement} divider
+   */
+  _setupHorizontalDividerDrag(divider) {
+    const onStart = (e) => {
+      e.preventDefault();
+      this._hDragging = true;
+      divider.classList.add('gb-hdivider--dragging');
+      document.addEventListener('mousemove', this._onHDragMove);
+      document.addEventListener('mouseup', this._onHDragEnd);
+      document.addEventListener('touchmove', this._onHDragMove, { passive: false });
+      document.addEventListener('touchend', this._onHDragEnd);
+    };
+
+    divider.addEventListener('mousedown', onStart);
+    divider.addEventListener('touchstart', onStart, { passive: false });
+  }
+
+  /**
+   * 横ドラッグ移動ハンドラ。
+   * @param {MouseEvent|TouchEvent} e
+   */
+  _handleHDragMove(e) {
+    if (!this._hDragging || !this._bodyEl) return;
+    e.preventDefault();
+
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const rect = this._bodyEl.getBoundingClientRect();
+    const totalWidth = rect.width;
+    if (totalWidth <= 0) return;
+
+    let ratio = (clientX - rect.left) / totalWidth;
+
+    // 最小 20%, 最大 60%
+    ratio = Math.max(0.2, Math.min(0.6, ratio));
+
+    this._horizontalSplitRatio = ratio;
+    if (this._leftPaneEl) {
+      this._leftPaneEl.style.width = `${ratio * 100}%`;
+    }
+  }
+
+  /**
+   * 横ドラッグ終了ハンドラ。
+   */
+  _handleHDragEnd() {
+    this._hDragging = false;
+    const divider = this._wrapper?.querySelector('.gb-hdivider');
+    if (divider) divider.classList.remove('gb-hdivider--dragging');
+    document.removeEventListener('mousemove', this._onHDragMove);
+    document.removeEventListener('mouseup', this._onHDragEnd);
+    document.removeEventListener('touchmove', this._onHDragMove);
+    document.removeEventListener('touchend', this._onHDragEnd);
+  }
+
   // --- ファイルセクション ---
 
   /**
@@ -426,6 +591,8 @@ export class GitBrowser {
         e.stopPropagation();
         this._selectedCommit = null;
         this._commitFiles = null;
+        this._showingDiff = false;
+        this._diffPath = null;
         this._renderMain();
         this._pushHistory(true);
       });
@@ -488,6 +655,10 @@ export class GitBrowser {
     const el = document.createElement('div');
     el.className = 'gb-file-entry';
 
+    if (this._isWideLayout() && this._showingDiff && this._diffPath === file.path) {
+      el.classList.add('gb-file-entry--selected');
+    }
+
     const badge = document.createElement('span');
     badge.className = `gb-status-badge gb-status--${statusClass(file.status)}`;
     badge.textContent = file.status;
@@ -499,7 +670,13 @@ export class GitBrowser {
     el.appendChild(badge);
     el.appendChild(name);
 
-    el.addEventListener('click', () => this._showDiff(file.path, { push: true }));
+    el.addEventListener('click', () => {
+      if (this._isWideLayout()) {
+        this._showDiffInPane(file.path);
+      } else {
+        this._showDiff(file.path, { push: true });
+      }
+    });
 
     return el;
   }
@@ -563,6 +740,8 @@ export class GitBrowser {
       if (this._selectedCommit !== null) {
         this._selectedCommit = null;
         this._commitFiles = null;
+        this._showingDiff = false;
+        this._diffPath = null;
         this._renderMain();
         this._pushHistory(true);
       }
@@ -636,6 +815,8 @@ export class GitBrowser {
       // 同じコミットを再タップ → 選択解除
       this._selectedCommit = null;
       this._commitFiles = null;
+      this._showingDiff = false;
+      this._diffPath = null;
       this._renderMain();
       this._pushHistory(push);
       return;
@@ -643,6 +824,8 @@ export class GitBrowser {
 
     this._selectedCommit = hash;
     this._commitFiles = null;
+    this._showingDiff = false;
+    this._diffPath = null;
 
     // ファイルセクションを更新（ローディング表示）
     this._renderMain();
@@ -752,6 +935,8 @@ export class GitBrowser {
     this._branchPickerOpen = false;
     this._selectedCommit = null;
     this._commitFiles = null;
+    this._showingDiff = false;
+    this._diffPath = null;
 
     // ブランチピッカーを閉じる
     const picker = this._wrapper.querySelector('.gb-branch-picker');
@@ -771,11 +956,103 @@ export class GitBrowser {
   // --- Diff ビュー ---
 
   /**
+   * ワイドレイアウト時にファイルの選択状態を更新する。
+   */
+  _updateFileSelection() {
+    if (!this._fileSectionEl) return;
+    const entries = this._fileSectionEl.querySelectorAll('.gb-file-entry');
+    entries.forEach(el => {
+      const nameEl = el.querySelector('.gb-file-name');
+      if (nameEl && nameEl.textContent === this._diffPath) {
+        el.classList.add('gb-file-entry--selected');
+      } else {
+        el.classList.remove('gb-file-entry--selected');
+      }
+    });
+  }
+
+  /**
+   * ワイドレイアウト時に右ペインで diff を表示する。
+   * @param {string} path - ファイルパス
+   * @param {{ push?: boolean }} [opts]
+   */
+  async _showDiffInPane(path, { push = true } = {}) {
+    this._showingDiff = true;
+    this._diffPath = path;
+    this._pushHistory(push);
+    this._updateFileSelection();
+    await this._populateRightPane(path);
+  }
+
+  /**
+   * 右ペインに diff コンテンツを描画する。
+   * @param {string} path - ファイルパス
+   */
+  async _populateRightPane(path) {
+    const rightPane = this._rightPaneEl;
+    if (!rightPane) return;
+
+    rightPane.innerHTML = '';
+
+    // ヘッダー（戻るボタンなし）
+    const header = document.createElement('div');
+    header.className = 'gb-diff-header gb-diff-header--pane';
+    const fileName = document.createElement('span');
+    fileName.className = 'gb-diff-filename';
+    fileName.textContent = path;
+    header.appendChild(fileName);
+    rightPane.appendChild(header);
+
+    // コンテンツ
+    const content = document.createElement('div');
+    content.className = 'gb-diff-content';
+    content.innerHTML = '<div class="gb-loading">Loading diff...</div>';
+    rightPane.appendChild(content);
+
+    try {
+      const result = await getGitDiff(this._session, path, this._selectedCommit || undefined);
+      if (!this._showingDiff || this._diffPath !== path) return;
+
+      content.innerHTML = '';
+
+      if (!result.diff) {
+        const empty = document.createElement('div');
+        empty.className = 'gb-empty';
+        empty.textContent = 'No diff available';
+        content.appendChild(empty);
+        return;
+      }
+
+      const fileStatus = this._getFileStatus(path);
+      const isNewFile = fileStatus === 'A' || fileStatus === '?' || this._isAllAddedDiff(result.diff);
+
+      if (isNewFile) {
+        this._renderNewFileDiff(content, result.diff);
+      } else {
+        this._renderSideBySideDiff(content, result.diff);
+      }
+    } catch (err) {
+      console.error('Failed to load diff:', err);
+      content.innerHTML = '';
+      const error = document.createElement('div');
+      error.className = 'gb-error';
+      error.textContent = `Failed to load diff: ${err.message}`;
+      content.appendChild(error);
+    }
+  }
+
+  /**
    * diff ビューを表示する。
    * @param {string} path - ファイルパス
    * @param {{ push?: boolean }} [opts]
    */
   async _showDiff(path, { push = true } = {}) {
+    // ワイドレイアウト時は右ペインに表示
+    if (this._isWideLayout() && this._rightPaneEl) {
+      await this._showDiffInPane(path, { push });
+      return;
+    }
+
     this._showingDiff = true;
     this._diffPath = path;
     if (!this._wrapper) this._render();
@@ -1146,11 +1423,18 @@ export class GitBrowser {
    * リソースを解放する。
    */
   dispose() {
+    // resize リスナー解除
+    window.removeEventListener('resize', this._onResize);
     // ドラッグリスナー解除
     document.removeEventListener('mousemove', this._onDragMove);
     document.removeEventListener('mouseup', this._onDragEnd);
     document.removeEventListener('touchmove', this._onDragMove);
     document.removeEventListener('touchend', this._onDragEnd);
+    // 横ドラッグリスナー解除
+    document.removeEventListener('mousemove', this._onHDragMove);
+    document.removeEventListener('mouseup', this._onHDragEnd);
+    document.removeEventListener('touchmove', this._onHDragMove);
+    document.removeEventListener('touchend', this._onHDragEnd);
 
     this._container.innerHTML = '';
     this._session = null;
@@ -1165,5 +1449,8 @@ export class GitBrowser {
     this._bodyEl = null;
     this._fileSectionEl = null;
     this._logSectionEl = null;
+    this._rightPaneEl = null;
+    this._leftPaneEl = null;
+    this._dragContainerEl = null;
   }
 }
