@@ -846,26 +846,27 @@ export class Drawer {
     cancelBtn.addEventListener('click', closeModal);
     overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
 
-    // For non-default branches, offer "Delete + Remove Worktree"
+    // For non-default branches, offer "Remove" (session + worktree) and "Delete Branch" (session + worktree + branch)
     if (!branchSession.isDefault) {
-      const deleteKeepBtn = document.createElement('button');
-      deleteKeepBtn.className = 'drawer-delete-modal-delete';
-      deleteKeepBtn.textContent = 'Kill Session';
-      deleteKeepBtn.style.background = '#666';
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'drawer-delete-modal-delete';
+      removeBtn.textContent = 'Remove';
+      removeBtn.style.background = '#666';
 
-      const deleteRemoveBtn = document.createElement('button');
-      deleteRemoveBtn.className = 'drawer-delete-modal-delete';
-      deleteRemoveBtn.textContent = 'Kill + Remove';
+      const deleteBranchBtn = document.createElement('button');
+      deleteBranchBtn.className = 'drawer-delete-modal-delete';
+      deleteBranchBtn.textContent = 'Delete Branch';
 
       actions.appendChild(cancelBtn);
-      actions.appendChild(deleteKeepBtn);
-      actions.appendChild(deleteRemoveBtn);
+      actions.appendChild(removeBtn);
+      actions.appendChild(deleteBranchBtn);
 
-      const doDelete = async (removeWorktree) => {
-        deleteKeepBtn.disabled = true;
-        deleteRemoveBtn.disabled = true;
+      // Remove: セッション削除 + worktree 削除
+      removeBtn.addEventListener('click', async () => {
+        removeBtn.disabled = true;
+        deleteBranchBtn.disabled = true;
         try {
-          await deleteProjectWorktree(projectName, branchSession.branch, removeWorktree);
+          await deleteProjectWorktree(projectName, branchSession.branch, true);
           closeModal();
           const [sessions, repos] = await Promise.all([listSessions(), listGhqRepos()]);
           this._sessions = sessions || [];
@@ -876,12 +877,51 @@ export class Drawer {
           }
         } catch (err) {
           closeModal();
-          this._showDeleteError(`Failed to delete: ${err.message}`);
+          this._showDeleteError(`Failed to remove: ${err.message}`);
         }
-      };
+      });
 
-      deleteKeepBtn.addEventListener('click', () => doDelete(false));
-      deleteRemoveBtn.addEventListener('click', () => doDelete(true));
+      // Delete Branch: セッション削除 + worktree 削除 + ブランチ削除（未マージ警告あり）
+      deleteBranchBtn.addEventListener('click', async () => {
+        removeBtn.disabled = true;
+        deleteBranchBtn.disabled = true;
+        deleteBranchBtn.textContent = 'Checking...';
+        try {
+          // マージ済みかチェック
+          const { merged } = await isProjectBranchMerged(projectName, branchSession.branch);
+          let force = false;
+
+          if (!merged) {
+            const confirmed = window.confirm(
+              `Branch "${branchSession.branch}" has unmerged commits. Delete anyway?`
+            );
+            if (!confirmed) {
+              removeBtn.disabled = false;
+              deleteBranchBtn.disabled = false;
+              deleteBranchBtn.textContent = 'Delete Branch';
+              return;
+            }
+            force = true;
+          }
+
+          deleteBranchBtn.textContent = 'Deleting...';
+          // 1. セッション + worktree 削除
+          await deleteProjectWorktree(projectName, branchSession.branch, true);
+          // 2. ブランチ削除
+          await deleteProjectBranch(projectName, branchSession.branch, force);
+          closeModal();
+          const [sessions, repos] = await Promise.all([listSessions(), listGhqRepos()]);
+          this._sessions = sessions || [];
+          this._groupSessionsByProject(this._sessions, repos || []);
+          this._renderContent();
+          if (branchSession.name === this._currentSession) {
+            await this._transitionToRecentSession();
+          }
+        } catch (err) {
+          closeModal();
+          this._showDeleteError(`Failed to delete branch: ${err.message}`);
+        }
+      });
     } else {
       // Default branch: just kill session (same as before)
       const deleteBtn = document.createElement('button');
