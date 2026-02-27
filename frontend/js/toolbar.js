@@ -94,8 +94,11 @@ export class Toolbar {
     /** @type {boolean} */
     this._visible = true;
 
-    /** @type {'normal' | 'shortcut' | 'commands'} ツールバーモード */
+    /** @type {'normal' | 'shortcut' | 'commands' | 'claude'} ツールバーモード */
     this._mode = 'normal';
+
+    /** @type {boolean} Claude ウィンドウかどうか */
+    this._isClaudeWindow = false;
 
     /** @type {string|null} 現在のセッション名 */
     this._currentSession = null;
@@ -217,7 +220,7 @@ export class Toolbar {
       e.preventDefault();
       if (this._mode === 'normal') {
         this._setMode('shortcut');
-      } else if (this._mode === 'commands') {
+      } else if (this._mode === 'commands' || this._mode === 'claude') {
         this._setMode('normal');
       }
     });
@@ -231,7 +234,7 @@ export class Toolbar {
     this._addButtonHandler(this._switchBackBtn, (e) => {
       e.preventDefault();
       if (this._mode === 'normal') {
-        this._setMode('commands');
+        this._setMode(this._isClaudeWindow ? 'claude' : 'commands');
       } else {
         this._setMode('normal');
       }
@@ -257,6 +260,55 @@ export class Toolbar {
     this._commandsRow = document.createElement('div');
     this._commandsRow.className = 'toolbar-commands-row';
     this._container.appendChild(this._commandsRow);
+
+    // Claude モード行（初期非表示）
+    this._claudeRow = document.createElement('div');
+    this._claudeRow.className = 'toolbar-claude-row';
+
+    // アクション行: [y] [n] [↑] [⏎] [^C] [Esc]
+    const actionsRow = document.createElement('div');
+    actionsRow.className = 'toolbar-claude-actions';
+    const claudeActions = [
+      { label: 'y', keys: ['y', '\r'] },
+      { label: 'n', keys: ['n', '\r'] },
+      { label: '\u2191', keys: ['\x1b[A'] },
+      { label: '\u23CE', keys: ['\r'] },
+      { label: '^C', keys: ['\x03'] },
+      { label: 'Esc', keys: ['\x1b'] },
+    ];
+    for (const action of claudeActions) {
+      const btn = document.createElement('button');
+      btn.className = 'toolbar-claude-btn';
+      btn.textContent = action.label;
+      this._addButtonHandler(btn, (e) => {
+        e.preventDefault();
+        for (const k of action.keys) {
+          this._onSendKey(k);
+        }
+      });
+      actionsRow.appendChild(btn);
+    }
+    this._claudeRow.appendChild(actionsRow);
+
+    // スラッシュコマンド行: /compact /clear /help /cost /status
+    const slashRow = document.createElement('div');
+    slashRow.className = 'toolbar-claude-commands';
+    const slashCommands = ['/compact', '/clear', '/help', '/cost', '/status'];
+    for (const cmd of slashCommands) {
+      const btn = document.createElement('button');
+      btn.className = 'toolbar-claude-slash-btn';
+      btn.textContent = cmd;
+      this._addTapButtonHandler(btn, (e) => {
+        e.preventDefault();
+        // テキストと Enter を別メッセージで送信（PTY が一括入力の \r を正しく処理しないケース対策）
+        this._onSendKey(cmd);
+        this._onSendKey('\r');
+      });
+      slashRow.appendChild(btn);
+    }
+    this._claudeRow.appendChild(slashRow);
+
+    this._container.appendChild(this._claudeRow);
 
     this._updateButtonStates();
     // 通常モードでは < ボタンも表示（commands へのアクセス用）
@@ -580,11 +632,12 @@ export class Toolbar {
     const getActiveRow = () => {
       if (this._mode === 'normal') return this._row;
       if (this._mode === 'shortcut') return this._shortcutRow;
+      if (this._mode === 'claude') return this._claudeRow;
       return this._commandsRow;
     };
 
     /** 現在のモードで左スワイプが有効か */
-    const canSwipeLeft = () => this._mode === 'normal' || this._mode === 'commands';
+    const canSwipeLeft = () => this._mode === 'normal' || this._mode === 'commands' || this._mode === 'claude';
     /** 現在のモードで右スワイプが有効か */
     const canSwipeRight = () => this._mode === 'normal' || this._mode === 'shortcut';
 
@@ -715,9 +768,9 @@ export class Toolbar {
       let targetMode = null;
       if (dir === 'left') {
         if (this._mode === 'normal') targetMode = 'shortcut';
-        else if (this._mode === 'commands') targetMode = 'normal';
+        else if (this._mode === 'commands' || this._mode === 'claude') targetMode = 'normal';
       } else {
-        if (this._mode === 'normal') targetMode = 'commands';
+        if (this._mode === 'normal') targetMode = this._isClaudeWindow ? 'claude' : 'commands';
         else if (this._mode === 'shortcut') targetMode = 'normal';
       }
 
@@ -745,10 +798,10 @@ export class Toolbar {
    * ツールバーのモードを設定する。
    *
    * モード遷移:
-   *   < ボタン: normal → commands（左側）、shortcut → normal
-   *   > ボタン: normal → shortcut（右側）、commands → normal
+   *   < ボタン: normal → commands/claude（左側）、shortcut → normal
+   *   > ボタン: normal → shortcut（右側）、commands/claude → normal
    *
-   * @param {'normal' | 'shortcut' | 'commands'} mode
+   * @param {'normal' | 'shortcut' | 'commands' | 'claude'} mode
    */
   _setMode(mode) {
     this._mode = mode;
@@ -757,6 +810,7 @@ export class Toolbar {
     this._row.style.display = 'none';
     this._shortcutRow.style.display = 'none';
     this._commandsRow.style.display = 'none';
+    this._claudeRow.style.display = 'none';
     this._switchFwdBtn.style.display = 'none';
     this._switchBackBtn.style.display = 'none';
 
@@ -764,7 +818,7 @@ export class Toolbar {
       // 通常: メイン行 + 両方のモード切替ボタンを表示
       this._row.style.display = '';
       this._switchFwdBtn.style.display = '';   // > → shortcut
-      this._switchBackBtn.style.display = 'flex'; // < → commands
+      this._switchBackBtn.style.display = 'flex'; // < → commands/claude
     } else if (mode === 'shortcut') {
       // ショートカット: ショートカット行 + < (戻る) のみ
       this._shortcutRow.style.display = 'flex';
@@ -774,6 +828,10 @@ export class Toolbar {
       this._commandsRow.style.display = 'flex';
       this._switchFwdBtn.style.display = '';   // > → normal
       this._loadCommands();
+    } else if (mode === 'claude') {
+      // Claude: Claude 行 + > (戻る) のみ
+      this._claudeRow.style.display = 'flex';
+      this._switchFwdBtn.style.display = '';   // > → normal
     }
   }
 
@@ -888,6 +946,19 @@ export class Toolbar {
     if (this._currentSession !== session) {
       this._currentSession = session;
       this._commandsCache = null;
+    }
+  }
+
+  /**
+   * Claude ウィンドウかどうかを設定する。
+   * Claude ウィンドウの場合、コマンドモードの代わりに Claude モードを使用する。
+   * @param {boolean} isClaude
+   */
+  setClaudeWindow(isClaude) {
+    this._isClaudeWindow = isClaude;
+    // Claude モード表示中に非 Claude に切り替わったら normal に戻す
+    if (!isClaude && this._mode === 'claude') {
+      this._setMode('normal');
     }
   }
 
@@ -1137,6 +1208,7 @@ export class Toolbar {
     this._switchBackBtn = null;
     this._shortcutRow = null;
     this._commandsRow = null;
+    this._claudeRow = null;
     this._commandsCache = null;
     if (this._longPressTimer !== null) {
       clearTimeout(this._longPressTimer);

@@ -72,6 +72,18 @@
   right: 4px;
 }
 
+.tab-notification--claude {
+  background: #ff5722;
+  width: 8px;
+  height: 8px;
+  animation: notification-pulse 1.5s infinite;
+}
+
+@keyframes notification-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.3); }
+}
+
 .tab-add {
   color: #666;
   font-size: 18px;
