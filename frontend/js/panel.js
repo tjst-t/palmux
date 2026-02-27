@@ -731,6 +731,24 @@ export class Panel {
   // ───────── ツールバー ─────────
 
   /**
+   * Claude ウィンドウかどうかを設定する。
+   * アクティブなツールバーおよび全キャッシュ済みツールバーに伝播する。
+   * @param {boolean} isClaude
+   */
+  setClaudeWindow(isClaude) {
+    // アクティブなツールバーに反映
+    if (this._toolbar) {
+      this._toolbar.setClaudeWindow(isClaude);
+    }
+    // キャッシュ済みのツールバーにも反映
+    for (const [, tabState] of this._tabCache) {
+      if (tabState.toolbar && tabState.toolbar !== this._toolbar) {
+        tabState.toolbar.setClaudeWindow(isClaude);
+      }
+    }
+  }
+
+  /**
    * ツールバーの表示/非表示を切り替える。
    */
   toggleToolbar() {

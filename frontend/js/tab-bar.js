@@ -180,7 +180,7 @@ export class TabBar {
 
   /**
    * Show notification badges on tabs that have background activity.
-   * @param {Array<{session: string, window: number}>} notifications
+   * @param {Array<{session: string, window_index: number, type: string}>} notifications
    */
   setNotifications(notifications) {
     if (!this._scrollEl) return;
@@ -197,11 +197,15 @@ export class TabBar {
     // Add badge to matching terminal tabs
     for (const notif of current) {
       const tab = this._scrollEl.querySelector(
-        `.tab[data-type="terminal"][data-window="${notif.window}"]`
+        `.tab[data-type="terminal"][data-window="${notif.window_index}"]`
       );
       if (tab) {
         const badge = document.createElement('span');
         badge.className = 'tab-notification';
+        // Claude ウィンドウの通知は目立つスタイルにする
+        if (this._isClaudeCodeMode && tab.dataset.windowName === 'claude') {
+          badge.classList.add('tab-notification--claude');
+        }
         tab.appendChild(badge);
       }
     }
