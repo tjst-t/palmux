@@ -70,6 +70,12 @@ export class TouchHandler {
    * @param {TouchEvent} e
    */
   _onTouchStart(e) {
+    // ブラウザのデフォルト動作（フォーカス移動等）を抑制する。
+    // IME 入力フィールドにフォーカスがある場合、タッチでブラーが発生し
+    // キーボード非表示→ビューポートリサイズ→レイアウト変更が起き、
+    // スワイプ中の座標がずれてスクロールジェスチャーが効かなくなるのを防ぐ。
+    e.preventDefault();
+
     // 選択中に新たにタッチした場合は選択モードを解除
     if (this._selecting) {
       this._selecting = false;
