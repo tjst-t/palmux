@@ -49,10 +49,11 @@ type StatusResult struct {
 
 // LogEntry はコミットログの1エントリを表す。
 type LogEntry struct {
-	Hash       string `json:"hash"`
-	AuthorName string `json:"author_name"`
-	Date       string `json:"date"`
-	Subject    string `json:"subject"`
+	Hash       string   `json:"hash"`
+	AuthorName string   `json:"author_name"`
+	Date       string   `json:"date"`
+	Subject    string   `json:"subject"`
+	Refs       []string `json:"refs,omitempty"`
 }
 
 // Branch はブランチ情報を表す。
@@ -81,7 +82,7 @@ func (g *Git) Log(dir, branch string, limit int) ([]LogEntry, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	args := []string{"log", "--pretty=format:%h\t%an\t%aI\t%s", "-n", strconv.Itoa(limit)}
+	args := []string{"log", "--pretty=format:%h\t%an\t%aI\t%s\t%D", "-n", strconv.Itoa(limit)}
 	if branch != "" {
 		args = append(args, branch)
 	}
