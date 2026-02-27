@@ -179,6 +179,7 @@ export class Panel {
     const tabState = this._tabCache.get(tabKey);
     this._showTab(tabState);
     this._activeTabKey = tabKey;
+    this._saveLastTab();
 
     // Panel の公開参照を更新
     if (tabState.type === 'terminal') {
@@ -765,6 +766,28 @@ export class Panel {
   }
 
   // ───────── 内部ユーティリティ ─────────
+
+  /**
+   * アクティブタブ種別を localStorage に保存する。
+   */
+  _saveLastTab() {
+    if (!this.session || !this._activeTabKey) return;
+    try {
+      const type = this._activeTabKey.startsWith('terminal:') ? 'terminal' : this._activeTabKey;
+      localStorage.setItem(`palmux-last-tab-${this.session}`, type);
+    } catch { /* ignore */ }
+  }
+
+  /**
+   * 指定セッションの最後のアクティブタブ種別を返す。
+   * @param {string} sessionName
+   * @returns {string|null}
+   */
+  static getLastTab(sessionName) {
+    try {
+      return localStorage.getItem(`palmux-last-tab-${sessionName}`);
+    } catch { return null; }
+  }
 
   /**
    * ツールバー状態を globalUIState に保存する。

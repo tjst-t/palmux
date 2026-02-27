@@ -6,6 +6,7 @@
 import { listSessions, listWindows, listNotifications, deleteNotification, getSessionMode, createWindow, deleteWindow, renameWindow, restartClaudeWindow } from './api.js';
 import { Drawer } from './drawer.js';
 import { PanelManager } from './panel-manager.js';
+import { Panel } from './panel.js';
 import { TabBar } from './tab-bar.js';
 
 /** @type {Drawer|null} */
@@ -409,6 +410,20 @@ function switchWindow(sessionName, windowIndex) {
 }
 
 /**
+ * 保存されたタブ種別を復元する。files/git なら切り替え、terminal は何もしない。
+ * @param {string} sessionName - セッション名
+ */
+function _restoreLastTab(sessionName) {
+  const saved = Panel.getLastTab(sessionName);
+  if (!saved || saved === 'terminal') return;
+  if (saved === 'files') {
+    showFileBrowser(sessionName, { push: false });
+  } else if (saved === 'git') {
+    showGitBrowser(sessionName, { push: false });
+  }
+}
+
+/**
  * 別セッションに切り替える（WebSocket 再接続）。
  * @param {string} sessionName - セッション名
  * @param {number} windowIndex - ウィンドウインデックス
@@ -418,12 +433,14 @@ async function switchSession(sessionName, windowIndex) {
     const mode = await getSessionMode(sessionName);
     if (mode && mode.claude_code && mode.claude_window >= 0) {
       connectToWindow(sessionName, mode.claude_window);
+      _restoreLastTab(sessionName);
       return;
     }
   } catch {
     // ignore — フォールバックで指定ウィンドウに接続
   }
   connectToWindow(sessionName, windowIndex);
+  _restoreLastTab(sessionName);
 }
 
 /**
@@ -1030,12 +1047,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const mode = await getSessionMode(sessionName);
         if (mode && mode.claude_code && mode.claude_window >= 0) {
           connectToWindow(sessionName, mode.claude_window);
+          _restoreLastTab(sessionName);
           return;
         }
       } catch {
         // ignore
       }
       connectToWindow(sessionName, 0);
+      _restoreLastTab(sessionName);
     },
     onDeleteSession: () => {
       showSessionList({ replace: true });
@@ -1278,8 +1297,19 @@ async function autoConnect() {
       return;
     }
 
+    // Claude Code モードなら claude ウィンドウに優先接続
+    try {
+      const mode = await getSessionMode(latest.name);
+      if (mode && mode.claude_code && mode.claude_window >= 0) {
+        connectToWindow(latest.name, mode.claude_window, { replace: true });
+        _restoreLastTab(latest.name);
+        return;
+      }
+    } catch { /* ignore */ }
+
     const activeWindow = windows.find((w) => w.active) || windows[0];
     connectToWindow(latest.name, activeWindow.index, { replace: true });
+    _restoreLastTab(latest.name);
   } catch (err) {
     console.error('Auto-connect failed, showing session list:', err);
     showSessionList({ replace: true });
