@@ -26,6 +26,54 @@ const globalUIState = {
   altState: 'off',
 };
 
+/** @type {Set<string>} 前回の通知キー Set（新規通知検出用） */
+let _prevNotificationKeys = new Set();
+
+/**
+ * Claude ウィンドウの新規通知を検出し、バイブレーションとブラウザ通知を送る。
+ * @param {Array<{session: string, window_index: number, type: string}>} notifications
+ */
+function _checkClaudeNotificationHaptic(notifications) {
+  const currentKeys = new Set();
+  const claudeNotifications = [];
+
+  for (const n of notifications) {
+    const key = `${n.session}:${n.window_index}`;
+    currentKeys.add(key);
+    // 新しい通知かつ Claude ウィンドウ名の判定（window name は通知には含まれないため、
+    // tabBar の情報を使って判定する）
+    if (!_prevNotificationKeys.has(key)) {
+      claudeNotifications.push(n);
+    }
+  }
+
+  _prevNotificationKeys = currentKeys;
+
+  if (claudeNotifications.length === 0) return;
+
+  // tabBar のウィンドウ情報から Claude ウィンドウかを判定
+  const hasNewClaudeNotif = tabBar && tabBar._isClaudeCodeMode &&
+    claudeNotifications.some(n => {
+      if (n.session !== tabBar._sessionName) return false;
+      return tabBar._windows.some(w => w.index === n.window_index && w.name === 'claude');
+    });
+
+  if (!hasNewClaudeNotif) return;
+
+  // バイブレーション
+  if (navigator.vibrate) {
+    navigator.vibrate([50, 100, 50]);
+  }
+
+  // ページ非表示時にブラウザ通知を送る
+  if (document.hidden && Notification.permission === 'granted') {
+    new Notification('Claude Code', {
+      body: 'Waiting for approval',
+      tag: 'palmux-claude-approval',
+    });
+  }
+}
+
 /**
  * パネルの状態を URL フラグメントに変換する。
  * @param {import('./panel.js').Panel} panel
@@ -609,6 +657,14 @@ async function _refreshTabBar(sessionName, activeTab) {
     tabBar.setWindows(sessionName, windows, isClaudeCodeMode);
     tabBar.setActiveTab(activeTab);
     tabBar.scrollToActive();
+
+    // アクティブタブが Claude ウィンドウかを判定してパネルに伝播
+    if (panelManager) {
+      const isClaudeTab = isClaudeCodeMode &&
+        activeTab.type === 'terminal' &&
+        windows.some(w => w.index === activeTab.windowIndex && w.name === 'claude');
+      panelManager.getFocusedPanel().setClaudeWindow(isClaudeTab);
+    }
   } catch (err) {
     console.error('Failed to refresh tab bar:', err);
   }
@@ -749,10 +805,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (type === 'terminal') {
         connectToWindow(currentSession, windowIndex);
+        // Claude ウィンドウかを判定してパネルに伝播
+        const isClaudeTab = tabBar._isClaudeCodeMode &&
+          tabBar._windows.some(w => w.index === windowIndex && w.name === 'claude');
+        panelManager.getFocusedPanel().setClaudeWindow(isClaudeTab);
       } else if (type === 'files') {
         showFileBrowser(currentSession);
+        panelManager.getFocusedPanel().setClaudeWindow(false);
       } else if (type === 'git') {
         showGitBrowser(currentSession);
+        panelManager.getFocusedPanel().setClaudeWindow(false);
       }
     },
     onCreateWindow: async () => {
@@ -1009,6 +1071,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (tabBar) {
         tabBar.setNotifications(notifications);
       }
+      _checkClaudeNotificationHaptic(notifications);
     },
     onConnectionStateChange: (state) => {
       updateConnectionUI(state);
@@ -1144,6 +1207,17 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // ブラウザ通知の権限リクエスト（初回ユーザー操作時）
+  if ('Notification' in window && Notification.permission === 'default') {
+    const requestNotificationPermission = () => {
+      Notification.requestPermission();
+      document.removeEventListener('click', requestNotificationPermission);
+      document.removeEventListener('touchstart', requestNotificationPermission);
+    };
+    document.addEventListener('click', requestNotificationPermission, { once: true });
+    document.addEventListener('touchstart', requestNotificationPermission, { once: true });
+  }
+
   // Visual Viewport API: ソフトキーボード表示時にビューポートを追従
   const appEl = document.getElementById('app');
   if (window.visualViewport && appEl) {
@@ -1250,11 +1324,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 初期通知を取得してドロワーに反映
+  // 初期通知を取得してドロワーとタブバーに反映
   listNotifications()
     .then((notifications) => {
       if (drawer && notifications) {
         drawer.setNotifications(notifications);
+      }
+      if (tabBar && notifications) {
+        tabBar.setNotifications(notifications);
       }
     })
     .catch((err) => {

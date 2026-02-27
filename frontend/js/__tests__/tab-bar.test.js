@@ -444,7 +444,7 @@ describe('TabBar', () => {
         makeWindow(1, 'vim'),
       ], false);
 
-      bar.setNotifications([{ session: 'main', window: 1 }]);
+      bar.setNotifications([{ session: 'main', window_index: 1 }]);
 
       const termTabs = container.querySelectorAll('.tab[data-type="terminal"]');
       expect(termTabs[0].querySelector('.tab-notification')).toBeNull();
@@ -458,7 +458,7 @@ describe('TabBar', () => {
         makeWindow(1, 'vim'),
       ], false);
 
-      bar.setNotifications([{ session: 'other', window: 1 }]);
+      bar.setNotifications([{ session: 'other', window_index: 1 }]);
 
       const badges = container.querySelectorAll('.tab-notification');
       expect(badges.length).toBe(0);
@@ -471,7 +471,7 @@ describe('TabBar', () => {
         makeWindow(1, 'vim'),
       ], false);
 
-      bar.setNotifications([{ session: 'main', window: 0 }]);
+      bar.setNotifications([{ session: 'main', window_index: 0 }]);
       expect(container.querySelectorAll('.tab-notification').length).toBe(1);
 
       bar.setNotifications([]);
@@ -487,11 +487,66 @@ describe('TabBar', () => {
       ], false);
 
       bar.setNotifications([
-        { session: 'main', window: 0 },
-        { session: 'main', window: 2 },
+        { session: 'main', window_index: 0 },
+        { session: 'main', window_index: 2 },
       ]);
 
       expect(container.querySelectorAll('.tab-notification').length).toBe(2);
+    });
+
+    it('adds tab-notification--claude class to claude window badge in Claude Code mode', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [
+        makeWindow(0, 'zsh'),
+        makeWindow(1, 'claude'),
+      ], true);
+
+      bar.setNotifications([
+        { session: 'main', window_index: 0 },
+        { session: 'main', window_index: 1 },
+      ]);
+
+      // zsh tab: normal badge (no --claude class)
+      const zshTab = container.querySelector('.tab[data-type="terminal"][data-window="0"]');
+      const zshBadge = zshTab.querySelector('.tab-notification');
+      expect(zshBadge).not.toBeNull();
+      expect(zshBadge.classList.contains('tab-notification--claude')).toBe(false);
+
+      // claude tab: claude badge
+      const claudeTab = container.querySelector('.tab[data-type="terminal"][data-window="1"]');
+      const claudeBadge = claudeTab.querySelector('.tab-notification');
+      expect(claudeBadge).not.toBeNull();
+      expect(claudeBadge.classList.contains('tab-notification--claude')).toBe(true);
+    });
+
+    it('does not add tab-notification--claude when not in Claude Code mode', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [
+        makeWindow(0, 'zsh'),
+        makeWindow(1, 'claude'),
+      ], false);
+
+      bar.setNotifications([{ session: 'main', window_index: 1 }]);
+
+      const claudeTab = container.querySelector('.tab[data-type="terminal"][data-window="1"]');
+      const badge = claudeTab.querySelector('.tab-notification');
+      expect(badge).not.toBeNull();
+      expect(badge.classList.contains('tab-notification--claude')).toBe(false);
+    });
+
+    it('does not add tab-notification--claude to non-claude windows in Claude Code mode', () => {
+      const bar = new TabBar({ container, onTabSelect });
+      bar.setWindows('main', [
+        makeWindow(0, 'zsh'),
+        makeWindow(1, 'claude'),
+      ], true);
+
+      bar.setNotifications([{ session: 'main', window_index: 0 }]);
+
+      const zshTab = container.querySelector('.tab[data-type="terminal"][data-window="0"]');
+      const badge = zshTab.querySelector('.tab-notification');
+      expect(badge).not.toBeNull();
+      expect(badge.classList.contains('tab-notification--claude')).toBe(false);
     });
   });
 
