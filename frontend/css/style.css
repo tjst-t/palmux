@@ -377,8 +377,8 @@ html, body {
   flex-shrink: 0;
   background: #16213e;
   border-top: 1px solid #2a2a4a;
-  /* 右端の > ボタン分を右パディングで確保: 22px(ボタン) + 4px(gap) + 4px(元padding) */
-  padding: 6px 30px 6px 4px;
+  /* 両端の < > ボタン分（各 26px）をパディングで確保 */
+  padding: 6px 30px;
   user-select: none;
   -webkit-user-select: none;
   position: relative;
