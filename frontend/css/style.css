@@ -591,6 +591,75 @@ html, body {
   white-space: nowrap;
 }
 
+/* Claude toolbar mode */
+.toolbar-claude-row {
+  display: none;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 30px 2px 0;
+}
+
+.toolbar-claude-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.toolbar-claude-btn {
+  flex: 1;
+  min-height: 40px;
+  padding: 6px 8px;
+  background: #1a1a2e;
+  border: 1px solid #3a3a5a;
+  border-radius: 6px;
+  color: #d4a0ff;
+  font-size: 14px;
+  font-family: monospace;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.toolbar-claude-btn:active {
+  background: #2e1a4a;
+  border-color: #d4a0ff;
+  color: #e8c8ff;
+}
+
+.toolbar-claude-commands {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+
+.toolbar-claude-commands::-webkit-scrollbar {
+  display: none;
+}
+
+.toolbar-claude-slash-btn {
+  flex-shrink: 0;
+  min-height: 34px;
+  padding: 4px 10px;
+  background: #1a0a2e;
+  border: 1px solid #4a2a6e;
+  border-radius: 6px;
+  color: #b388ff;
+  font-size: 13px;
+  font-family: monospace;
+  cursor: pointer;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.toolbar-claude-slash-btn:active {
+  background: #2e1a4a;
+  color: #d4a0ff;
+}
+
 /* Drawer Overlay */
 .drawer-overlay {
   position: fixed;
