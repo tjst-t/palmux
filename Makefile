@@ -7,6 +7,7 @@ LDFLAGS := -X main.version=$(VERSION)
 all: build-linux
 
 frontend:
+	cd frontend && npm install --silent
 	cd frontend && npx esbuild js/app.js \
 	  --bundle --minify --outdir=build
 	cp frontend/index.html frontend/build/
