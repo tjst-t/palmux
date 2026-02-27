@@ -377,8 +377,17 @@ export class Drawer {
     this._content.innerHTML = '<div class="drawer-loading">Loading...</div>';
 
     try {
-      const [sessions, repos] = await Promise.all([listSessions(), listGhqRepos()]);
+      const fetches = [listSessions(), listGhqRepos()];
+      // 展開予定のプロジェクトの worktree も同時に取得（デフォルトブランチ名解決用）
+      const expandedProject = [...this._expandedProjects][0] || null;
+      if (expandedProject && !this._projectWorktrees.has(expandedProject)) {
+        fetches.push(listProjectWorktrees(expandedProject));
+      }
+      const [sessions, repos, worktrees] = await Promise.all(fetches);
       this._sessions = sessions || [];
+      if (expandedProject && worktrees && worktrees.length > 0) {
+        this._projectWorktrees.set(expandedProject, worktrees);
+      }
       this._groupSessionsByProject(this._sessions, repos || []);
       this._renderContent();
       this._startRefreshPolling();
@@ -433,9 +442,16 @@ export class Drawer {
       const { repo } = parseSessionName(session);
       this._expandedProjects.clear();
       this._expandedProjects.add(repo);
-      // Reload sessions
-      Promise.all([listSessions(), listGhqRepos()]).then(([sessions, repos]) => {
+      // Reload sessions + worktree（デフォルトブランチ名解決用）
+      const fetches = [listSessions(), listGhqRepos()];
+      if (!this._projectWorktrees.has(repo)) {
+        fetches.push(listProjectWorktrees(repo));
+      }
+      Promise.all(fetches).then(([sessions, repos, worktrees]) => {
         this._sessions = sessions || [];
+        if (worktrees && worktrees.length > 0) {
+          this._projectWorktrees.set(repo, worktrees);
+        }
         this._groupSessionsByProject(this._sessions, repos || []);
         this._renderContent();
       }).catch(() => this._renderContent());
