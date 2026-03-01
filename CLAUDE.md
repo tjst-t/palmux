@@ -182,8 +182,7 @@ go test -v -run TestParseSession # 特定テスト
   https://raw.githubusercontent.com/tjst-t/port-manager/main/docs/CLAUDE_INTEGRATION.md
 
 ```bash
-make serve                       # portman 経由でサーバー起動（フォアグラウンド）
-./dev-serve.sh                   # portman 経由でバックグラウンド起動（nohup + PID 管理）
+make serve                       # portman 経由でサーバー起動
 ```
 
 ## ビルド
