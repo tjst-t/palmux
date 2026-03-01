@@ -658,6 +658,18 @@ export class PalmuxTerminal {
   _globalKeyHandler(e) {
     if (!this._term || !this._ws) return;
 
+    // 入力フィールドにフォーカスがある場合はブラウザネイティブの動作に委譲する。
+    // Ctrl-V/Z/A/X/C 等がターミナルに奪われるのを防ぐ。
+    const active = document.activeElement;
+    if (active && (
+      active.tagName === 'INPUT' ||
+      active.tagName === 'TEXTAREA' ||
+      active.tagName === 'SELECT' ||
+      active.isContentEditable
+    )) {
+      return;
+    }
+
     // ブラウザ DevTools は許可
     if (e.key === 'F12') return;
     if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J')) return;
