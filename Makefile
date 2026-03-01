@@ -2,7 +2,7 @@ GO ?= $(shell which go 2>/dev/null || echo /usr/local/go/bin/go)
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: all build frontend build-linux build-arm test clean
+.PHONY: all build frontend build-linux build-arm test clean serve
 
 all: build-linux
 
@@ -34,6 +34,9 @@ build-arm: frontend
 
 test:
 	$(GO) test ./...
+
+serve: build
+	portman exec --name palmux --expose -- ./palmux --host 0.0.0.0 --port {}
 
 clean:
 	rm -rf frontend/build palmux palmux-linux-amd64 palmux-linux-arm64

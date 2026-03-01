@@ -175,6 +175,17 @@ go test -v -run TestParseSession # 特定テスト
 - フロントエンドへは `<meta name="base-path">` タグで注入
 - テストでは `/`, `/palmux/`, `/deep/nested/path/` 等の複数パターンを検証
 
+## サーバー起動
+
+- テストサーバーは `make serve` で起動すること。ポート番号を直接指定してはいけない。
+- サーバー起動スクリプトを作成・変更する場合は、portman ガイドを参照すること:
+  https://raw.githubusercontent.com/tjst-t/port-manager/main/docs/CLAUDE_INTEGRATION.md
+
+```bash
+make serve                       # portman 経由でサーバー起動（フォアグラウンド）
+./dev-serve.sh                   # portman 経由でバックグラウンド起動（nohup + PID 管理）
+```
+
 ## ビルド
 
 ```bash
