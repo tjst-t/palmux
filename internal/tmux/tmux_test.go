@@ -1292,10 +1292,11 @@ func TestManager_IsGhqSession(t *testing.T) {
 }
 
 func TestManager_EnsureClaudeWindow(t *testing.T) {
-	t.Run("既存の claude ウィンドウがある場合: 作成しない", func(t *testing.T) {
+	t.Run("既存の claude ウィンドウで claude が動いている場合: そのまま返す", func(t *testing.T) {
 		mock := &sequentialMockExecutor{
 			calls: []mockCall{
 				{output: []byte("0\tbash\t1\n1\tclaude\t0\n")}, // ListWindows
+				{output: []byte("claude\n")},                    // GetPaneCommand
 			},
 		}
 		m := &Manager{Exec: mock}
@@ -1310,8 +1311,51 @@ func TestManager_EnsureClaudeWindow(t *testing.T) {
 		if win.Name != "claude" {
 			t.Errorf("window.Name = %q, want %q", win.Name, "claude")
 		}
-		if mock.callIdx != 1 {
-			t.Errorf("expected 1 call (ListWindows only), got %d", mock.callIdx)
+		if mock.callIdx != 2 {
+			t.Errorf("expected 2 calls (ListWindows + GetPaneCommand), got %d", mock.callIdx)
+		}
+	})
+
+	t.Run("既存の claude ウィンドウでシェルが動いている場合: 再作成する", func(t *testing.T) {
+		mock := &sequentialMockExecutor{
+			calls: []mockCall{
+				{output: []byte("0\tbash\t1\n1\tclaude\t0\n")},   // ListWindows (EnsureClaudeWindow)
+				{output: []byte("bash\n")},                        // GetPaneCommand → シェル
+				{output: []byte("0\tbash\t1\n1\tclaude\t0\n")},   // ListWindows (ReplaceClaudeWindow)
+				{output: nil, err: nil},                           // SendKeys (C-c)
+				{output: nil, err: nil},                           // KillWindow
+				{output: []byte("2\tclaude\t1\n")},                // NewWindow
+			},
+		}
+		m := &Manager{Exec: mock}
+
+		win, err := m.EnsureClaudeWindow("palmux", "claude")
+		if err != nil {
+			t.Fatalf("EnsureClaudeWindow() unexpected error: %v", err)
+		}
+		if win.Index != 2 {
+			t.Errorf("window.Index = %d, want 2", win.Index)
+		}
+		if win.Name != "claude" {
+			t.Errorf("window.Name = %q, want %q", win.Name, "claude")
+		}
+	})
+
+	t.Run("GetPaneCommand エラーの場合: 既存ウィンドウをそのまま返す", func(t *testing.T) {
+		mock := &sequentialMockExecutor{
+			calls: []mockCall{
+				{output: []byte("0\tbash\t1\n1\tclaude\t0\n")},    // ListWindows
+				{err: errors.New("display-message failed")},        // GetPaneCommand エラー
+			},
+		}
+		m := &Manager{Exec: mock}
+
+		win, err := m.EnsureClaudeWindow("palmux", "claude")
+		if err != nil {
+			t.Fatalf("EnsureClaudeWindow() unexpected error: %v", err)
+		}
+		if win.Index != 1 {
+			t.Errorf("window.Index = %d, want 1", win.Index)
 		}
 	})
 
@@ -1367,6 +1411,35 @@ func TestManager_EnsureClaudeWindow(t *testing.T) {
 			t.Fatal("EnsureClaudeWindow() expected error, got nil")
 		}
 	})
+}
+
+func TestIsShellCommand(t *testing.T) {
+	tests := []struct {
+		cmd  string
+		want bool
+	}{
+		{"bash", true},
+		{"zsh", true},
+		{"sh", true},
+		{"fish", true},
+		{"dash", true},
+		{"ksh", true},
+		{"tcsh", true},
+		{"csh", true},
+		{"claude", false},
+		{"node", false},
+		{"python", false},
+		{"vim", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.cmd, func(t *testing.T) {
+			got := isShellCommand(tt.cmd)
+			if got != tt.want {
+				t.Errorf("isShellCommand(%q) = %v, want %v", tt.cmd, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestManager_ReplaceClaudeWindow(t *testing.T) {
