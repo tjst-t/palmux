@@ -485,6 +485,52 @@ export class Panel {
   }
 
   /**
+   * 指定ウィンドウインデックスのターミナルタブをキャッシュから破棄・削除する。
+   * ウィンドウ削除時に呼び出し、同一インデックスで新規作成されたウィンドウが
+   * 古いキャッシュエントリを使わないようにする。
+   * @param {number} windowIdx
+   */
+  removeTerminalTab(windowIdx) {
+    const tabKey = `terminal:${windowIdx}`;
+    const tabState = this._tabCache.get(tabKey);
+    if (!tabState) return;
+
+    // アクティブタブの場合は参照をクリア
+    if (this._activeTabKey === tabKey) {
+      this._activeTabKey = null;
+      if (tabState.type === 'terminal') {
+        this._terminal = null;
+        this._toolbar = null;
+        this._imeInput = null;
+        this._touchHandler = null;
+        this._connectionManager = null;
+      }
+    }
+
+    this._destroyTabState(tabState);
+    this._tabCache.delete(tabKey);
+  }
+
+  /**
+   * 現在のウィンドウ一覧に存在しないターミナルタブをキャッシュから破棄する。
+   * tmux の renumber-windows 等でインデックスが変わった場合に古い接続を掃除する。
+   * @param {Array<{index: number}>} windows - 現在のウィンドウ一覧
+   */
+  pruneTerminalTabs(windows) {
+    const validIndices = new Set(windows.map(w => w.index));
+    const staleKeys = [];
+    for (const [tabKey, tabState] of this._tabCache) {
+      if (tabState.type !== 'terminal') continue;
+      if (!validIndices.has(tabState.windowIndex)) {
+        staleKeys.push(tabKey);
+      }
+    }
+    for (const tabKey of staleKeys) {
+      this.removeTerminalTab(parseInt(tabKey.split(':')[1], 10));
+    }
+  }
+
+  /**
    * 全タブの WebSocket 切断・ターミナル破棄・DOM 削除を行う。
    */
   clearTabCache() {
