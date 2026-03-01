@@ -395,8 +395,31 @@ func (m *Manager) ReplaceClaudeWindow(session, name, command string) (*Window, e
 	return win, nil
 }
 
-// EnsureClaudeWindow は ghq セッションに "claude" ウィンドウが存在することを保証する。
-// 既に存在すればそのウィンドウを返し、なければ新規作成する。
+// GetPaneCommand は指定セッション・ウィンドウの pane で実行中のコマンド名を返す。
+func (m *Manager) GetPaneCommand(session string, windowIndex int) (string, error) {
+	target := fmt.Sprintf("%s:%d", session, windowIndex)
+	out, err := m.Exec.Run("display-message", "-p", "-t", target, "#{pane_current_command}")
+	if err != nil {
+		return "", fmt.Errorf("get pane command: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// isShellCommand はコマンド名が一般的なシェルかどうかを判定する。
+func isShellCommand(cmd string) bool {
+	switch cmd {
+	case "bash", "zsh", "sh", "fish", "dash", "ksh", "tcsh", "csh":
+		return true
+	}
+	return false
+}
+
+// EnsureClaudeWindow は ghq セッションに "claude" ウィンドウが存在し、
+// claude プロセスが実行中であることを保証する。
+// ウィンドウが存在しなければ新規作成する。
+// ウィンドウは存在するがシェル（bash/zsh 等）のみ動いている場合は
+// ウィンドウを再作成して claude を起動する。
+// （サーバー再起動・tmux-resurrect 等でプロセスが失われるケースに対応）
 func (m *Manager) EnsureClaudeWindow(session, claudePath string) (*Window, error) {
 	windows, err := m.ListWindows(session)
 	if err != nil {
@@ -405,6 +428,16 @@ func (m *Manager) EnsureClaudeWindow(session, claudePath string) (*Window, error
 
 	for i := range windows {
 		if windows[i].Name == "claude" {
+			// claude プロセスが動いているか確認する。
+			// シェルのみの場合はウィンドウを再作成して claude を起動する。
+			cmd, err := m.GetPaneCommand(session, windows[i].Index)
+			if err == nil && isShellCommand(cmd) {
+				win, err := m.ReplaceClaudeWindow(session, "claude", claudePath)
+				if err != nil {
+					return nil, fmt.Errorf("ensure claude window: %w", err)
+				}
+				return win, nil
+			}
 			return &windows[i], nil
 		}
 	}
