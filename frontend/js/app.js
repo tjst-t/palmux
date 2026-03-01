@@ -658,6 +658,17 @@ async function _refreshTabBar(sessionName, activeTab) {
     tabBar.setActiveTab(activeTab);
     tabBar.scrollToActive();
 
+    // 存在しないウィンドウの古いタブキャッシュを破棄する。
+    // tmux の renumber-windows 等でインデックスが変わった場合に
+    // 古い接続が残り、新規ウィンドウが別の内容を表示するバグを防ぐ。
+    if (panelManager) {
+      panelManager.getFocusedPanel().pruneTerminalTabs(windows);
+      const rightPanel = panelManager.getRightPanel();
+      if (rightPanel) {
+        rightPanel.pruneTerminalTabs(windows);
+      }
+    }
+
     // アクティブタブが Claude ウィンドウかを判定してパネルに伝播
     if (panelManager) {
       const isClaudeTab = isClaudeCodeMode &&
@@ -1004,6 +1015,17 @@ document.addEventListener('DOMContentLoaded', () => {
       await deleteWindow(sessionName, windowIndex);
 
       const currentWindowIndex = panelManager?.getCurrentWindowIndex();
+
+      // 削除されたウィンドウのキャッシュエントリを破棄する。
+      // tmux はウィンドウ削除時にインデックスを再利用するため（renumber-windows 等）、
+      // 古いキャッシュが残ると新規ウィンドウが別のウィンドウの内容を表示するバグになる。
+      if (panelManager) {
+        panelManager.getFocusedPanel().removeTerminalTab(windowIndex);
+        const rightPanel = panelManager.getRightPanel();
+        if (rightPanel) {
+          rightPanel.removeTerminalTab(windowIndex);
+        }
+      }
 
       // If deleted window was the current one, switch to another
       if (currentWindowIndex === windowIndex) {
