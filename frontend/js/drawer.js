@@ -381,7 +381,7 @@ export class Drawer {
       // 展開予定のプロジェクトの worktree も同時に取得（デフォルトブランチ名解決用）
       const expandedProject = [...this._expandedProjects][0] || null;
       if (expandedProject && !this._projectWorktrees.has(expandedProject)) {
-        fetches.push(listProjectWorktrees(expandedProject));
+        fetches.push(listProjectWorktrees(expandedProject).catch(() => null));
       }
       const [sessions, repos, worktrees] = await Promise.all(fetches);
       this._sessions = sessions || [];
@@ -445,7 +445,7 @@ export class Drawer {
       // Reload sessions + worktree（デフォルトブランチ名解決用）
       const fetches = [listSessions(), listGhqRepos()];
       if (!this._projectWorktrees.has(repo)) {
-        fetches.push(listProjectWorktrees(repo));
+        fetches.push(listProjectWorktrees(repo).catch(() => null));
       }
       Promise.all(fetches).then(([sessions, repos, worktrees]) => {
         this._sessions = sessions || [];
@@ -522,7 +522,7 @@ export class Drawer {
         // 展開中プロジェクトの worktree キャッシュも更新
         const expandedProject = [...this._expandedProjects][0] || null;
         if (expandedProject) {
-          fetches.push(listProjectWorktrees(expandedProject));
+          fetches.push(listProjectWorktrees(expandedProject).catch(() => null));
         }
         const [sessions, repos, worktrees] = await Promise.all(fetches);
         if (expandedProject && worktrees && worktrees.length > 0) {
