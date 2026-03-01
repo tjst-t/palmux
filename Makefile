@@ -35,8 +35,27 @@ build-arm: frontend
 test:
 	$(GO) test ./...
 
+PID_FILE := /tmp/palmux-dev.pid
+LOG_FILE := /tmp/palmux-dev.log
+PORTMAN_ENV := /tmp/palmux-portman.env
+
 serve: build
-	portman exec --name palmux --expose -- ./palmux --host 0.0.0.0 --port {}
+	@if [ -f $(PID_FILE) ]; then \
+	  OLD_PID=$$(cat $(PID_FILE)); \
+	  if kill -0 $$OLD_PID 2>/dev/null; then \
+	    echo "==> Killing previous palmux (PID: $$OLD_PID)..."; \
+	    kill $$OLD_PID; \
+	    for i in $$(seq 1 50); do kill -0 $$OLD_PID 2>/dev/null || break; sleep 0.1; done; \
+	    kill -0 $$OLD_PID 2>/dev/null && kill -9 $$OLD_PID 2>/dev/null || true; \
+	  fi; \
+	  rm -f $(PID_FILE); \
+	fi
+	@portman env --name palmux --expose --output $(PORTMAN_ENV)
+	@. $(PORTMAN_ENV) && \
+	  echo "==> Starting Palmux on port $$PALMUX_PORT (log: $(LOG_FILE))" && \
+	  nohup ./palmux --host 0.0.0.0 --port $$PALMUX_PORT > $(LOG_FILE) 2>&1 & \
+	  echo $$! > $(PID_FILE) && \
+	  echo "    PID: $$(cat $(PID_FILE))"
 
 clean:
 	rm -rf frontend/build palmux palmux-linux-amd64 palmux-linux-arm64
