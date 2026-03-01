@@ -70,11 +70,15 @@ export class TouchHandler {
    * @param {TouchEvent} e
    */
   _onTouchStart(e) {
-    // ブラウザのデフォルト動作（フォーカス移動等）を抑制する。
-    // IME 入力フィールドにフォーカスがある場合、タッチでブラーが発生し
-    // キーボード非表示→ビューポートリサイズ→レイアウト変更が起き、
-    // スワイプ中の座標がずれてスクロールジェスチャーが効かなくなるのを防ぐ。
-    e.preventDefault();
+    // ソフトキーボードが表示されている状態でタッチすると、ブラウザがフォーカスを
+    // 移動→キーボード非表示→ビューポートリサイズ→レイアウト変更が起き、
+    // スワイプ中の座標がずれてスクロールジェスチャーが効かなくなる。
+    // これを防ぐため、ソフトキーボードが表示されている場合のみ preventDefault する。
+    // 無条件に呼ぶと xterm.js のポインタイベント処理に干渉し、
+    // tmux のマウスモード（コピーモード等）が動作しなくなる。
+    if (this._shouldPreventTouchDefault()) {
+      e.preventDefault();
+    }
 
     // 選択中に新たにタッチした場合は選択モードを解除
     if (this._selecting) {
@@ -294,6 +298,26 @@ export class TouchHandler {
     while (end < text.length && test(text[end])) end++;
 
     return { start, end };
+  }
+
+  // --- デフォルト動作抑制判定 ---
+
+  /**
+   * touchstart で preventDefault を呼ぶべきかを判定する。
+   * ソフトキーボードが表示されている場合（input/textarea にフォーカスがあり、
+   * inputmode が 'none' 以外）のみ true を返す。
+   * キーボード非表示中や xterm.js のマウスモード使用中は false を返し、
+   * ポインタイベントの正常な伝播を保証する。
+   * @returns {boolean}
+   */
+  _shouldPreventTouchDefault() {
+    const active = document.activeElement;
+    if (!active) return false;
+    const tag = active.tagName;
+    if (tag !== 'INPUT' && tag !== 'TEXTAREA') return false;
+    // inputmode="none" はソフトキーボード非表示なのでリサイズの心配がない
+    const inputMode = active.getAttribute('inputmode');
+    return inputMode !== 'none';
   }
 
   // --- 既存ユーティリティ ---
