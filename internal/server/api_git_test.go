@@ -27,6 +27,12 @@ func (m *mockGitCommandRunner) RunInDir(dir string, args ...string) ([]byte, err
 	return m.output, m.err
 }
 
+func (m *mockGitCommandRunner) RunWithStdin(dir string, input []byte, args ...string) ([]byte, error) {
+	m.calledDir = dir
+	m.calledArgs = args
+	return m.output, m.err
+}
+
 // newTestServerWithGit はテスト用 Server を git モック付きで作成するヘルパー。
 func newTestServerWithGit(tmuxMock TmuxManager, gitMock git.CommandRunner) (*Server, string) {
 	const token = "test-token"

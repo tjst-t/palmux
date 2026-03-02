@@ -1,6 +1,10 @@
 package git
 
-import "strings"
+import (
+	"regexp"
+	"strconv"
+	"strings"
+)
 
 // statusCodeToText はステータスコードを人間が読みやすいテキストに変換する。
 func statusCodeToText(code string) string {
@@ -246,4 +250,158 @@ func ParseBranches(output string) []Branch {
 	}
 
 	return branches
+}
+
+// DiffHunk は diff の hunk（変更ブロック）を表す。
+type DiffHunk struct {
+	Header   string `json:"header"`    // "@@ -10,7 +10,8 @@ func main()"
+	OldStart int    `json:"old_start"` // 旧ファイルの開始行番号
+	OldLines int    `json:"old_lines"` // 旧ファイルの行数
+	NewStart int    `json:"new_start"` // 新ファイルの開始行番号
+	NewLines int    `json:"new_lines"` // 新ファイルの行数
+	Content  string `json:"content"`   // hunk の全行（ヘッダー行含む）
+}
+
+// StructuredDiff は構造化された差分を表す。
+type StructuredDiff struct {
+	FilePath string     `json:"file_path"`
+	Status   string     `json:"status"` // "M", "A", "D"
+	Hunks    []DiffHunk `json:"hunks"`
+}
+
+// hunkHeaderRe は @@ -old_start[,old_lines] +new_start[,new_lines] @@ にマッチする正規表現。
+var hunkHeaderRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$`)
+
+// ParseStructuredDiff は git diff の出力を構造化された差分にパースする。
+func ParseStructuredDiff(output string) []StructuredDiff {
+	diffs := []StructuredDiff{}
+	if output == "" {
+		return diffs
+	}
+
+	lines := strings.Split(output, "\n")
+	var current *StructuredDiff
+	var currentHunkLines []string
+
+	// finishHunk は現在の hunk を確定して current に追加する。
+	finishHunk := func() {
+		if current != nil && len(current.Hunks) > 0 && len(currentHunkLines) > 0 {
+			lastIdx := len(current.Hunks) - 1
+			current.Hunks[lastIdx].Content = strings.Join(currentHunkLines, "\n")
+			currentHunkLines = nil
+		}
+	}
+
+	// finishFile は現在のファイルを確定して diffs に追加する。
+	finishFile := func() {
+		finishHunk()
+		if current != nil {
+			diffs = append(diffs, *current)
+			current = nil
+		}
+	}
+
+	for _, line := range lines {
+		// 新しいファイルの開始
+		if strings.HasPrefix(line, "diff --git ") {
+			finishFile()
+			filePath := parseDiffGitHeader(line)
+			current = &StructuredDiff{
+				FilePath: filePath,
+				Status:   "M", // デフォルトは modified
+				Hunks:    []DiffHunk{},
+			}
+			continue
+		}
+
+		if current == nil {
+			continue
+		}
+
+		// ファイルステータスの判定
+		if strings.HasPrefix(line, "new file mode") {
+			current.Status = "A"
+			continue
+		}
+		if strings.HasPrefix(line, "deleted file mode") {
+			current.Status = "D"
+			continue
+		}
+
+		// --- と +++ 行（ステータス判定の補助）
+		if strings.HasPrefix(line, "--- ") {
+			if line == "--- /dev/null" && current.Status == "M" {
+				current.Status = "A"
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "+++ ") {
+			if line == "+++ /dev/null" && current.Status == "M" {
+				current.Status = "D"
+			}
+			continue
+		}
+
+		// index 行はスキップ
+		if strings.HasPrefix(line, "index ") {
+			continue
+		}
+
+		// hunk ヘッダー
+		if matches := hunkHeaderRe.FindStringSubmatch(line); matches != nil {
+			finishHunk()
+			oldStart, _ := strconv.Atoi(matches[1])
+			oldLines := 1
+			if matches[2] != "" {
+				oldLines, _ = strconv.Atoi(matches[2])
+			}
+			newStart, _ := strconv.Atoi(matches[3])
+			newLines := 1
+			if matches[4] != "" {
+				newLines, _ = strconv.Atoi(matches[4])
+			}
+
+			hunk := DiffHunk{
+				Header:   line,
+				OldStart: oldStart,
+				OldLines: oldLines,
+				NewStart: newStart,
+				NewLines: newLines,
+			}
+			current.Hunks = append(current.Hunks, hunk)
+			currentHunkLines = []string{line}
+			continue
+		}
+
+		// hunk 内の行（コンテキスト行、追加行、削除行）
+		if len(currentHunkLines) > 0 {
+			currentHunkLines = append(currentHunkLines, line)
+		}
+	}
+
+	// 最後のファイルを確定
+	finishFile()
+
+	return diffs
+}
+
+// parseDiffGitHeader は "diff --git a/path b/path" からファイルパスを抽出する。
+func parseDiffGitHeader(line string) string {
+	// "diff --git a/foo b/foo" → "foo"
+	// b/ の後のパスを使う
+	parts := strings.SplitN(line, " b/", 2)
+	if len(parts) == 2 {
+		return parts[1]
+	}
+	// フォールバック: a/ の後のパスを使う
+	parts = strings.SplitN(line, " a/", 2)
+	if len(parts) == 2 {
+		// "path b/path" から前の部分だけ取る
+		p := parts[1]
+		if idx := strings.Index(p, " b/"); idx >= 0 {
+			return p[:idx]
+		}
+		return p
+	}
+	return ""
 }

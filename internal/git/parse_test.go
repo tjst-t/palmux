@@ -2,6 +2,7 @@ package git
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -330,6 +331,265 @@ func TestParseBranches(t *testing.T) {
 			branches := ParseBranches(tt.input)
 			if len(branches) != tt.wantCount {
 				t.Errorf("len(branches) = %d, want %d", len(branches), tt.wantCount)
+			}
+		})
+	}
+}
+
+func TestParseStructuredDiff(t *testing.T) {
+	input := readTestdata(t, "diff_single_hunk.txt")
+	diffs := ParseStructuredDiff(input)
+
+	if len(diffs) != 1 {
+		t.Fatalf("len(diffs) = %d, want 1", len(diffs))
+	}
+
+	d := diffs[0]
+	if d.FilePath != "main.go" {
+		t.Errorf("FilePath = %q, want %q", d.FilePath, "main.go")
+	}
+	if d.Status != "M" {
+		t.Errorf("Status = %q, want %q", d.Status, "M")
+	}
+	if len(d.Hunks) != 1 {
+		t.Fatalf("len(Hunks) = %d, want 1", len(d.Hunks))
+	}
+
+	h := d.Hunks[0]
+	if h.OldStart != 10 {
+		t.Errorf("OldStart = %d, want 10", h.OldStart)
+	}
+	if h.OldLines != 7 {
+		t.Errorf("OldLines = %d, want 7", h.OldLines)
+	}
+	if h.NewStart != 10 {
+		t.Errorf("NewStart = %d, want 10", h.NewStart)
+	}
+	if h.NewLines != 8 {
+		t.Errorf("NewLines = %d, want 8", h.NewLines)
+	}
+	if h.Header != "@@ -10,7 +10,8 @@ func main() {" {
+		t.Errorf("Header = %q, want %q", h.Header, "@@ -10,7 +10,8 @@ func main() {")
+	}
+	// Content にはヘッダー行も含まれる
+	if !strings.Contains(h.Content, "@@ -10,7 +10,8 @@ func main() {") {
+		t.Error("Content should contain hunk header")
+	}
+	if !strings.Contains(h.Content, "+\tfmt.Println(\"added\")") {
+		t.Error("Content should contain added line")
+	}
+}
+
+func TestParseStructuredDiff_MultipleHunks(t *testing.T) {
+	input := readTestdata(t, "diff_multiple_hunks.txt")
+	diffs := ParseStructuredDiff(input)
+
+	if len(diffs) != 1 {
+		t.Fatalf("len(diffs) = %d, want 1", len(diffs))
+	}
+
+	d := diffs[0]
+	if d.FilePath != "main.go" {
+		t.Errorf("FilePath = %q, want %q", d.FilePath, "main.go")
+	}
+	if len(d.Hunks) != 2 {
+		t.Fatalf("len(Hunks) = %d, want 2", len(d.Hunks))
+	}
+
+	// 1つ目の hunk
+	h1 := d.Hunks[0]
+	if h1.OldStart != 1 {
+		t.Errorf("Hunk[0].OldStart = %d, want 1", h1.OldStart)
+	}
+	if h1.OldLines != 5 {
+		t.Errorf("Hunk[0].OldLines = %d, want 5", h1.OldLines)
+	}
+	if h1.NewStart != 1 {
+		t.Errorf("Hunk[0].NewStart = %d, want 1", h1.NewStart)
+	}
+	if h1.NewLines != 5 {
+		t.Errorf("Hunk[0].NewLines = %d, want 5", h1.NewLines)
+	}
+
+	// 2つ目の hunk
+	h2 := d.Hunks[1]
+	if h2.OldStart != 20 {
+		t.Errorf("Hunk[1].OldStart = %d, want 20", h2.OldStart)
+	}
+	if h2.OldLines != 6 {
+		t.Errorf("Hunk[1].OldLines = %d, want 6", h2.OldLines)
+	}
+	if h2.NewStart != 20 {
+		t.Errorf("Hunk[1].NewStart = %d, want 20", h2.NewStart)
+	}
+	if h2.NewLines != 7 {
+		t.Errorf("Hunk[1].NewLines = %d, want 7", h2.NewLines)
+	}
+}
+
+func TestParseStructuredDiff_MultipleFiles(t *testing.T) {
+	input := readTestdata(t, "diff_multiple_files.txt")
+	diffs := ParseStructuredDiff(input)
+
+	if len(diffs) != 2 {
+		t.Fatalf("len(diffs) = %d, want 2", len(diffs))
+	}
+
+	if diffs[0].FilePath != "file1.go" {
+		t.Errorf("diffs[0].FilePath = %q, want %q", diffs[0].FilePath, "file1.go")
+	}
+	if diffs[1].FilePath != "file2.go" {
+		t.Errorf("diffs[1].FilePath = %q, want %q", diffs[1].FilePath, "file2.go")
+	}
+
+	if len(diffs[0].Hunks) != 1 {
+		t.Errorf("diffs[0].Hunks count = %d, want 1", len(diffs[0].Hunks))
+	}
+	if len(diffs[1].Hunks) != 1 {
+		t.Errorf("diffs[1].Hunks count = %d, want 1", len(diffs[1].Hunks))
+	}
+
+	// file1 の hunk: 追加行がある
+	if !strings.Contains(diffs[0].Hunks[0].Content, "+\tbar()") {
+		t.Error("file1 hunk should contain added line")
+	}
+	// file2 の hunk: 削除行がある
+	if !strings.Contains(diffs[1].Hunks[0].Content, "-func old() {}") {
+		t.Error("file2 hunk should contain deleted line")
+	}
+}
+
+func TestParseStructuredDiff_Empty(t *testing.T) {
+	diffs := ParseStructuredDiff("")
+	if len(diffs) != 0 {
+		t.Errorf("len(diffs) = %d, want 0", len(diffs))
+	}
+}
+
+func TestParseStructuredDiff_NewFile(t *testing.T) {
+	input := readTestdata(t, "diff_new_file.txt")
+	diffs := ParseStructuredDiff(input)
+
+	if len(diffs) != 1 {
+		t.Fatalf("len(diffs) = %d, want 1", len(diffs))
+	}
+
+	d := diffs[0]
+	if d.FilePath != "newfile.go" {
+		t.Errorf("FilePath = %q, want %q", d.FilePath, "newfile.go")
+	}
+	if d.Status != "A" {
+		t.Errorf("Status = %q, want %q", d.Status, "A")
+	}
+	if len(d.Hunks) != 1 {
+		t.Fatalf("len(Hunks) = %d, want 1", len(d.Hunks))
+	}
+
+	h := d.Hunks[0]
+	if h.OldStart != 0 {
+		t.Errorf("OldStart = %d, want 0", h.OldStart)
+	}
+	if h.OldLines != 0 {
+		t.Errorf("OldLines = %d, want 0", h.OldLines)
+	}
+	if h.NewStart != 1 {
+		t.Errorf("NewStart = %d, want 1", h.NewStart)
+	}
+	if h.NewLines != 5 {
+		t.Errorf("NewLines = %d, want 5", h.NewLines)
+	}
+}
+
+func TestParseStructuredDiff_DeletedFile(t *testing.T) {
+	input := readTestdata(t, "diff_deleted_file.txt")
+	diffs := ParseStructuredDiff(input)
+
+	if len(diffs) != 1 {
+		t.Fatalf("len(diffs) = %d, want 1", len(diffs))
+	}
+
+	d := diffs[0]
+	if d.FilePath != "deleted.go" {
+		t.Errorf("FilePath = %q, want %q", d.FilePath, "deleted.go")
+	}
+	if d.Status != "D" {
+		t.Errorf("Status = %q, want %q", d.Status, "D")
+	}
+	if len(d.Hunks) != 1 {
+		t.Fatalf("len(Hunks) = %d, want 1", len(d.Hunks))
+	}
+
+	h := d.Hunks[0]
+	if h.OldStart != 1 {
+		t.Errorf("OldStart = %d, want 1", h.OldStart)
+	}
+	if h.OldLines != 5 {
+		t.Errorf("OldLines = %d, want 5", h.OldLines)
+	}
+	if h.NewStart != 0 {
+		t.Errorf("NewStart = %d, want 0", h.NewStart)
+	}
+	if h.NewLines != 0 {
+		t.Errorf("NewLines = %d, want 0", h.NewLines)
+	}
+}
+
+func TestParseStructuredDiff_HunkHeaderParsing(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantOldS int
+		wantOldL int
+		wantNewS int
+		wantNewL int
+	}{
+		{
+			name:     "標準的なhunkヘッダー",
+			input:    "diff --git a/f.go b/f.go\n--- a/f.go\n+++ b/f.go\n@@ -10,7 +10,8 @@ func main() {\n context\n",
+			wantOldS: 10,
+			wantOldL: 7,
+			wantNewS: 10,
+			wantNewL: 8,
+		},
+		{
+			name:     "行数省略（1行のみ）",
+			input:    "diff --git a/f.go b/f.go\n--- a/f.go\n+++ b/f.go\n@@ -1 +1 @@\n-old\n+new\n",
+			wantOldS: 1,
+			wantOldL: 1,
+			wantNewS: 1,
+			wantNewL: 1,
+		},
+		{
+			name:     "0行の追加（新規ファイル）",
+			input:    "diff --git a/f.go b/f.go\nnew file mode 100644\n--- /dev/null\n+++ b/f.go\n@@ -0,0 +1,3 @@\n+line1\n+line2\n+line3\n",
+			wantOldS: 0,
+			wantOldL: 0,
+			wantNewS: 1,
+			wantNewL: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diffs := ParseStructuredDiff(tt.input)
+			if len(diffs) == 0 {
+				t.Fatal("expected at least 1 diff")
+			}
+			if len(diffs[0].Hunks) == 0 {
+				t.Fatal("expected at least 1 hunk")
+			}
+			h := diffs[0].Hunks[0]
+			if h.OldStart != tt.wantOldS {
+				t.Errorf("OldStart = %d, want %d", h.OldStart, tt.wantOldS)
+			}
+			if h.OldLines != tt.wantOldL {
+				t.Errorf("OldLines = %d, want %d", h.OldLines, tt.wantOldL)
+			}
+			if h.NewStart != tt.wantNewS {
+				t.Errorf("NewStart = %d, want %d", h.NewStart, tt.wantNewS)
+			}
+			if h.NewLines != tt.wantNewL {
+				t.Errorf("NewLines = %d, want %d", h.NewLines, tt.wantNewL)
 			}
 		})
 	}

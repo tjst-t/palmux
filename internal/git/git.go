@@ -1,6 +1,7 @@
 package git
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -14,10 +15,14 @@ var ErrNotGitRepo = errors.New("not a git repository")
 // ErrInvalidPath は不正なパスが指定されたことを示すエラー。
 var ErrInvalidPath = errors.New("invalid path")
 
+// ErrEmptyPatch はパッチ内容が空であることを示すエラー。
+var ErrEmptyPatch = errors.New("empty patch")
+
 // CommandRunner は git コマンドの実行を抽象化する。
 // テスト時にはモック実装を注入する。
 type CommandRunner interface {
 	RunInDir(dir string, args ...string) ([]byte, error)
+	RunWithStdin(dir string, input []byte, args ...string) ([]byte, error)
 }
 
 // RealCommandRunner は実際の git バイナリを実行する。
@@ -30,6 +35,21 @@ func (r *RealCommandRunner) RunInDir(dir string, args ...string) ([]byte, error)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		// "not a git repository" を検出してセンチネルエラーに変換
+		if strings.Contains(string(out), "not a git repository") {
+			return nil, ErrNotGitRepo
+		}
+		return nil, err
+	}
+	return out, nil
+}
+
+// RunWithStdin は指定ディレクトリで git コマンドを実行し、stdin からデータを渡す。
+func (r *RealCommandRunner) RunWithStdin(dir string, input []byte, args ...string) ([]byte, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Stdin = bytes.NewReader(input)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		if strings.Contains(string(out), "not a git repository") {
 			return nil, ErrNotGitRepo
 		}
@@ -214,4 +234,41 @@ func (g *Git) Unstage(dir string, paths []string) error {
 	args = append(args, paths...)
 	_, err := g.Cmd.RunInDir(dir, args...)
 	return err
+}
+
+// DiscardHunk は hunk 単位のリバート（git apply --reverse でパッチ適用）を実行する。
+func (g *Git) DiscardHunk(dir, patch string) error {
+	if patch == "" {
+		return ErrEmptyPatch
+	}
+	_, err := g.Cmd.RunWithStdin(dir, []byte(patch), "apply", "--reverse")
+	return err
+}
+
+// StageHunk は hunk 単位のステージ（git apply --cached でパッチ適用）を実行する。
+func (g *Git) StageHunk(dir, patch string) error {
+	if patch == "" {
+		return ErrEmptyPatch
+	}
+	_, err := g.Cmd.RunWithStdin(dir, []byte(patch), "apply", "--cached")
+	return err
+}
+
+// UnstageHunk は hunk 単位のアンステージ（git apply --cached --reverse でパッチを index から除去）を実行する。
+func (g *Git) UnstageHunk(dir, patch string) error {
+	if patch == "" {
+		return ErrEmptyPatch
+	}
+	_, err := g.Cmd.RunWithStdin(dir, []byte(patch), "apply", "--cached", "--reverse")
+	return err
+}
+
+// StructuredDiff は構造化された差分を返す。
+// 内部で Diff() を呼び出し、結果を ParseStructuredDiff() でパースして返す。
+func (g *Git) StructuredDiff(dir, commit, path string) ([]StructuredDiff, error) {
+	raw, err := g.Diff(dir, commit, path)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStructuredDiff(raw), nil
 }
