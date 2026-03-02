@@ -116,6 +116,7 @@ palmux/
 │   │   ├── drawer.js          # セッション/ウィンドウ Drawer
 │   │   ├── touch.js           # タッチジェスチャーハンドラ
 │   │   ├── connection.js      # 接続状態管理・自動再接続
+│   │   ├── router.js          # ブラウザ履歴/ナビゲーション一元管理（Router）
 │   │   ├── filebrowser.js     # ディレクトリブラウズ UI
 │   │   └── file-preview.js    # Markdown / コード / 画像プレビュー
 │   ├── manifest.json          # PWA マニフェスト
@@ -140,6 +141,28 @@ palmux/
 - Vanilla JS で書く。React 等のフレームワークは使わない
 - モバイルファースト: スマホでの操作性を最優先に設計する
 - xterm.js 本体には `inputmode="none"` を設定し、IME 入力は専用フィールド経由
+
+### ブラウザ履歴/ナビゲーション（Router）
+
+**すべてのナビゲーションは `router.js` の `Router` クラス経由で行う。`history.pushState` / `replaceState` を直接呼んではならない。**
+
+- `router.push(state)` — 新しい履歴エントリを追加
+- `router.replace(state)` — 現在の履歴エントリを置換
+- `router.navigateFromHash(hash)` — URL ハッシュから初期画面を復元
+- `router.suppressDuring(fn)` — popstate 復元中の再 push を防止
+
+**RouteState**: `{ view, session, window, filePath, previewFile, gitState, split, rightPanel }`
+- URL ハッシュには `view`, `session`, `window`, `filePath`, `split`, `rightPanel` のみ反映
+- `previewFile`, `gitState` は `history.state` にのみ保存（URL ハッシュには含めない）
+
+**サブコンポーネントのナビゲーション**:
+- FileBrowser のディレクトリ移動・プレビュー開閉、GitBrowser の内部遷移は、Panel → PanelManager → app.js のコールバックチェーンを経由して `router.push()` を呼ぶ
+- コールバック: `onFileBrowserNavigate`, `onFileBrowserPreview`, `onFileBrowserPreviewClose`, `onGitBrowserNavigate`
+- popstate 復元時は `{ push: false }` で show 関数を呼び、Router の `suppressDuring` で二重 push を防止
+
+**注意**:
+- `navigateTo()` は呼び出し前にプレビューを閉じる。popstate でディレクトリ状態を復元する際にプレビューが残らないようにするため
+- 新しいビュータブを追加する場合は、Router のハンドラ（`onSessions`, `onWindows`, `onTerminal`, `onFiles`, `onGit`）に対応するハンドラを追加すること
 
 ## テスト
 
