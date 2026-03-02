@@ -1427,6 +1427,9 @@ export class FilePreview {
 
   /**
    * Make symbols clickable in the code table.
+   * Searches ALL lines for occurrences of known symbol names,
+   * not just the definition lines. This enables clicking on
+   * function calls to jump to their definitions.
    */
   _applySymbolLinks() {
     if (!this._symbols.length || !this._contentEl) return;
@@ -1434,107 +1437,127 @@ export class FilePreview {
     const rows = this._contentEl.querySelectorAll('.fp-code-table tbody tr');
     if (!rows.length) return;
 
-    // Build a map of line number -> symbols at that line
-    const lineSymbols = new Map();
-    this._flattenSymbols(this._symbols, lineSymbols);
+    // Collect all symbol names (skip very short names to avoid false positives)
+    const symbolNames = new Set();
+    this._collectSymbolNames(this._symbols, symbolNames);
+    if (symbolNames.size === 0) return;
 
-    for (const [lineNum, symbols] of lineSymbols) {
-      const row = rows[lineNum - 1]; // 1-based to 0-based
-      if (!row) continue;
+    // Build regex matching any symbol name (longest first to avoid partial matches)
+    const sortedNames = Array.from(symbolNames).sort((a, b) => b.length - a.length);
+    const pattern = new RegExp('\\b(' + sortedNames.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')\\b');
 
-      const codeTd = row.querySelector('.fp-code-line');
+    // Get source lines for column calculation
+    const sourceLines = this._originalContent.split('\n');
+
+    // Process each line
+    for (let i = 0; i < rows.length; i++) {
+      const codeTd = rows[i].querySelector('.fp-code-line');
       if (!codeTd) continue;
 
-      // For each symbol on this line, wrap its name in a clickable span
-      for (const sym of symbols) {
-        this._wrapSymbolInLine(codeTd, sym);
-      }
+      const lineNum = i + 1; // 1-based
+      const sourceLine = sourceLines[i] || '';
+
+      this._wrapSymbolsInLine(codeTd, pattern, lineNum, sourceLine);
     }
   }
 
   /**
-   * Flatten nested symbols into a line -> symbols map.
+   * Recursively collect symbol names from document symbols.
+   * Skips names shorter than 2 characters to avoid false positives.
    * @param {Array} symbols
-   * @param {Map} lineSymbols
+   * @param {Set} names
    */
-  _flattenSymbols(symbols, lineSymbols) {
+  _collectSymbolNames(symbols, names) {
     for (const sym of symbols) {
-      const lineNum = sym.line;
-      if (!lineSymbols.has(lineNum)) {
-        lineSymbols.set(lineNum, []);
+      if (sym.name && sym.name.length >= 2) {
+        names.add(sym.name);
       }
-      lineSymbols.get(lineNum).push(sym);
-
       if (sym.children) {
-        this._flattenSymbols(sym.children, lineSymbols);
+        this._collectSymbolNames(sym.children, names);
       }
     }
   }
 
   /**
-   * Wrap a symbol name in a code line with a clickable span.
-   * @param {HTMLElement} codeTd
-   * @param {Object} sym
+   * Wrap all symbol name occurrences in a code line with clickable spans.
+   * @param {HTMLElement} codeTd - The code cell element
+   * @param {RegExp} pattern - Regex matching any known symbol name
+   * @param {number} lineNum - 1-based line number
+   * @param {string} sourceLine - Raw source text of this line
    */
-  _wrapSymbolInLine(codeTd, sym) {
-    // Walk through text nodes in codeTd and find the symbol name
+  _wrapSymbolsInLine(codeTd, pattern, lineNum, sourceLine) {
     const walker = document.createTreeWalker(codeTd, NodeFilter.SHOW_TEXT);
+    const textNodes = [];
     let node;
     while ((node = walker.nextNode())) {
-      const idx = node.textContent.indexOf(sym.name);
-      if (idx === -1) continue;
+      textNodes.push(node);
+    }
 
-      // Split the text node and wrap the symbol name
-      const before = node.textContent.substring(0, idx);
-      const after = node.textContent.substring(idx + sym.name.length);
+    for (const textNode of textNodes) {
+      const text = textNode.textContent;
+      const match = pattern.exec(text);
+      if (!match) continue;
 
-      const parent = node.parentNode;
+      const symName = match[1];
+      const idx = match.index;
+
+      // Calculate the 1-based column from the source line
+      const col = sourceLine.indexOf(symName) + 1;
+
+      const before = text.substring(0, idx);
+      const after = text.substring(idx + symName.length);
+      const parent = textNode.parentNode;
 
       if (before) {
-        parent.insertBefore(document.createTextNode(before), node);
+        parent.insertBefore(document.createTextNode(before), textNode);
       }
 
       const link = document.createElement('span');
       link.className = 'fp-symbol-link';
-      link.textContent = sym.name;
-      link.title = `${sym.kind}: ${sym.name}`;
-      link.setAttribute('data-symbol-kind', sym.kind);
+      link.textContent = symName;
+      link.title = symName;
       link.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        this._handleSymbolClick(sym);
+        this._handleSymbolClick(symName, lineNum, col > 0 ? col : 1);
       });
-      parent.insertBefore(link, node);
+      parent.insertBefore(link, textNode);
 
       if (after) {
-        parent.insertBefore(document.createTextNode(after), node);
+        parent.insertBefore(document.createTextNode(after), textNode);
       }
 
-      parent.removeChild(node);
-      break; // Only wrap the first occurrence per line
+      parent.removeChild(textNode);
+      // Reset regex lastIndex (since we modified the DOM)
+      pattern.lastIndex = 0;
     }
   }
 
   /**
-   * Handle a symbol click: jump to its definition.
-   * @param {Object} sym
+   * Handle a symbol click: call LSP definition with the actual click position.
+   * @param {string} name - Symbol name
+   * @param {number} line - 1-based line number of the click
+   * @param {number} col - 1-based column number of the click
    */
-  async _handleSymbolClick(sym) {
+  async _handleSymbolClick(name, line, col) {
     if (!this._getLspDefinition) return;
 
     try {
-      const result = await this._getLspDefinition(this._session, this._path, sym.line, 1);
+      const result = await this._getLspDefinition(this._session, this._path, line, col);
       if (!result || !result.locations || result.locations.length === 0) return;
 
-      const loc = result.locations[0]; // Take first definition
+      const loc = result.locations[0];
+
+      // Skip if definition is the same position (clicking on the definition itself)
+      if (loc.file === this._path && loc.line === line) return;
 
       // Push current position to nav stack
       if (this._navStack) {
-        this._navStack.push({ file: this._path, line: sym.line, session: this._session });
+        this._navStack.push({ file: this._path, line: line, session: this._session });
       }
 
       if (loc.file === this._path) {
-        // Same file: scroll to line
+        // Same file: scroll to the definition line
         this._scrollToLine(loc.line);
       } else {
         // Different file: navigate
