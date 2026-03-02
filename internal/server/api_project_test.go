@@ -192,7 +192,7 @@ func TestHandleCreateProjectWorktree(t *testing.T) {
 func TestHandleCreateProjectWorktree_GhqSession_CreatesClaudeWindow(t *testing.T) {
 	mock := &configurableMock{
 		newWorktreeSession: &tmux.Session{Name: "palmux@feature-x", Windows: 1},
-		isGhqSession:      true,
+		isGhqSession:       true,
 		ensureClaudeWindow: &tmux.Window{Index: 1, Name: "claude"},
 	}
 	srv, token := newTestServer(mock)

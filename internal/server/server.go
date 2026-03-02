@@ -45,14 +45,14 @@ type TmuxManager interface {
 
 // Server は Palmux の HTTP サーバーを表す。
 type Server struct {
-	tmux        TmuxManager
-	gitCmd      git.CommandRunner
-	token       string
-	basePath    string
-	claudePath  string
-	handler     http.Handler
-	connTracker    *connectionTracker
-	notifications  *NotificationStore
+	tmux          TmuxManager
+	gitCmd        git.CommandRunner
+	token         string
+	basePath      string
+	claudePath    string
+	handler       http.Handler
+	connTracker   *connectionTracker
+	notifications *NotificationStore
 }
 
 // Options は Server の生成オプション。
@@ -62,8 +62,8 @@ type Options struct {
 	Token          string
 	BasePath       string
 	ClaudePath     string // Claude コマンドのパス（デフォルト: "claude"）
-	Frontend       fs.FS // 静的ファイル配信用 FS（テスト時は nil 可）
-	MaxConnections int   // 同一セッションへの最大同時接続数（デフォルト: 5）
+	Frontend       fs.FS  // 静的ファイル配信用 FS（テスト時は nil 可）
+	MaxConnections int    // 同一セッションへの最大同時接続数（デフォルト: 5）
 	Version        string
 }
 
@@ -81,11 +81,11 @@ func NewServer(opts Options) *Server {
 	}
 
 	s := &Server{
-		tmux:        opts.Tmux,
-		gitCmd:      gitCmd,
-		token:       opts.Token,
-		basePath:    NormalizeBasePath(opts.BasePath),
-		claudePath:  claudePath,
+		tmux:          opts.Tmux,
+		gitCmd:        gitCmd,
+		token:         opts.Token,
+		basePath:      NormalizeBasePath(opts.BasePath),
+		claudePath:    claudePath,
 		connTracker:   newConnectionTracker(opts.MaxConnections),
 		notifications: NewNotificationStore(),
 	}
@@ -126,6 +126,12 @@ func NewServer(opts Options) *Server {
 	mux.Handle("GET /api/sessions/{session}/git/diff", auth(s.handleGitDiff()))
 	mux.Handle("GET /api/sessions/{session}/git/show", auth(s.handleGitShow()))
 	mux.Handle("GET /api/sessions/{session}/git/branches", auth(s.handleGitBranches()))
+	mux.Handle("POST /api/sessions/{session}/git/discard", auth(s.handleGitDiscard()))
+	mux.Handle("POST /api/sessions/{session}/git/discard-hunk", auth(s.handleGitDiscardHunk()))
+	mux.Handle("POST /api/sessions/{session}/git/stage", auth(s.handleGitStage()))
+	mux.Handle("POST /api/sessions/{session}/git/unstage", auth(s.handleGitUnstage()))
+	mux.Handle("POST /api/sessions/{session}/git/stage-hunk", auth(s.handleGitStageHunk()))
+	mux.Handle("POST /api/sessions/{session}/git/unstage-hunk", auth(s.handleGitUnstageHunk()))
 	mux.Handle("POST /api/upload", auth(s.handleUploadImage()))
 	mux.Handle("POST /api/notifications", auth(s.handlePostNotification()))
 	mux.Handle("DELETE /api/notifications", auth(s.handleDeleteNotification()))
