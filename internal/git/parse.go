@@ -57,6 +57,8 @@ func ParseStatus(output string) *StatusResult {
 		}
 
 		xy := line[:2]
+		x := xy[0] // index (staging area) status
+		y := xy[1] // work tree status
 		path := strings.TrimSpace(line[3:])
 
 		// リネームの場合: "old -> new"
@@ -65,28 +67,44 @@ func ParseStatus(output string) *StatusResult {
 			path = parts[1]
 		}
 
-		// ステータスコードを決定
-		var code string
-		switch {
-		case xy == "??":
-			code = "?"
-		case xy[0] == 'R' || xy[1] == 'R':
-			code = "R"
-		case xy[0] == 'A' || xy[1] == 'A':
-			code = "A"
-		case xy[0] == 'D' || xy[1] == 'D':
-			code = "D"
-		case xy[0] == 'M' || xy[1] == 'M':
-			code = "M"
-		default:
-			code = "M"
-		}
+		// git status --porcelain=v1 の XY フォーマット:
+		// X = index (staging area) status
+		// Y = work tree status
+		// X が ' ' でも '?' でもない → Staged entry
+		// Y が ' ' でない → Unstaged entry
+		// 両方に状態がある場合（例: MM）→ 2つの StatusFile を生成
 
-		result.Files = append(result.Files, StatusFile{
-			Path:       path,
-			Status:     code,
-			StatusText: statusCodeToText(code),
-		})
+		if xy == "??" {
+			// untracked: 特殊ケース
+			result.Files = append(result.Files, StatusFile{
+				Path:       path,
+				Status:     "?",
+				StatusText: statusCodeToText("?"),
+				Staged:     false,
+			})
+		} else {
+			// Staged entry (X が ' ' でも '?' でもない場合)
+			if x != ' ' && x != '?' {
+				code := string(x)
+				result.Files = append(result.Files, StatusFile{
+					Path:       path,
+					Status:     code,
+					StatusText: statusCodeToText(code),
+					Staged:     true,
+				})
+			}
+
+			// Unstaged entry (Y が ' ' でない場合)
+			if y != ' ' {
+				code := string(y)
+				result.Files = append(result.Files, StatusFile{
+					Path:       path,
+					Status:     code,
+					StatusText: statusCodeToText(code),
+					Staged:     false,
+				})
+			}
+		}
 	}
 
 	return result

@@ -351,6 +351,42 @@ export async function getGitBranches(session) {
 }
 
 /**
+ * ファイルの変更を破棄する。
+ * @param {string} session - セッション名
+ * @param {string[]} paths - ファイルパスの配列
+ */
+export async function gitDiscard(session, paths) {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/git/discard`, {
+    method: 'POST',
+    body: JSON.stringify({ paths }),
+  });
+}
+
+/**
+ * ファイルをステージする。
+ * @param {string} session - セッション名
+ * @param {string[]} paths - ファイルパスの配列
+ */
+export async function gitStage(session, paths) {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/git/stage`, {
+    method: 'POST',
+    body: JSON.stringify({ paths }),
+  });
+}
+
+/**
+ * ファイルをアンステージする。
+ * @param {string} session - セッション名
+ * @param {string[]} paths - ファイルパスの配列
+ */
+export async function gitUnstage(session, paths) {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/git/unstage`, {
+    method: 'POST',
+    body: JSON.stringify({ paths }),
+  });
+}
+
+/**
  * 画像ファイルをサーバーにアップロードし、保存先パスを返す。
  * fetchAPI() は Content-Type: application/json を固定するため、直接 fetch + FormData を使用する。
  * @param {File} file - アップロードする画像ファイル

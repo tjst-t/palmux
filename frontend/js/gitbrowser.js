@@ -1,7 +1,7 @@
 // gitbrowser.js - Git ブラウザ UI
 // セッションの CWD における git status, log, diff, branches を表示する
 
-import { getGitStatus, getGitLog, getGitDiff, getGitCommitFiles, getGitBranches } from './api.js';
+import { getGitStatus, getGitLog, getGitDiff, getGitCommitFiles, getGitBranches, gitDiscard, gitStage, gitUnstage } from './api.js';
 
 /**
  * 日時を相対的な短い形式にフォーマットする。
@@ -637,7 +637,32 @@ export class GitBrowser {
       empty.className = 'gb-empty';
       empty.textContent = this._selectedCommit ? 'No files changed' : 'Working tree clean';
       list.appendChild(empty);
+    } else if (!this._selectedCommit) {
+      // コミット未選択時: Staged / Changes グループに分離表示
+      const stagedFiles = files.filter(f => f.staged);
+      const unstagedFiles = files.filter(f => !f.staged);
+
+      if (stagedFiles.length > 0) {
+        const groupHeader = document.createElement('div');
+        groupHeader.className = 'gb-group-header';
+        groupHeader.textContent = `Staged Changes (${stagedFiles.length})`;
+        list.appendChild(groupHeader);
+        for (const file of stagedFiles) {
+          list.appendChild(this._createFileEntry(file));
+        }
+      }
+
+      if (unstagedFiles.length > 0) {
+        const groupHeader = document.createElement('div');
+        groupHeader.className = 'gb-group-header';
+        groupHeader.textContent = `Changes (${unstagedFiles.length})`;
+        list.appendChild(groupHeader);
+        for (const file of unstagedFiles) {
+          list.appendChild(this._createFileEntry(file));
+        }
+      }
     } else {
+      // コミット選択時: フラットにファイル一覧を表示
       for (const file of files) {
         list.appendChild(this._createFileEntry(file));
       }
@@ -670,13 +695,67 @@ export class GitBrowser {
     el.appendChild(badge);
     el.appendChild(name);
 
-    el.addEventListener('click', () => {
+    // クリックハンドラ（ロングプレス発火時は抑制）
+    let longPressTriggered = false;
+
+    el.addEventListener('click', (e) => {
+      if (longPressTriggered) {
+        longPressTriggered = false;
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       if (this._isWideLayout()) {
         this._showDiffInPane(file.path);
       } else {
         this._showDiff(file.path, { push: true });
       }
     });
+
+    // コンテキストメニュー: コミット未選択時のみ
+    if (!this._selectedCommit) {
+      // ロングプレス（スマホ）
+      let pressTimer = null;
+      let pressStartPos = null;
+
+      const onPressStart = (e) => {
+        pressStartPos = { x: e.touches?.[0]?.clientX ?? e.clientX, y: e.touches?.[0]?.clientY ?? e.clientY };
+        pressTimer = setTimeout(() => {
+          longPressTriggered = true;
+          this._showContextMenu(file, pressStartPos.x, pressStartPos.y);
+          pressTimer = null;
+        }, 500);
+      };
+
+      const onPressMove = (e) => {
+        if (pressTimer) {
+          const x = e.touches?.[0]?.clientX ?? e.clientX;
+          const y = e.touches?.[0]?.clientY ?? e.clientY;
+          if (Math.abs(x - pressStartPos.x) > 10 || Math.abs(y - pressStartPos.y) > 10) {
+            clearTimeout(pressTimer);
+            pressTimer = null;
+          }
+        }
+      };
+
+      const onPressEnd = () => {
+        if (pressTimer) {
+          clearTimeout(pressTimer);
+          pressTimer = null;
+        }
+      };
+
+      el.addEventListener('touchstart', onPressStart, { passive: true });
+      el.addEventListener('touchmove', onPressMove, { passive: true });
+      el.addEventListener('touchend', onPressEnd);
+      el.addEventListener('touchcancel', onPressEnd);
+
+      // PC: 右クリック
+      el.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        this._showContextMenu(file, e.clientX, e.clientY);
+      });
+    }
 
     return el;
   }
@@ -1381,6 +1460,135 @@ export class GitBrowser {
     container.appendChild(sbs);
   }
 
+  // --- コンテキストメニュー ---
+
+  /**
+   * コンテキストメニューを表示する。
+   * @param {Object} file - StatusFile
+   * @param {number} x - 表示 X 座標
+   * @param {number} y - 表示 Y 座標
+   */
+  _showContextMenu(file, x, y) {
+    // 既存メニューを閉じる
+    this._closeContextMenu();
+
+    const menu = document.createElement('div');
+    menu.className = 'gb-context-menu';
+
+    if (file.staged) {
+      // Unstage
+      const unstageItem = document.createElement('div');
+      unstageItem.className = 'gb-context-menu-item';
+      unstageItem.textContent = '\u2212 Unstage File';
+      unstageItem.addEventListener('click', () => this._doUnstage(file));
+      menu.appendChild(unstageItem);
+    } else {
+      // Stage
+      const stageItem = document.createElement('div');
+      stageItem.className = 'gb-context-menu-item';
+      stageItem.textContent = '\uFF0B Stage File';
+      stageItem.addEventListener('click', () => this._doStage(file));
+      menu.appendChild(stageItem);
+
+      // Discard (untracked ファイルには表示しない)
+      if (file.status !== '?') {
+        const discardItem = document.createElement('div');
+        discardItem.className = 'gb-context-menu-item gb-context-menu-item--danger';
+        discardItem.textContent = '\u21A9 Discard Changes';
+        discardItem.addEventListener('click', () => this._doDiscard(file));
+        menu.appendChild(discardItem);
+      }
+    }
+
+    // 位置調整（画面外にはみ出さないように）
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+
+    this._wrapper.appendChild(menu);
+
+    // 画面外はみ出しチェック（DOM に追加後に寸法を取得）
+    requestAnimationFrame(() => {
+      const rect = menu.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+
+      if (rect.right > vw) {
+        menu.style.left = `${Math.max(0, vw - rect.width)}px`;
+      }
+      if (rect.bottom > vh) {
+        menu.style.top = `${Math.max(0, vh - rect.height)}px`;
+      }
+    });
+
+    this._contextMenu = menu;
+
+    // メニュー外クリックで閉じる
+    const closeHandler = (e) => {
+      if (!menu.contains(e.target)) {
+        this._closeContextMenu();
+        document.removeEventListener('click', closeHandler, true);
+        document.removeEventListener('touchstart', closeHandler, true);
+      }
+    };
+    setTimeout(() => {
+      document.addEventListener('click', closeHandler, true);
+      document.addEventListener('touchstart', closeHandler, true);
+    }, 10);
+  }
+
+  /**
+   * コンテキストメニューを閉じる。
+   */
+  _closeContextMenu() {
+    if (this._contextMenu) {
+      this._contextMenu.remove();
+      this._contextMenu = null;
+    }
+  }
+
+  /**
+   * ファイルをステージする。
+   * @param {Object} file - StatusFile
+   */
+  async _doStage(file) {
+    this._closeContextMenu();
+    try {
+      await gitStage(this._session, [file.path]);
+      await this.refresh();
+    } catch (err) {
+      console.error('Failed to stage:', err);
+    }
+  }
+
+  /**
+   * ファイルをアンステージする。
+   * @param {Object} file - StatusFile
+   */
+  async _doUnstage(file) {
+    this._closeContextMenu();
+    try {
+      await gitUnstage(this._session, [file.path]);
+      await this.refresh();
+    } catch (err) {
+      console.error('Failed to unstage:', err);
+    }
+  }
+
+  /**
+   * ファイルの変更を破棄する（確認ダイアログ付き）。
+   * @param {Object} file - StatusFile
+   */
+  async _doDiscard(file) {
+    this._closeContextMenu();
+    if (!confirm('この操作は取り消せません。変更を破棄しますか？')) return;
+    try {
+      await gitDiscard(this._session, [file.path]);
+      await this.refresh();
+    } catch (err) {
+      console.error('Failed to discard:', err);
+    }
+  }
+
   // --- フォントサイズ ---
 
   /**
@@ -1423,6 +1631,8 @@ export class GitBrowser {
    * リソースを解放する。
    */
   dispose() {
+    // コンテキストメニューを閉じる
+    this._closeContextMenu();
     // resize リスナー解除
     window.removeEventListener('resize', this._onResize);
     // ドラッグリスナー解除
