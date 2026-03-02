@@ -63,6 +63,7 @@ type StatusFile struct {
 	Path       string `json:"path"`
 	Status     string `json:"status"`      // "M","A","D","?","R"
 	StatusText string `json:"status_text"` // "modified","added","deleted","untracked","renamed"
+	Staged     bool   `json:"staged"`      // true if in staging area
 }
 
 // StatusResult は git status の結果を表す。

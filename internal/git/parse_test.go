@@ -26,7 +26,7 @@ func TestParseStatus(t *testing.T) {
 			name:       "フィクスチャファイルからパース",
 			input:      readTestdata(t, "status_porcelain.txt"),
 			wantBranch: "main",
-			wantFiles:  6,
+			wantFiles:  7, // MM both_modified.go generates 2 entries
 		},
 		{
 			name:       "変更なしのステータス",
@@ -66,18 +66,20 @@ func TestParseStatus_FileDetails(t *testing.T) {
 	input := readTestdata(t, "status_porcelain.txt")
 	result := ParseStatus(input)
 
-	// 各ファイルのステータスを確認
+	// 各ファイルのステータスを確認（MM は staged + unstaged の2エントリ）
 	tests := []struct {
 		path       string
 		status     string
 		statusText string
+		staged     bool
 	}{
-		{"internal/server/server.go", "M", "modified"},
-		{"internal/git/git.go", "A", "added"},
-		{"old_file.go", "D", "deleted"},
-		{"untracked.txt", "?", "untracked"},
-		{"new_name.go", "R", "renamed"},
-		{"both_modified.go", "M", "modified"},
+		{"internal/server/server.go", "M", "modified", false},
+		{"internal/git/git.go", "A", "added", true},
+		{"old_file.go", "D", "deleted", true},
+		{"untracked.txt", "?", "untracked", false},
+		{"new_name.go", "R", "renamed", true},
+		{"both_modified.go", "M", "modified", true},  // staged entry from MM
+		{"both_modified.go", "M", "modified", false}, // unstaged entry from MM
 	}
 
 	if len(result.Files) != len(tests) {
@@ -85,7 +87,13 @@ func TestParseStatus_FileDetails(t *testing.T) {
 	}
 
 	for i, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
+		name := tt.path
+		if tt.staged {
+			name += "/staged"
+		} else {
+			name += "/unstaged"
+		}
+		t.Run(name, func(t *testing.T) {
 			f := result.Files[i]
 			if f.Path != tt.path {
 				t.Errorf("Path = %q, want %q", f.Path, tt.path)
@@ -95,6 +103,109 @@ func TestParseStatus_FileDetails(t *testing.T) {
 			}
 			if f.StatusText != tt.statusText {
 				t.Errorf("StatusText = %q, want %q", f.StatusText, tt.statusText)
+			}
+			if f.Staged != tt.staged {
+				t.Errorf("Staged = %v, want %v", f.Staged, tt.staged)
+			}
+		})
+	}
+}
+
+func TestParseStatus_StagedField(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantFiles []StatusFile
+	}{
+		{
+			name:  "M_ → staged modified",
+			input: "## main\nM  file.go\n",
+			wantFiles: []StatusFile{
+				{Path: "file.go", Status: "M", StatusText: "modified", Staged: true},
+			},
+		},
+		{
+			name:  "_M → unstaged modified",
+			input: "## main\n M file.go\n",
+			wantFiles: []StatusFile{
+				{Path: "file.go", Status: "M", StatusText: "modified", Staged: false},
+			},
+		},
+		{
+			name:  "MM → staged + unstaged (2 entries)",
+			input: "## main\nMM file.go\n",
+			wantFiles: []StatusFile{
+				{Path: "file.go", Status: "M", StatusText: "modified", Staged: true},
+				{Path: "file.go", Status: "M", StatusText: "modified", Staged: false},
+			},
+		},
+		{
+			name:  "A_ → staged added",
+			input: "## main\nA  file.go\n",
+			wantFiles: []StatusFile{
+				{Path: "file.go", Status: "A", StatusText: "added", Staged: true},
+			},
+		},
+		{
+			name:  "?? → untracked (unstaged)",
+			input: "## main\n?? file.go\n",
+			wantFiles: []StatusFile{
+				{Path: "file.go", Status: "?", StatusText: "untracked", Staged: false},
+			},
+		},
+		{
+			name:  "D_ → staged deleted",
+			input: "## main\nD  file.go\n",
+			wantFiles: []StatusFile{
+				{Path: "file.go", Status: "D", StatusText: "deleted", Staged: true},
+			},
+		},
+		{
+			name:  "_D → unstaged deleted",
+			input: "## main\n D file.go\n",
+			wantFiles: []StatusFile{
+				{Path: "file.go", Status: "D", StatusText: "deleted", Staged: false},
+			},
+		},
+		{
+			name:  "R_ → staged renamed",
+			input: "## main\nR  old.go -> new.go\n",
+			wantFiles: []StatusFile{
+				{Path: "new.go", Status: "R", StatusText: "renamed", Staged: true},
+			},
+		},
+		{
+			name:  "AM → staged added + unstaged modified",
+			input: "## main\nAM file.go\n",
+			wantFiles: []StatusFile{
+				{Path: "file.go", Status: "A", StatusText: "added", Staged: true},
+				{Path: "file.go", Status: "M", StatusText: "modified", Staged: false},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseStatus(tt.input)
+
+			if len(result.Files) != len(tt.wantFiles) {
+				t.Fatalf("len(Files) = %d, want %d; files = %+v", len(result.Files), len(tt.wantFiles), result.Files)
+			}
+
+			for i, want := range tt.wantFiles {
+				got := result.Files[i]
+				if got.Path != want.Path {
+					t.Errorf("Files[%d].Path = %q, want %q", i, got.Path, want.Path)
+				}
+				if got.Status != want.Status {
+					t.Errorf("Files[%d].Status = %q, want %q", i, got.Status, want.Status)
+				}
+				if got.StatusText != want.StatusText {
+					t.Errorf("Files[%d].StatusText = %q, want %q", i, got.StatusText, want.StatusText)
+				}
+				if got.Staged != want.Staged {
+					t.Errorf("Files[%d].Staged = %v, want %v", i, got.Staged, want.Staged)
+				}
 			}
 		})
 	}
