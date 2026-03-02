@@ -635,9 +635,12 @@ export class FileBrowser {
 
     this._wrapper.appendChild(this._createBreadcrumb());
 
-    // If grep mode, re-add the filter bar
-    if (this._grepMode && !this._searchMode) {
-      // Not in search result mode, filter bar is handled by toggle
+    // grep モードの場合、フィルターバーを再追加
+    if (this._grepMode) {
+      const breadcrumb = this._wrapper.querySelector('.fb-breadcrumb');
+      if (breadcrumb) {
+        breadcrumb.after(this._createGrepFilterBar());
+      }
     }
 
     const list = document.createElement('div');

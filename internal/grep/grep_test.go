@@ -1042,6 +1042,59 @@ func TestBuiltinSearcher_MaxResults(t *testing.T) {
 	}
 }
 
+func TestBuiltinSearcher_GlobFilter(t *testing.T) {
+	root := setupTestDir(t)
+	s := &BuiltinSearcher{}
+
+	// .go ファイルのみ検索
+	results, err := s.Search(context.Background(), "Hello", root, Options{Glob: "*.go"})
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+
+	for _, r := range results {
+		if !strings.HasSuffix(r.Path, ".go") {
+			t.Errorf("glob filter should limit to .go files, got %q", r.Path)
+		}
+	}
+
+	// .md ファイルのみ検索
+	results, err = s.Search(context.Background(), "Hello", root, Options{Glob: "*.md"})
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+
+	for _, r := range results {
+		if !strings.HasSuffix(r.Path, ".md") {
+			t.Errorf("glob filter should limit to .md files, got %q", r.Path)
+		}
+	}
+	if len(results) == 0 {
+		t.Error("expected at least one result for *.md glob")
+	}
+}
+
+func TestGrepSearcher_RegexMatchPosition(t *testing.T) {
+	root := setupTestDir(t)
+	s := &GrepSearcher{}
+
+	// GNU grep の基本正規表現を使用
+	results, err := s.Search(context.Background(), "Hel.*", root, Options{Regex: true})
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+
+	if len(results) == 0 {
+		t.Fatal("expected at least one result")
+	}
+
+	for _, r := range results {
+		if r.MatchEnd <= r.MatchStart {
+			t.Errorf("regex mode should have valid match positions: start=%d, end=%d in line %q", r.MatchStart, r.MatchEnd, r.LineText)
+		}
+	}
+}
+
 func TestBuiltinSearcher_ResultFields(t *testing.T) {
 	root := setupTestDir(t)
 	s := &BuiltinSearcher{}

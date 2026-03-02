@@ -311,7 +311,19 @@ func (s *GrepSearcher) parseOutput(data []byte, query string, opts Options) []Re
 
 		// MatchStart/MatchEnd を計算
 		var matchStart, matchEnd int
-		if !opts.Regex {
+		if opts.Regex {
+			// 正規表現検索: re.FindStringIndex で位置を特定
+			pattern := query
+			if !opts.CaseSensitive {
+				pattern = "(?i)" + pattern
+			}
+			if re, err := regexp.Compile(pattern); err == nil {
+				if loc := re.FindStringIndex(content); loc != nil {
+					matchStart = loc[0]
+					matchEnd = loc[1]
+				}
+			}
+		} else {
 			// 固定文字列検索: 文字列位置を特定
 			searchContent := content
 			searchQuery := query
@@ -322,10 +334,9 @@ func (s *GrepSearcher) parseOutput(data []byte, query string, opts Options) []Re
 			idx := strings.Index(searchContent, searchQuery)
 			if idx >= 0 {
 				matchStart = idx
-				matchEnd = idx + len(query)
+				matchEnd = idx + len(searchQuery)
 			}
 		}
-		// 正規表現の場合は MatchStart=0, MatchEnd=0 のまま
 
 		results = append(results, Result{
 			Path:       filePath,
@@ -404,6 +415,14 @@ func (s *BuiltinSearcher) Search(ctx context.Context, query string, dir string, 
 		// 通常ファイルのみ処理
 		if !d.Type().IsRegular() {
 			return nil
+		}
+
+		// Glob フィルタ
+		if opts.Glob != "" {
+			matched, _ := filepath.Match(opts.Glob, d.Name())
+			if !matched {
+				return nil
+			}
 		}
 
 		// ファイルサイズチェック
