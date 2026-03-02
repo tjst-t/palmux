@@ -14,13 +14,13 @@ import (
 
 func TestHandleGetCommands(t *testing.T) {
 	tests := []struct {
-		name          string
-		session       string
-		projectDir    string
-		projectDirErr error
+		name            string
+		session         string
+		projectDir      string
+		projectDirErr   error
 		makefileContent string // 空でない場合 projectDir に Makefile を作成
-		wantStatus    int
-		wantCommands  []cmddetect.Command
+		wantStatus      int
+		wantCommands    []cmddetect.Command
 	}{
 		{
 			name:            "正常系: Makefile のターゲットを返す",

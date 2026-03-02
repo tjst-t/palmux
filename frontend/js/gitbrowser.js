@@ -1,7 +1,8 @@
 // gitbrowser.js - Git ブラウザ UI
 // セッションの CWD における git status, log, diff, branches を表示する
 
-import { getGitStatus, getGitLog, getGitDiff, getGitCommitFiles, getGitBranches } from './api.js';
+import { getGitStatus, getGitLog, getGitDiff, getGitStructuredDiff, getGitCommitFiles, getGitBranches, gitDiscard, gitStage, gitUnstage, gitDiscardHunk, gitStageHunk, gitUnstageHunk } from './api.js';
+import { attachContextMenu, ContextMenu } from './context-menu.js';
 
 /**
  * 日時を相対的な短い形式にフォーマットする。
@@ -637,7 +638,32 @@ export class GitBrowser {
       empty.className = 'gb-empty';
       empty.textContent = this._selectedCommit ? 'No files changed' : 'Working tree clean';
       list.appendChild(empty);
+    } else if (!this._selectedCommit) {
+      // コミット未選択時: Staged / Changes グループに分離表示
+      const stagedFiles = files.filter(f => f.staged);
+      const unstagedFiles = files.filter(f => !f.staged);
+
+      if (stagedFiles.length > 0) {
+        const groupHeader = document.createElement('div');
+        groupHeader.className = 'gb-group-header';
+        groupHeader.textContent = `Staged Changes (${stagedFiles.length})`;
+        list.appendChild(groupHeader);
+        for (const file of stagedFiles) {
+          list.appendChild(this._createFileEntry(file));
+        }
+      }
+
+      if (unstagedFiles.length > 0) {
+        const groupHeader = document.createElement('div');
+        groupHeader.className = 'gb-group-header';
+        groupHeader.textContent = `Changes (${unstagedFiles.length})`;
+        list.appendChild(groupHeader);
+        for (const file of unstagedFiles) {
+          list.appendChild(this._createFileEntry(file));
+        }
+      }
     } else {
+      // コミット選択時: フラットにファイル一覧を表示
       for (const file of files) {
         list.appendChild(this._createFileEntry(file));
       }
@@ -670,7 +696,33 @@ export class GitBrowser {
     el.appendChild(badge);
     el.appendChild(name);
 
-    el.addEventListener('click', () => {
+    // コンテキストメニュー: コミット未選択時のみ
+    let handle = null;
+    if (!this._selectedCommit) {
+      handle = attachContextMenu(el, {
+        onTrigger: ({ x, y, isMobile }) => {
+          const items = [];
+          if (file.staged) {
+            items.push({ label: '\u2212 Unstage File', onClick: () => this._doUnstage(file) });
+          } else {
+            items.push({ label: '\uFF0B Stage File', onClick: () => this._doStage(file) });
+            if (file.status !== '?') {
+              items.push({ label: '\u21A9 Discard Changes', danger: true, onClick: () => this._doDiscard(file) });
+            }
+          }
+          this._activeContextMenu = new ContextMenu({ items });
+          this._activeContextMenu.show({ x, y, isMobile });
+        },
+      });
+    }
+
+    // クリックハンドラ（ロングプレス発火時は抑制）
+    el.addEventListener('click', (e) => {
+      if (handle && handle.wasLongPress()) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       if (this._isWideLayout()) {
         this._showDiffInPane(file.path);
       } else {
@@ -1010,7 +1062,16 @@ export class GitBrowser {
     rightPane.appendChild(content);
 
     try {
-      const result = await getGitDiff(this._session, path, this._selectedCommit || undefined);
+      if (!this._selectedCommit) {
+        // 未コミット変更: hunk 操作ボタン付き structured diff
+        const fileInfo = this._status?.files?.find(f => f.path === path);
+        const isStaged = fileInfo?.staged ?? false;
+        await this._renderDiffWithHunkActions(content, path, { staged: isStaged });
+        return;
+      }
+
+      // コミット選択時: 既存の挙動
+      const result = await getGitDiff(this._session, path, this._selectedCommit);
       if (!this._showingDiff || this._diffPath !== path) return;
 
       content.innerHTML = '';
@@ -1090,6 +1151,14 @@ export class GitBrowser {
     this._pushHistory(push);
 
     try {
+      if (!this._selectedCommit) {
+        // 未コミット変更: hunk 操作ボタン付き
+        const fileInfo = this._status?.files?.find(f => f.path === path);
+        const isStaged = fileInfo?.staged ?? false;
+        await this._renderDiffWithHunkActions(content, path, { staged: isStaged });
+        return;
+      }
+
       const result = await getGitDiff(this._session, path, this._selectedCommit || undefined);
       if (!this._showingDiff || this._diffPath !== path) return;
 
@@ -1125,6 +1194,180 @@ export class GitBrowser {
   }
 
   // --- Diff ヘルパー ---
+
+  /**
+   * hunk からパッチ文字列を生成する。
+   * @param {string} filePath - ファイルパス
+   * @param {Object} hunk - DiffHunk ({header, content})
+   * @returns {string} パッチ文字列
+   */
+  _buildHunkPatch(filePath, hunk) {
+    const lines = [
+      `diff --git a/${filePath} b/${filePath}`,
+      `--- a/${filePath}`,
+      `+++ b/${filePath}`,
+    ];
+    // content には hunk ヘッダー行（@@...@@）とその下の行が含まれている
+    // content をそのまま追加
+    lines.push(hunk.content);
+    // 末尾に改行がなければ追加
+    let patch = lines.join('\n');
+    if (!patch.endsWith('\n')) {
+      patch += '\n';
+    }
+    return patch;
+  }
+
+  /**
+   * hunk 操作ボタン付きの diff を描画する。
+   * @param {HTMLElement} container
+   * @param {string} filePath
+   * @param {Object} [options]
+   * @param {boolean} [options.staged=false] - true の場合、Unstage ボタンを表示する
+   */
+  async _renderDiffWithHunkActions(container, filePath, { staged = false } = {}) {
+    try {
+      const diffs = await getGitStructuredDiff(this._session, filePath);
+      if (!this._showingDiff || this._diffPath !== filePath) return;
+
+      container.innerHTML = '';
+
+      if (!diffs || diffs.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'gb-empty';
+        empty.textContent = 'No diff available';
+        container.appendChild(empty);
+        return;
+      }
+
+      const diff = diffs[0]; // 1ファイル分
+
+      const pre = document.createElement('pre');
+      pre.className = 'gb-diff-pre';
+
+      for (const hunk of diff.hunks) {
+        // hunk ヘッダー行 + アクションボタン
+        const hunkHeaderRow = document.createElement('div');
+        hunkHeaderRow.className = 'gb-diff-hunk-row';
+
+        const hunkHeaderText = document.createElement('span');
+        hunkHeaderText.className = 'gb-diff-line gb-diff-line--hunk gb-diff-hunk-text';
+        hunkHeaderText.textContent = hunk.header;
+        hunkHeaderRow.appendChild(hunkHeaderText);
+
+        // ボタンコンテナ
+        const btnContainer = document.createElement('span');
+        btnContainer.className = 'gb-hunk-actions';
+
+        if (staged) {
+          // Unstage ボタン
+          const unstageBtn = document.createElement('button');
+          unstageBtn.className = 'gb-hunk-btn gb-hunk-btn--stage';
+          unstageBtn.textContent = '\u2212 Unstage';
+          unstageBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            try {
+              const patch = this._buildHunkPatch(diff.file_path, hunk);
+              await gitUnstageHunk(this._session, patch);
+              await this._reloadDiff(container, filePath);
+            } catch (err) {
+              console.error('Failed to unstage hunk:', err);
+            }
+          });
+          btnContainer.appendChild(unstageBtn);
+        } else {
+          // Stage ボタン
+          const stageBtn = document.createElement('button');
+          stageBtn.className = 'gb-hunk-btn gb-hunk-btn--stage';
+          stageBtn.textContent = '\uFF0B Stage';
+          stageBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            try {
+              const patch = this._buildHunkPatch(diff.file_path, hunk);
+              await gitStageHunk(this._session, patch);
+              // diff をリロード
+              await this._reloadDiff(container, filePath);
+            } catch (err) {
+              console.error('Failed to stage hunk:', err);
+            }
+          });
+          btnContainer.appendChild(stageBtn);
+
+          // Revert ボタン（確認ダイアログ付き）
+          const revertBtn = document.createElement('button');
+          revertBtn.className = 'gb-hunk-btn gb-hunk-btn--revert';
+          revertBtn.textContent = '\u21A9 Revert';
+          revertBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (!confirm('\u3053\u306E hunk \u306E\u5909\u66F4\u3092\u53D6\u308A\u6D88\u3057\u307E\u3059\u304B\uFF1F\u3053\u306E\u64CD\u4F5C\u306F\u5143\u306B\u623B\u305B\u307E\u305B\u3093\u3002')) return;
+            try {
+              const patch = this._buildHunkPatch(diff.file_path, hunk);
+              await gitDiscardHunk(this._session, patch);
+              await this._reloadDiff(container, filePath);
+            } catch (err) {
+              console.error('Failed to revert hunk:', err);
+            }
+          });
+          btnContainer.appendChild(revertBtn);
+        }
+
+        hunkHeaderRow.appendChild(btnContainer);
+        pre.appendChild(hunkHeaderRow);
+
+        // hunk の本体行（ヘッダー行を除く content の行）
+        const contentLines = hunk.content.split('\n');
+        for (const line of contentLines) {
+          // hunk ヘッダー行はスキップ（既に描画済み）
+          if (line.startsWith('@@')) continue;
+          if (line === '') continue; // 末尾の空行はスキップ
+
+          const lineEl = document.createElement('div');
+          lineEl.className = 'gb-diff-line';
+
+          if (line.startsWith('+')) {
+            lineEl.classList.add('gb-diff-line--added');
+          } else if (line.startsWith('-')) {
+            lineEl.classList.add('gb-diff-line--removed');
+          }
+
+          lineEl.textContent = line;
+          pre.appendChild(lineEl);
+        }
+      }
+
+      container.appendChild(pre);
+    } catch (err) {
+      console.error('Failed to load structured diff:', err);
+      container.innerHTML = '';
+      const error = document.createElement('div');
+      error.className = 'gb-error';
+      error.textContent = `Failed to load diff: ${err.message}`;
+      container.appendChild(error);
+    }
+  }
+
+  /**
+   * diff を再読み込みする。
+   * @param {HTMLElement} container
+   * @param {string} filePath
+   */
+  async _reloadDiff(container, filePath) {
+    container.innerHTML = '<div class="gb-loading">Loading diff...</div>';
+    if (!this._selectedCommit) {
+      const fileInfo = this._status?.files?.find(f => f.path === filePath);
+      const isStaged = fileInfo?.staged ?? false;
+      await this._renderDiffWithHunkActions(container, filePath, { staged: isStaged });
+    } else {
+      // コミット選択時は通常の diff（hunk 操作なし）
+      const result = await getGitDiff(this._session, filePath, this._selectedCommit);
+      container.innerHTML = '';
+      if (!result.diff) {
+        container.innerHTML = '<div class="gb-empty">No diff available</div>';
+        return;
+      }
+      this._renderUnifiedDiff(container, result.diff);
+    }
+  }
 
   /**
    * ファイルパスに対応するステータスコードを返す。
@@ -1381,6 +1624,67 @@ export class GitBrowser {
     container.appendChild(sbs);
   }
 
+  // --- コンテキストメニュー ---
+
+  /**
+   * コンテキストメニューを表示する。
+   * @param {Object} file - StatusFile
+   * @param {number} x - 表示 X 座標
+   * @param {number} y - 表示 Y 座標
+   */
+  /**
+   * アクティブなコンテキストメニューを閉じる。
+   */
+  _closeContextMenu() {
+    if (this._activeContextMenu) {
+      this._activeContextMenu.close();
+      this._activeContextMenu = null;
+    }
+  }
+
+  /**
+   * ファイルをステージする。
+   * @param {Object} file - StatusFile
+   */
+  async _doStage(file) {
+    this._closeContextMenu();
+    try {
+      await gitStage(this._session, [file.path]);
+      await this.refresh();
+    } catch (err) {
+      console.error('Failed to stage:', err);
+    }
+  }
+
+  /**
+   * ファイルをアンステージする。
+   * @param {Object} file - StatusFile
+   */
+  async _doUnstage(file) {
+    this._closeContextMenu();
+    try {
+      await gitUnstage(this._session, [file.path]);
+      await this.refresh();
+    } catch (err) {
+      console.error('Failed to unstage:', err);
+    }
+  }
+
+  /**
+   * ファイルの変更を破棄する（確認ダイアログ付き）。
+   * @param {Object} file - StatusFile
+   */
+  async _doDiscard(file) {
+    this._closeContextMenu();
+    if (!confirm('この操作は取り消せません。変更を破棄しますか？')) return;
+    try {
+      await gitDiscard(this._session, [file.path]);
+      await this.refresh();
+    } catch (err) {
+      console.error('Failed to discard:', err);
+    }
+  }
+
   // --- フォントサイズ ---
 
   /**
@@ -1423,6 +1727,8 @@ export class GitBrowser {
    * リソースを解放する。
    */
   dispose() {
+    // コンテキストメニューを閉じる
+    this._closeContextMenu();
     // resize リスナー解除
     window.removeEventListener('resize', this._onResize);
     // ドラッグリスナー解除

@@ -3,6 +3,7 @@
 // プロジェクト作成・削除、ブランチ（worktree）管理機能を含む
 
 import { listSessions, createSession, deleteSession, listGhqRepos, cloneGhqRepo, deleteGhqRepo, listProjectWorktrees, createProjectWorktree, deleteProjectWorktree, listProjectBranches, isProjectBranchMerged, deleteProjectBranch } from './api.js';
+import { attachContextMenu, ContextMenu } from './context-menu.js';
 
 /**
  * セッション名をプロジェクト名とブランチ名に分解する。
@@ -52,12 +53,8 @@ export class Drawer {
     /** @type {Array} キャッシュ済みセッションデータ */
     this._sessions = [];
 
-    /** @type {number|null} 長押しタイマー ID */
-    this._longPressTimer = null;
-    /** @type {boolean} 長押し検出フラグ（クリックイベント抑制用） */
-    this._longPressDetected = false;
-    /** @type {boolean} ブランチピッカー長押し検出フラグ */
-    this._branchPickerLongPressDetected = false;
+    /** @type {Array<{detach: function, wasLongPress: function}>} コンテキストメニューハンドル */
+    this._contextMenuHandles = [];
     /** @type {boolean} セッション作成中フラグ */
     this._creating = false;
     /** @type {'activity'|'name'} セッション並び順 */
@@ -409,7 +406,7 @@ export class Drawer {
     this._visible = false;
     this._el.classList.remove('drawer--open');
     this._overlay.classList.remove('drawer-overlay--visible');
-    this._clearLongPressTimer();
+    this._detachContextMenuHandles();
     this._stopRefreshPolling();
     if (this._onClose) {
       this._onClose();
@@ -589,6 +586,7 @@ export class Drawer {
    * Drawer の内容を描画する。
    */
   _renderContent() {
+    this._detachContextMenuHandles();
     this._content.innerHTML = '';
 
     // 1. プロジェクト一覧
@@ -645,14 +643,15 @@ export class Drawer {
     header.appendChild(badge);
 
     // Long press for delete
-    this._setupLongPress(header, project.defaultSession || project.sessions[0]);
+    const headerSession = project.defaultSession || project.sessions[0];
+    const headerHandle = attachContextMenu(header, {
+      onTrigger: () => this._showDeleteConfirmation(headerSession),
+    });
+    this._contextMenuHandles.push(headerHandle);
 
     // Click to expand/collapse + auto-connect
     header.addEventListener('click', async () => {
-      if (this._longPressDetected) {
-        this._longPressDetected = false;
-        return;
-      }
+      if (headerHandle.wasLongPress()) return;
 
       if (this._expandedProjects.has(projectName)) {
         this._expandedProjects.delete(projectName);
@@ -749,14 +748,14 @@ export class Drawer {
     el.appendChild(indicator);
 
     // Long press for delete (worktree session)
-    this._setupBranchLongPress(el, projectName, branchSession);
+    const branchHandle = attachContextMenu(el, {
+      onTrigger: () => this._showBranchDeleteConfirmation(projectName, branchSession),
+    });
+    this._contextMenuHandles.push(branchHandle);
 
     // Click to connect
     el.addEventListener('click', () => {
-      if (this._longPressDetected) {
-        this._longPressDetected = false;
-        return;
-      }
+      if (branchHandle.wasLongPress()) return;
       this._onSelectSession(branchSession.name, 0);
       this._currentSession = branchSession.name;
       this._currentWindowIndex = 0;
@@ -773,43 +772,6 @@ export class Drawer {
    * @param {string} projectName - プロジェクト名
    * @param {Object} branchSession - ブランチセッション情報
    */
-  _setupBranchLongPress(el, projectName, branchSession) {
-    let startX = 0;
-    let startY = 0;
-
-    const showDelete = () => {
-      this._showBranchDeleteConfirmation(projectName, branchSession);
-    };
-
-    el.addEventListener('touchstart', (e) => {
-      startX = e.touches[0].clientX;
-      startY = e.touches[0].clientY;
-      this._longPressDetected = false;
-      this._longPressTimer = window.setTimeout(() => {
-        this._longPressDetected = true;
-        showDelete();
-      }, 500);
-    }, { passive: true });
-
-    el.addEventListener('touchmove', (e) => {
-      if (this._longPressTimer !== null) {
-        const moveX = e.touches[0].clientX;
-        const moveY = e.touches[0].clientY;
-        if (Math.abs(moveX - startX) > 10 || Math.abs(moveY - startY) > 10) {
-          this._clearLongPressTimer();
-        }
-      }
-    }, { passive: true });
-
-    el.addEventListener('touchend', () => this._clearLongPressTimer(), { passive: true });
-    el.addEventListener('touchcancel', () => this._clearLongPressTimer(), { passive: true });
-
-    el.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      showDelete();
-    });
-  }
-
   /**
    * ブランチ削除確認モーダルを表示する。
    * @param {string} projectName - プロジェクト名
@@ -1113,11 +1075,19 @@ export class Drawer {
 
           item.appendChild(nameEl);
 
+          // ローカルブランチ（デフォルト以外）にコンテキストメニュー（右クリック/長押し）を設定
+          let bpHandle = null;
+          if (!branch.remote && branch.name !== defaultBranch) {
+            bpHandle = attachContextMenu(item, {
+              onTrigger: ({ x, y, isMobile }) => {
+                this._showBranchPickerDeleteMenu(projectName, branch.name, worktreeBranches.has(branch.name), x, y, isMobile, refreshPicker);
+              },
+            });
+            this._contextMenuHandles.push(bpHandle);
+          }
+
           item.addEventListener('click', () => {
-            if (this._branchPickerLongPressDetected) {
-              this._branchPickerLongPressDetected = false;
-              return;
-            }
+            if (bpHandle && bpHandle.wasLongPress()) return;
             // リモートブランチの場合はリモートプレフィクスを除去してローカルブランチとして開く
             // 例: "origin/feature/new" → "feature/new"
             let branchName = branch.name;
@@ -1129,11 +1099,6 @@ export class Drawer {
             }
             this._createWorktreeAndConnect(projectName, branchName, false, picker, triggerBtn);
           });
-
-          // ローカルブランチ（デフォルト以外）にコンテキストメニュー（右クリック/長押し）を設定
-          if (!branch.remote && branch.name !== defaultBranch) {
-            this._setupBranchPickerContextMenu(item, projectName, branch.name, worktreeBranches.has(branch.name), refreshPicker);
-          }
 
           listEl.appendChild(item);
         }
@@ -1245,64 +1210,6 @@ export class Drawer {
   }
 
   /**
-   * ブランチピッカー項目にコンテキストメニュー（右クリック/長押し）を設定する。
-   * @param {HTMLElement} el - ブランチ項目要素
-   * @param {string} projectName - プロジェクト名
-   * @param {string} branchName - ブランチ名
-   * @param {boolean} hasWorktree - worktree が存在するか
-   * @param {function} refreshPicker - ピッカーリフレッシュ関数
-   */
-  _setupBranchPickerContextMenu(el, projectName, branchName, hasWorktree, refreshPicker) {
-    let startX = 0;
-    let startY = 0;
-    let longPressTimer = null;
-
-    const showMenu = (clientX, clientY, isMobile) => {
-      this._showBranchPickerDeleteMenu(projectName, branchName, hasWorktree, clientX, clientY, isMobile, refreshPicker);
-    };
-
-    el.addEventListener('touchstart', (e) => {
-      startX = e.touches[0].clientX;
-      startY = e.touches[0].clientY;
-      this._branchPickerLongPressDetected = false;
-      longPressTimer = window.setTimeout(() => {
-        this._branchPickerLongPressDetected = true;
-        showMenu(startX, startY, true);
-      }, 500);
-    }, { passive: true });
-
-    el.addEventListener('touchmove', (e) => {
-      if (longPressTimer !== null) {
-        const moveX = e.touches[0].clientX;
-        const moveY = e.touches[0].clientY;
-        if (Math.abs(moveX - startX) > 10 || Math.abs(moveY - startY) > 10) {
-          window.clearTimeout(longPressTimer);
-          longPressTimer = null;
-        }
-      }
-    }, { passive: true });
-
-    el.addEventListener('touchend', () => {
-      if (longPressTimer !== null) {
-        window.clearTimeout(longPressTimer);
-        longPressTimer = null;
-      }
-    }, { passive: true });
-
-    el.addEventListener('touchcancel', () => {
-      if (longPressTimer !== null) {
-        window.clearTimeout(longPressTimer);
-        longPressTimer = null;
-      }
-    }, { passive: true });
-
-    el.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      showMenu(e.clientX, e.clientY, false);
-    });
-  }
-
-  /**
    * ブランチピッカーの削除コンテキストメニューを表示する。
    * @param {string} projectName - プロジェクト名
    * @param {string} branchName - ブランチ名
@@ -1313,94 +1220,44 @@ export class Drawer {
    * @param {function} refreshPicker - ピッカーリフレッシュ関数
    */
   _showBranchPickerDeleteMenu(projectName, branchName, hasWorktree, clientX, clientY, isMobile, refreshPicker) {
-    // 既存メニューを閉じる
-    const existing = document.querySelector('.drawer-branch-context-menu');
-    if (existing) existing.remove();
+    const ctxMenu = new ContextMenu({
+      items: [{
+        label: 'Delete branch',
+        danger: true,
+        onClick: async () => {
+          ctxMenu.updateItem(0, { label: 'Checking...', disabled: true });
+          try {
+            const { merged } = await isProjectBranchMerged(projectName, branchName);
+            let force = false;
 
-    const menu = document.createElement('div');
-    menu.className = 'drawer-branch-context-menu';
+            if (!merged) {
+              const confirmed = window.confirm(
+                `Branch "${branchName}" has unmerged commits. Delete anyway?`
+              );
+              if (!confirmed) {
+                ctxMenu.close();
+                return;
+              }
+              force = true;
+            }
 
-    const deleteItem = document.createElement('div');
-    deleteItem.className = 'drawer-branch-context-menu-item drawer-branch-context-menu-item--danger';
-    deleteItem.textContent = 'Delete branch';
-    menu.appendChild(deleteItem);
+            ctxMenu.updateItem(0, { label: 'Deleting...' });
+            await deleteProjectBranch(projectName, branchName, force);
+            ctxMenu.close();
 
-    document.body.appendChild(menu);
-
-    // 位置設定
-    if (isMobile) {
-      menu.style.left = '50%';
-      menu.style.top = '50%';
-      menu.style.transform = 'translate(-50%, -50%)';
-    } else {
-      // 画面からはみ出ないように調整
-      const menuRect = menu.getBoundingClientRect();
-      let x = clientX;
-      let y = clientY;
-      if (x + menuRect.width > window.innerWidth) {
-        x = window.innerWidth - menuRect.width - 8;
-      }
-      if (y + menuRect.height > window.innerHeight) {
-        y = window.innerHeight - menuRect.height - 8;
-      }
-      menu.style.left = x + 'px';
-      menu.style.top = y + 'px';
-    }
-
-    const closeMenu = () => {
-      menu.remove();
-      document.removeEventListener('click', outsideClickHandler, true);
-      document.removeEventListener('touchstart', outsideClickHandler, true);
-    };
-
-    const outsideClickHandler = (e) => {
-      if (!menu.contains(e.target)) {
-        closeMenu();
-      }
-    };
-
-    // 次のイベントループでリスナーを追加（即時発火防止）
-    setTimeout(() => {
-      document.addEventListener('click', outsideClickHandler, true);
-      document.addEventListener('touchstart', outsideClickHandler, true);
-    }, 0);
-
-    deleteItem.addEventListener('click', async () => {
-      deleteItem.textContent = 'Checking...';
-      deleteItem.style.pointerEvents = 'none';
-      try {
-        // マージ済みかチェック
-        const { merged } = await isProjectBranchMerged(projectName, branchName);
-        let force = false;
-
-        if (!merged) {
-          // 未マージの場合は確認ダイアログ
-          const confirmed = window.confirm(
-            `Branch "${branchName}" has unmerged commits. Delete anyway?`
-          );
-          if (!confirmed) {
-            closeMenu();
-            return;
+            const [sessions, repos] = await Promise.all([listSessions(), listGhqRepos()]);
+            this._sessions = sessions || [];
+            this._groupSessionsByProject(this._sessions, repos || []);
+            this._renderContent();
+            refreshPicker();
+          } catch (err) {
+            ctxMenu.close();
+            this._showDeleteError(`Failed to delete branch: ${err.message}`);
           }
-          force = true;
-        }
-
-        deleteItem.textContent = 'Deleting...';
-        await deleteProjectBranch(projectName, branchName, force);
-        closeMenu();
-
-        // 削除後にセッション情報を更新
-        const [sessions, repos] = await Promise.all([listSessions(), listGhqRepos()]);
-        this._sessions = sessions || [];
-        this._groupSessionsByProject(this._sessions, repos || []);
-        this._renderContent();
-        // ピッカーのリストをリフレッシュ
-        refreshPicker();
-      } catch (err) {
-        closeMenu();
-        this._showDeleteError(`Failed to delete branch: ${err.message}`);
-      }
+        },
+      }],
     });
+    ctxMenu.show({ x: clientX, y: clientY, isMobile });
   }
 
   /**
@@ -1502,10 +1359,13 @@ export class Drawer {
         el.appendChild(indicator);
 
         // Long press for delete
-        this._setupLongPress(el, session);
+        const otherHandle = attachContextMenu(el, {
+          onTrigger: () => this._showDeleteConfirmation(session),
+        });
+        this._contextMenuHandles.push(otherHandle);
 
         el.addEventListener('click', () => {
-          if (this._longPressDetected) { this._longPressDetected = false; return; }
+          if (otherHandle.wasLongPress()) return;
           this._onSelectSession(session.name, 0);
           this._currentSession = session.name;
           this._currentWindowIndex = 0;
@@ -1722,61 +1582,14 @@ export class Drawer {
     item.appendChild(pathEl);
 
     // 長押しで削除確認モーダル
-    let longPressTimer = null;
-    let longPressDetected = false;
-    let startX = 0;
-    let startY = 0;
-
-    const showDelete = () => {
-      this._showRepoDeleteConfirmation(repo, picker, container, btn);
-    };
-
-    item.addEventListener('touchstart', (e) => {
-      startX = e.touches[0].clientX;
-      startY = e.touches[0].clientY;
-      longPressDetected = false;
-      longPressTimer = window.setTimeout(() => {
-        longPressDetected = true;
-        showDelete();
-      }, 600);
-    }, { passive: true });
-
-    item.addEventListener('touchmove', (e) => {
-      if (longPressTimer !== null) {
-        const moveX = e.touches[0].clientX;
-        const moveY = e.touches[0].clientY;
-        if (Math.abs(moveX - startX) > 10 || Math.abs(moveY - startY) > 10) {
-          window.clearTimeout(longPressTimer);
-          longPressTimer = null;
-        }
-      }
-    }, { passive: true });
-
-    item.addEventListener('touchend', () => {
-      if (longPressTimer !== null) {
-        window.clearTimeout(longPressTimer);
-        longPressTimer = null;
-      }
-    }, { passive: true });
-
-    item.addEventListener('touchcancel', () => {
-      if (longPressTimer !== null) {
-        window.clearTimeout(longPressTimer);
-        longPressTimer = null;
-      }
-    }, { passive: true });
-
-    // デスクトップ: 右クリックで削除オプション
-    item.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      showDelete();
+    const pickerHandle = attachContextMenu(item, {
+      delay: 600,
+      onTrigger: () => this._showRepoDeleteConfirmation(repo, picker, container, btn),
     });
+    this._contextMenuHandles.push(pickerHandle);
 
     item.addEventListener('click', () => {
-      if (longPressDetected) {
-        longPressDetected = false;
-        return;
-      }
+      if (pickerHandle.wasLongPress()) return;
       this._handleCreateSessionFromPicker(repo.name, item, container, btn, picker);
     });
 
@@ -2185,60 +1998,11 @@ export class Drawer {
   }
 
   /**
-   * セッションヘッダーに長押し検出を設定する。
-   * 500ms の長押しで削除確認モーダルを表示する。
-   * @param {HTMLElement} header - セッションヘッダー要素
-   * @param {Object} session - セッション情報
+   * 全コンテキストメニューハンドルを detach する。
    */
-  _setupLongPress(header, session) {
-    let startX = 0;
-    let startY = 0;
-
-    header.addEventListener('touchstart', (e) => {
-      startX = e.touches[0].clientX;
-      startY = e.touches[0].clientY;
-      this._longPressDetected = false;
-
-      this._longPressTimer = window.setTimeout(() => {
-        this._longPressDetected = true;
-        this._showDeleteConfirmation(session);
-      }, 500);
-    }, { passive: true });
-
-    header.addEventListener('touchmove', (e) => {
-      if (this._longPressTimer !== null) {
-        const moveX = e.touches[0].clientX;
-        const moveY = e.touches[0].clientY;
-        // 10px 以上動いたら長押しキャンセル
-        if (Math.abs(moveX - startX) > 10 || Math.abs(moveY - startY) > 10) {
-          this._clearLongPressTimer();
-        }
-      }
-    }, { passive: true });
-
-    header.addEventListener('touchend', () => {
-      this._clearLongPressTimer();
-    }, { passive: true });
-
-    header.addEventListener('touchcancel', () => {
-      this._clearLongPressTimer();
-    }, { passive: true });
-
-    // デスクトップ: 右クリック（contextmenu）でも削除オプション表示
-    header.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      this._showDeleteConfirmation(session);
-    });
-  }
-
-  /**
-   * 長押しタイマーをクリアする。
-   */
-  _clearLongPressTimer() {
-    if (this._longPressTimer !== null) {
-      window.clearTimeout(this._longPressTimer);
-      this._longPressTimer = null;
-    }
+  _detachContextMenuHandles() {
+    for (const h of this._contextMenuHandles) h.detach();
+    this._contextMenuHandles = [];
   }
 
   /**
@@ -2442,7 +2206,7 @@ export class Drawer {
     this._projects = new Map();
     this._otherSessions = [];
     this._expandedProjects.clear();
-    this._clearLongPressTimer();
+    this._detachContextMenuHandles();
     this._stopRefreshPolling();
 
     // ピン状態をクリア

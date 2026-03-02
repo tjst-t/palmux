@@ -14,16 +14,29 @@ import (
 
 // mockGitCommandRunner はテスト用の git CommandRunner モック。
 type mockGitCommandRunner struct {
-	output []byte
-	err    error
+	output      []byte
+	err         error
+	stdinOutput []byte
+	stdinErr    error
 
-	calledDir  string
-	calledArgs []string
+	calledDir   string
+	calledArgs  []string
+	calledStdin []byte
 }
 
 func (m *mockGitCommandRunner) RunInDir(dir string, args ...string) ([]byte, error) {
 	m.calledDir = dir
 	m.calledArgs = args
+	return m.output, m.err
+}
+
+func (m *mockGitCommandRunner) RunWithStdin(dir string, input []byte, args ...string) ([]byte, error) {
+	m.calledDir = dir
+	m.calledArgs = args
+	m.calledStdin = input
+	if m.stdinOutput != nil || m.stdinErr != nil {
+		return m.stdinOutput, m.stdinErr
+	}
 	return m.output, m.err
 }
 
@@ -465,5 +478,557 @@ func TestHandleGitStatus_Authentication(t *testing.T) {
 	rec = doRequest(t, srv.Handler(), http.MethodGet, "/api/sessions/main/git/status", "wrong-token", "")
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestHandleGitDiscard(t *testing.T) {
+	tests := []struct {
+		name       string
+		session    string
+		cwd        string
+		cwdErr     error
+		body       string
+		gitErr     error
+		wantStatus int
+	}{
+		{
+			name:       "正常系: ファイルをdiscard",
+			session:    "main",
+			cwd:        "/home/user/project",
+			body:       `{"paths":["file.go"]}`,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "正常系: 複数ファイルをdiscard",
+			session:    "main",
+			cwd:        "/home/user/project",
+			body:       `{"paths":["file1.go","file2.go"]}`,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "異常系: セッションが存在しない → 404",
+			session:    "nonexistent",
+			cwdErr:     fmt.Errorf("get session cwd: %w", tmux.ErrSessionNotFound),
+			body:       `{"paths":["file.go"]}`,
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "異常系: git リポジトリでない → 400",
+			session:    "main",
+			cwd:        "/home/user/no-git",
+			body:       `{"paths":["file.go"]}`,
+			gitErr:     git.ErrNotGitRepo,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "異常系: 不正な JSON → 400",
+			session:    "main",
+			cwd:        "/home/user/project",
+			body:       `{invalid`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "異常系: パストラバーサル → 400",
+			session:    "main",
+			cwd:        "/home/user/project",
+			body:       `{"paths":["../etc/passwd"]}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "異常系: 空のパス配列 → 400",
+			session:    "main",
+			cwd:        "/home/user/project",
+			body:       `{"paths":[]}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "異常系: git コマンドエラー → 500",
+			session:    "main",
+			cwd:        "/home/user/project",
+			body:       `{"paths":["file.go"]}`,
+			gitErr:     errors.New("git command failed"),
+			wantStatus: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmuxMock := &configurableMock{
+				cwd:    tt.cwd,
+				cwdErr: tt.cwdErr,
+			}
+			gitMock := &mockGitCommandRunner{
+				err: tt.gitErr,
+			}
+			srv, token := newTestServerWithGit(tmuxMock, gitMock)
+			rec := doRequest(t, srv.Handler(), http.MethodPost, "/api/sessions/"+tt.session+"/git/discard", token, tt.body)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d, body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+
+			if tt.wantStatus == http.StatusOK {
+				var result map[string]string
+				if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+					t.Fatalf("failed to decode response: %v", err)
+				}
+				if result["status"] != "ok" {
+					t.Errorf("status = %q, want %q", result["status"], "ok")
+				}
+			}
+		})
+	}
+}
+
+func TestHandleGitStage(t *testing.T) {
+	tests := []struct {
+		name       string
+		session    string
+		cwd        string
+		cwdErr     error
+		body       string
+		gitErr     error
+		wantStatus int
+	}{
+		{
+			name:       "正常系: ファイルをstage",
+			session:    "main",
+			cwd:        "/home/user/project",
+			body:       `{"paths":["file.go"]}`,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "異常系: セッションが存在しない → 404",
+			session:    "nonexistent",
+			cwdErr:     fmt.Errorf("get session cwd: %w", tmux.ErrSessionNotFound),
+			body:       `{"paths":["file.go"]}`,
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "異常系: git リポジトリでない → 400",
+			session:    "main",
+			cwd:        "/home/user/no-git",
+			body:       `{"paths":["file.go"]}`,
+			gitErr:     git.ErrNotGitRepo,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "異常系: 不正な JSON → 400",
+			session:    "main",
+			cwd:        "/home/user/project",
+			body:       `not json`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "異常系: パストラバーサル → 400",
+			session:    "main",
+			cwd:        "/home/user/project",
+			body:       `{"paths":["../../secret"]}`,
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmuxMock := &configurableMock{
+				cwd:    tt.cwd,
+				cwdErr: tt.cwdErr,
+			}
+			gitMock := &mockGitCommandRunner{
+				err: tt.gitErr,
+			}
+			srv, token := newTestServerWithGit(tmuxMock, gitMock)
+			rec := doRequest(t, srv.Handler(), http.MethodPost, "/api/sessions/"+tt.session+"/git/stage", token, tt.body)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d, body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+
+			if tt.wantStatus == http.StatusOK {
+				var result map[string]string
+				if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+					t.Fatalf("failed to decode response: %v", err)
+				}
+				if result["status"] != "ok" {
+					t.Errorf("status = %q, want %q", result["status"], "ok")
+				}
+			}
+		})
+	}
+}
+
+func TestHandleGitUnstage(t *testing.T) {
+	tests := []struct {
+		name       string
+		session    string
+		cwd        string
+		cwdErr     error
+		body       string
+		gitErr     error
+		wantStatus int
+	}{
+		{
+			name:       "正常系: ファイルをunstage",
+			session:    "main",
+			cwd:        "/home/user/project",
+			body:       `{"paths":["file.go"]}`,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "異常系: セッションが存在しない → 404",
+			session:    "nonexistent",
+			cwdErr:     fmt.Errorf("get session cwd: %w", tmux.ErrSessionNotFound),
+			body:       `{"paths":["file.go"]}`,
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "異常系: git リポジトリでない → 400",
+			session:    "main",
+			cwd:        "/home/user/no-git",
+			body:       `{"paths":["file.go"]}`,
+			gitErr:     git.ErrNotGitRepo,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "異常系: 不正な JSON → 400",
+			session:    "main",
+			cwd:        "/home/user/project",
+			body:       `broken`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "異常系: パストラバーサル → 400",
+			session:    "main",
+			cwd:        "/home/user/project",
+			body:       `{"paths":["../secret"]}`,
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmuxMock := &configurableMock{
+				cwd:    tt.cwd,
+				cwdErr: tt.cwdErr,
+			}
+			gitMock := &mockGitCommandRunner{
+				err: tt.gitErr,
+			}
+			srv, token := newTestServerWithGit(tmuxMock, gitMock)
+			rec := doRequest(t, srv.Handler(), http.MethodPost, "/api/sessions/"+tt.session+"/git/unstage", token, tt.body)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d, body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+
+			if tt.wantStatus == http.StatusOK {
+				var result map[string]string
+				if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+					t.Fatalf("failed to decode response: %v", err)
+				}
+				if result["status"] != "ok" {
+					t.Errorf("status = %q, want %q", result["status"], "ok")
+				}
+			}
+		})
+	}
+}
+
+func TestHandleGitDiscardHunk(t *testing.T) {
+	tests := []struct {
+		name       string
+		session    string
+		cwd        string
+		cwdErr     error
+		body       string
+		gitErr     error
+		wantStatus int
+	}{
+		{
+			name:       "正常系: hunk をdiscard",
+			session:    "main",
+			cwd:        "/home/user/project",
+			body:       `{"patch":"diff --git a/file.go b/file.go\n@@ -1,3 +1,4 @@\n+new line\n"}`,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "異常系: セッションが存在しない → 404",
+			session:    "nonexistent",
+			cwdErr:     fmt.Errorf("get session cwd: %w", tmux.ErrSessionNotFound),
+			body:       `{"patch":"some patch"}`,
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "異常系: git リポジトリでない → 400",
+			session:    "main",
+			cwd:        "/home/user/no-git",
+			body:       `{"patch":"some patch"}`,
+			gitErr:     git.ErrNotGitRepo,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "異常系: 不正な JSON → 400",
+			session:    "main",
+			cwd:        "/home/user/project",
+			body:       `{bad`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "異常系: 空のパッチ → 400",
+			session:    "main",
+			cwd:        "/home/user/project",
+			body:       `{"patch":""}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "異常系: git コマンドエラー → 500",
+			session:    "main",
+			cwd:        "/home/user/project",
+			body:       `{"patch":"some patch"}`,
+			gitErr:     errors.New("git apply failed"),
+			wantStatus: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmuxMock := &configurableMock{
+				cwd:    tt.cwd,
+				cwdErr: tt.cwdErr,
+			}
+			gitMock := &mockGitCommandRunner{
+				err: tt.gitErr,
+			}
+			srv, token := newTestServerWithGit(tmuxMock, gitMock)
+			rec := doRequest(t, srv.Handler(), http.MethodPost, "/api/sessions/"+tt.session+"/git/discard-hunk", token, tt.body)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d, body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+
+			if tt.wantStatus == http.StatusOK {
+				var result map[string]string
+				if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+					t.Fatalf("failed to decode response: %v", err)
+				}
+				if result["status"] != "ok" {
+					t.Errorf("status = %q, want %q", result["status"], "ok")
+				}
+			}
+		})
+	}
+}
+
+func TestHandleGitStageHunk(t *testing.T) {
+	tests := []struct {
+		name       string
+		session    string
+		cwd        string
+		cwdErr     error
+		body       string
+		gitErr     error
+		wantStatus int
+	}{
+		{
+			name:       "正常系: hunk をstage",
+			session:    "main",
+			cwd:        "/home/user/project",
+			body:       `{"patch":"diff --git a/file.go b/file.go\n@@ -1,3 +1,4 @@\n+new line\n"}`,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "異常系: セッションが存在しない → 404",
+			session:    "nonexistent",
+			cwdErr:     fmt.Errorf("get session cwd: %w", tmux.ErrSessionNotFound),
+			body:       `{"patch":"some patch"}`,
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "異常系: 不正な JSON → 400",
+			session:    "main",
+			cwd:        "/home/user/project",
+			body:       `{bad`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "異常系: 空のパッチ → 400",
+			session:    "main",
+			cwd:        "/home/user/project",
+			body:       `{"patch":""}`,
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmuxMock := &configurableMock{
+				cwd:    tt.cwd,
+				cwdErr: tt.cwdErr,
+			}
+			gitMock := &mockGitCommandRunner{
+				err: tt.gitErr,
+			}
+			srv, token := newTestServerWithGit(tmuxMock, gitMock)
+			rec := doRequest(t, srv.Handler(), http.MethodPost, "/api/sessions/"+tt.session+"/git/stage-hunk", token, tt.body)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d, body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+
+			if tt.wantStatus == http.StatusOK {
+				var result map[string]string
+				if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+					t.Fatalf("failed to decode response: %v", err)
+				}
+				if result["status"] != "ok" {
+					t.Errorf("status = %q, want %q", result["status"], "ok")
+				}
+			}
+		})
+	}
+}
+
+func TestHandleGitUnstageHunk(t *testing.T) {
+	tests := []struct {
+		name       string
+		session    string
+		cwd        string
+		cwdErr     error
+		body       string
+		gitErr     error
+		wantStatus int
+	}{
+		{
+			name:       "正常系: hunk をunstage",
+			session:    "main",
+			cwd:        "/home/user/project",
+			body:       `{"patch":"diff --git a/file.go b/file.go\n@@ -1,3 +1,4 @@\n+new line\n"}`,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "異常系: セッションが存在しない → 404",
+			session:    "nonexistent",
+			cwdErr:     fmt.Errorf("get session cwd: %w", tmux.ErrSessionNotFound),
+			body:       `{"patch":"some patch"}`,
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "異常系: 不正な JSON → 400",
+			session:    "main",
+			cwd:        "/home/user/project",
+			body:       `{bad`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "異常系: 空のパッチ → 400",
+			session:    "main",
+			cwd:        "/home/user/project",
+			body:       `{"patch":""}`,
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmuxMock := &configurableMock{
+				cwd:    tt.cwd,
+				cwdErr: tt.cwdErr,
+			}
+			gitMock := &mockGitCommandRunner{
+				err: tt.gitErr,
+			}
+			srv, token := newTestServerWithGit(tmuxMock, gitMock)
+			rec := doRequest(t, srv.Handler(), http.MethodPost, "/api/sessions/"+tt.session+"/git/unstage-hunk", token, tt.body)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d, body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+
+			if tt.wantStatus == http.StatusOK {
+				var result map[string]string
+				if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+					t.Fatalf("failed to decode response: %v", err)
+				}
+				if result["status"] != "ok" {
+					t.Errorf("status = %q, want %q", result["status"], "ok")
+				}
+			}
+		})
+	}
+}
+
+func TestHandleGitDiff_Structured(t *testing.T) {
+	tests := []struct {
+		name       string
+		session    string
+		query      string
+		cwd        string
+		cwdErr     error
+		gitOutput  string
+		gitErr     error
+		wantStatus int
+	}{
+		{
+			name:       "正常系: structured=true で構造化差分を返す",
+			session:    "main",
+			query:      "?structured=true",
+			cwd:        "/home/user/project",
+			gitOutput:  "diff --git a/file.go b/file.go\nindex abc..def 100644\n--- a/file.go\n+++ b/file.go\n@@ -1,3 +1,4 @@\n line1\n+new line\n line2\n line3\n",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "正常系: structured=true で空の差分",
+			session:    "main",
+			query:      "?structured=true",
+			cwd:        "/home/user/project",
+			gitOutput:  "",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "異常系: structured=true でセッションが存在しない → 404",
+			session:    "nonexistent",
+			query:      "?structured=true",
+			cwdErr:     fmt.Errorf("get session cwd: %w", tmux.ErrSessionNotFound),
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "異常系: structured=true で git リポジトリでない → 400",
+			session:    "main",
+			query:      "?structured=true",
+			cwd:        "/home/user/no-git",
+			gitErr:     git.ErrNotGitRepo,
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmuxMock := &configurableMock{
+				cwd:    tt.cwd,
+				cwdErr: tt.cwdErr,
+			}
+			gitMock := &mockGitCommandRunner{
+				output: []byte(tt.gitOutput),
+				err:    tt.gitErr,
+			}
+			srv, token := newTestServerWithGit(tmuxMock, gitMock)
+			path := "/api/sessions/" + tt.session + "/git/diff" + tt.query
+			rec := doRequest(t, srv.Handler(), http.MethodGet, path, token, "")
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d, body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+
+			if tt.wantStatus == http.StatusOK {
+				var result []git.StructuredDiff
+				if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+					t.Fatalf("failed to decode response: %v", err)
+				}
+				// structured=true の場合は配列を返す
+				if result == nil {
+					t.Error("response should not be nil")
+				}
+			}
+		})
 	}
 }
