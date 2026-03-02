@@ -121,8 +121,9 @@ func (s *RipgrepSearcher) Search(ctx context.Context, query string, dir string, 
 	err := cmd.Run()
 	if err != nil {
 		// exit code 1 は "マッチなし" を意味する — エラーではない
+		// exit code 2 は "検索対象ファイルなし"（.gitignore 等でフィルタ）— エラーではない
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			if exitErr.ExitCode() == 1 {
+			if exitErr.ExitCode() == 1 || exitErr.ExitCode() == 2 {
 				return nil, nil
 			}
 		}
