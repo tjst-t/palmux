@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 )
@@ -69,6 +70,14 @@ func (m *Manager) GetServer(language, rootDir string) (*LanguageServer, error) {
 	}
 
 	srv := m.newServer(config, rootDir)
+
+	// アイドルタイムアウト時にマップから自動除去するコールバック
+	srv.onIdle = func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		delete(m.servers, key)
+	}
+
 	if err := srv.Start(context.Background()); err != nil {
 		return nil, fmt.Errorf("start server for %q: %w", language, err)
 	}
@@ -82,14 +91,14 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	var lastErr error
+	var errs []error
 	for key, srv := range m.servers {
 		if err := srv.Shutdown(ctx); err != nil {
-			lastErr = fmt.Errorf("shutdown %s: %w", key, err)
+			errs = append(errs, fmt.Errorf("shutdown %s: %w", key, err))
 		}
 	}
 	m.servers = make(map[string]*LanguageServer)
-	return lastErr
+	return errors.Join(errs...)
 }
 
 // Status は全ての言語サーバーのステータスを返す。

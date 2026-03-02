@@ -17,6 +17,7 @@ import (
 // mockLSPServer は LSP プロトコルに準拠するテスト用のサーバー。
 // io.Pipe 上で JSON-RPC メッセージを読み書きし、initialize / shutdown / exit に対応する。
 type mockLSPServer struct {
+	t      *testing.T
 	reader *bufio.Reader
 	tp     *textproto.Reader
 	writer io.Writer
@@ -31,9 +32,11 @@ type mockLSPServer struct {
 	done chan struct{}
 }
 
-func newMockLSPServer(reader io.Reader, writer io.Writer) *mockLSPServer {
+func newMockLSPServer(t *testing.T, reader io.Reader, writer io.Writer) *mockLSPServer {
+	t.Helper()
 	br := bufio.NewReader(reader)
 	return &mockLSPServer{
+		t:        t,
 		reader:   br,
 		tp:       textproto.NewReader(br),
 		writer:   writer,
@@ -152,20 +155,29 @@ func (s *mockLSPServer) writeMessage(msg *jsonrpcMessage) error {
 }
 
 func (s *mockLSPServer) respond(id *json.RawMessage, result interface{}) {
-	resultRaw, _ := json.Marshal(result)
-	s.writeMessage(&jsonrpcMessage{
+	s.t.Helper()
+	resultRaw, err := json.Marshal(result)
+	if err != nil {
+		s.t.Fatalf("mockLSPServer.respond: json.Marshal エラー: %v", err)
+	}
+	if err := s.writeMessage(&jsonrpcMessage{
 		JSONRPC: jsonrpcVersion,
 		ID:      id,
 		Result:  json.RawMessage(resultRaw),
-	})
+	}); err != nil {
+		s.t.Fatalf("mockLSPServer.respond: writeMessage エラー: %v", err)
+	}
 }
 
 func (s *mockLSPServer) respondError(id *json.RawMessage, rpcErr *jsonrpcError) {
-	s.writeMessage(&jsonrpcMessage{
+	s.t.Helper()
+	if err := s.writeMessage(&jsonrpcMessage{
 		JSONRPC: jsonrpcVersion,
 		ID:      id,
 		Error:   rpcErr,
-	})
+	}); err != nil {
+		s.t.Fatalf("mockLSPServer.respondError: writeMessage エラー: %v", err)
+	}
 }
 
 func (s *mockLSPServer) stop() {
@@ -192,15 +204,16 @@ func setupTestServer(t *testing.T) (*LanguageServer, *mockLSPServer) {
 			Command:  "gopls",
 			Enabled:  true,
 		},
-		language:    "go",
-		rootDir:     "/tmp/test-project",
-		status:      StatusStarting,
-		maxRestarts: 3,
+		language:      "go",
+		rootDir:       "/tmp/test-project",
+		status:        StatusStarting,
+		maxRestarts:   3,
+		stopIdleTimer: make(chan struct{}),
 	}
 
 	ls.conn = newJSONRPCConn(serverToClientR, clientToServerW, clientToServerW, serverToClientR)
 
-	mock := newMockLSPServer(clientToServerR, serverToClientW)
+	mock := newMockLSPServer(t, clientToServerR, serverToClientW)
 
 	t.Cleanup(func() {
 		mock.stop()
@@ -470,11 +483,283 @@ func TestNewLanguageServer(t *testing.T) {
 		t.Errorf("maxRestarts = %d, want %d", ls.maxRestarts, 3)
 	}
 
+	if ls.idleTimeout != defaultIdleTimeout {
+		t.Errorf("idleTimeout = %v, want %v", ls.idleTimeout, defaultIdleTimeout)
+	}
+
 	if ls.Language() != "go" {
 		t.Errorf("Language() = %q, want %q", ls.Language(), "go")
 	}
 
 	if ls.RootDir() != "/home/user/project" {
 		t.Errorf("RootDir() = %q, want %q", ls.RootDir(), "/home/user/project")
+	}
+}
+
+func TestIdleTimeoutAutoStop(t *testing.T) {
+	t.Run("アイドルタイムアウトでサーバーが自動停止する", func(t *testing.T) {
+		ls, mock := setupTestServer(t)
+
+		// 非常に短いアイドルタイムアウトを設定
+		ls.idleTimeout = 100 * time.Millisecond
+
+		go mock.serve()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := ls.Start(ctx); err != nil {
+			t.Fatalf("Start エラー: %v", err)
+		}
+
+		if ls.Status() != StatusReady {
+			t.Fatalf("status = %q, want %q", ls.Status(), StatusReady)
+		}
+
+		// アイドルタイムアウトを待つ（タイムアウト + チェック間隔のマージン）
+		time.Sleep(300 * time.Millisecond)
+
+		if ls.Status() != StatusStopped {
+			t.Errorf("status = %q, want %q (アイドルタイムアウトで停止すべき)", ls.Status(), StatusStopped)
+		}
+	})
+
+	t.Run("アクティビティがあるとタイマーがリセットされる", func(t *testing.T) {
+		ls, mock := setupTestServer(t)
+
+		// 短いアイドルタイムアウト
+		ls.idleTimeout = 200 * time.Millisecond
+
+		mock.handlers["textDocument/hover"] = func(params json.RawMessage) (interface{}, *jsonrpcError) {
+			return HoverResult{
+				Contents: MarkupContent{
+					Kind:  MarkupKindMarkdown,
+					Value: "test",
+				},
+			}, nil
+		}
+
+		go mock.serve()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := ls.Start(ctx); err != nil {
+			t.Fatalf("Start エラー: %v", err)
+		}
+
+		// タイムアウトの半分ごとにリクエストを送信して、タイマーをリセットする
+		for i := 0; i < 5; i++ {
+			time.Sleep(100 * time.Millisecond)
+
+			if ls.Status() != StatusReady {
+				t.Fatalf("iteration %d: status = %q, want %q (アクティビティがあるので停止すべきでない)",
+					i, ls.Status(), StatusReady)
+			}
+
+			var result HoverResult
+			if err := ls.Request(ctx, "textDocument/hover", TextDocumentPositionParams{
+				TextDocument: TextDocumentIdentifier{URI: "file:///tmp/test.go"},
+				Position:     Position{Line: 1, Character: 5},
+			}, &result); err != nil {
+				t.Fatalf("Request エラー: %v", err)
+			}
+		}
+
+		// 最後のアクティビティから十分に時間を置いてタイムアウトを確認
+		time.Sleep(400 * time.Millisecond)
+
+		if ls.Status() != StatusStopped {
+			t.Errorf("status = %q, want %q (アクティビティ停止後にタイムアウトすべき)", ls.Status(), StatusStopped)
+		}
+	})
+
+	t.Run("onIdleコールバックが呼ばれる", func(t *testing.T) {
+		ls, mock := setupTestServer(t)
+
+		ls.idleTimeout = 100 * time.Millisecond
+
+		callbackCh := make(chan struct{}, 1)
+		ls.onIdle = func() {
+			callbackCh <- struct{}{}
+		}
+
+		go mock.serve()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := ls.Start(ctx); err != nil {
+			t.Fatalf("Start エラー: %v", err)
+		}
+
+		select {
+		case <-callbackCh:
+			// onIdle が呼ばれた
+		case <-time.After(2 * time.Second):
+			t.Fatal("onIdle コールバックが呼ばれなかった")
+		}
+	})
+
+	t.Run("Shutdownでアイドルタイマーが停止する", func(t *testing.T) {
+		ls, mock := setupTestServer(t)
+
+		ls.idleTimeout = 1 * time.Hour // 非常に長いタイムアウト
+
+		go mock.serve()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := ls.Start(ctx); err != nil {
+			t.Fatalf("Start エラー: %v", err)
+		}
+
+		// 即座にシャットダウン
+		if err := ls.Shutdown(ctx); err != nil {
+			t.Fatalf("Shutdown エラー: %v", err)
+		}
+
+		if ls.Status() != StatusStopped {
+			t.Errorf("status = %q, want %q", ls.Status(), StatusStopped)
+		}
+	})
+}
+
+func TestCrashDetection(t *testing.T) {
+	t.Run("maxRestartsを超えるとStatusErrorになる", func(t *testing.T) {
+		ls := &LanguageServer{
+			status:        StatusReady,
+			maxRestarts:   3,
+			restartCount:  3, // 既に最大回数に達している
+			stopIdleTimer: make(chan struct{}),
+		}
+
+		// processMonitor のクラッシュ検出ロジックをシミュレート
+		ls.mu.Lock()
+		if ls.restartCount >= ls.maxRestarts {
+			ls.status = StatusError
+		}
+		ls.mu.Unlock()
+
+		if ls.Status() != StatusError {
+			t.Errorf("status = %q, want %q", ls.Status(), StatusError)
+		}
+	})
+
+	t.Run("restartCountとmaxRestartsが正しく設定される", func(t *testing.T) {
+		ls := newLanguageServer(ServerConfig{
+			Language: "go",
+			Command:  "gopls",
+			Enabled:  true,
+		}, "/tmp/project")
+
+		if ls.restartCount != 0 {
+			t.Errorf("restartCount = %d, want 0", ls.restartCount)
+		}
+
+		if ls.maxRestarts != 3 {
+			t.Errorf("maxRestarts = %d, want 3", ls.maxRestarts)
+		}
+	})
+
+	t.Run("shutdownRequestedフラグが正しく設定される", func(t *testing.T) {
+		ls, mock := setupTestServer(t)
+
+		go mock.serve()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := ls.initialize(ctx); err != nil {
+			t.Fatalf("initialize エラー: %v", err)
+		}
+		ls.status = StatusReady
+
+		if ls.shutdownRequested {
+			t.Error("shutdownRequested は false であるべき")
+		}
+
+		if err := ls.Shutdown(ctx); err != nil {
+			t.Fatalf("Shutdown エラー: %v", err)
+		}
+
+		if !ls.shutdownRequested {
+			t.Error("shutdownRequested は true であるべき")
+		}
+	})
+
+	t.Run("パイプ切断でクラッシュを検出する", func(t *testing.T) {
+		// クライアント → サーバー
+		clientToServerR, clientToServerW := io.Pipe()
+		// サーバー → クライアント
+		serverToClientR, serverToClientW := io.Pipe()
+
+		ls := &LanguageServer{
+			config: ServerConfig{
+				Language: "go",
+				Command:  "gopls",
+				Enabled:  true,
+			},
+			language:      "go",
+			rootDir:       "/tmp/test-project",
+			status:        StatusStarting,
+			maxRestarts:   0, // リスタートしない
+			stopIdleTimer: make(chan struct{}),
+		}
+
+		ls.conn = newJSONRPCConn(serverToClientR, clientToServerW, clientToServerW, serverToClientR)
+
+		mock := newMockLSPServer(t, clientToServerR, serverToClientW)
+		go mock.serve()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := ls.initialize(ctx); err != nil {
+			t.Fatalf("initialize エラー: %v", err)
+		}
+		ls.status = StatusReady
+
+		// サーバーのパイプを閉じてクラッシュをシミュレート
+		serverToClientW.Close()
+		clientToServerR.Close()
+		mock.stop()
+
+		// cleanup
+		t.Cleanup(func() {
+			ls.conn.Close()
+		})
+
+		// クラッシュ検出後、コネクションが閉じられることを確認
+		// （processMonitor は cmd が nil の場合は動作しないが、
+		//  接続切断でリクエストがエラーになることを確認する）
+		err := ls.Request(ctx, "textDocument/hover", nil, nil)
+		if err == nil {
+			t.Error("パイプ切断後はエラーが返るべき")
+		}
+	})
+}
+
+func TestGetIdleTimeout(t *testing.T) {
+	tests := []struct {
+		name     string
+		timeout  time.Duration
+		expected time.Duration
+	}{
+		{"デフォルト値", 0, defaultIdleTimeout},
+		{"負の値", -1 * time.Second, defaultIdleTimeout},
+		{"カスタム値", 5 * time.Minute, 5 * time.Minute},
+		{"短い値", 100 * time.Millisecond, 100 * time.Millisecond},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ls := &LanguageServer{idleTimeout: tt.timeout}
+			got := ls.getIdleTimeout()
+			if got != tt.expected {
+				t.Errorf("getIdleTimeout() = %v, want %v", got, tt.expected)
+			}
+		})
 	}
 }

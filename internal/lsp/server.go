@@ -9,6 +9,9 @@ import (
 	"time"
 )
 
+// defaultIdleTimeout はデフォルトのアイドルタイムアウト（10分）。
+const defaultIdleTimeout = 10 * time.Minute
+
 // LanguageServer は言語サーバープロセスとの接続を管理する。
 type LanguageServer struct {
 	config   ServerConfig
@@ -20,9 +23,15 @@ type LanguageServer struct {
 	mu       sync.RWMutex
 
 	// Lifecycle
-	lastActivity time.Time
-	restartCount int
-	maxRestarts  int
+	lastActivity      time.Time
+	restartCount      int
+	maxRestarts       int
+	shutdownRequested bool
+	stopIdleTimer     chan struct{} // アイドルタイマー停止用
+
+	// Idle timeout
+	idleTimeout time.Duration // 0 の場合はデフォルト値を使用
+	onIdle      func()        // アイドルタイムアウト時のコールバック
 
 	// サーバーケイパビリティ（initialize 後に設定される）
 	capabilities *ServerCapabilities
@@ -31,12 +40,22 @@ type LanguageServer struct {
 // newLanguageServer は新しい LanguageServer を作成する。
 func newLanguageServer(config ServerConfig, rootDir string) *LanguageServer {
 	return &LanguageServer{
-		config:      config,
-		language:    config.Language,
-		rootDir:     rootDir,
-		status:      StatusStopped,
-		maxRestarts: 3,
+		config:        config,
+		language:      config.Language,
+		rootDir:       rootDir,
+		status:        StatusStopped,
+		maxRestarts:   3,
+		idleTimeout:   defaultIdleTimeout,
+		stopIdleTimer: make(chan struct{}),
 	}
+}
+
+// getIdleTimeout はアイドルタイムアウトを返す。0 の場合はデフォルト値を返す。
+func (ls *LanguageServer) getIdleTimeout() time.Duration {
+	if ls.idleTimeout <= 0 {
+		return defaultIdleTimeout
+	}
+	return ls.idleTimeout
 }
 
 // Start はサーバープロセスを起動し、Initialize ハンドシェイクを実行する。
@@ -85,6 +104,15 @@ func (ls *LanguageServer) Start(ctx context.Context) error {
 	}
 
 	ls.status = StatusReady
+
+	// アイドルタイマーを起動
+	go ls.idleChecker()
+
+	// プロセス監視を起動（実プロセスの場合のみ）
+	if ls.cmd != nil {
+		go ls.processMonitor()
+	}
+
 	return nil
 }
 
@@ -126,24 +154,38 @@ func (ls *LanguageServer) initialize(ctx context.Context) error {
 // Shutdown はサーバーをグレースフルにシャットダウンする。
 func (ls *LanguageServer) Shutdown(ctx context.Context) error {
 	ls.mu.Lock()
-	defer ls.mu.Unlock()
 
 	if ls.status == StatusStopped {
+		ls.mu.Unlock()
 		return nil
 	}
 
-	if ls.conn != nil {
-		// shutdown リクエストを送信
-		err := ls.conn.Request(ctx, "shutdown", nil, nil)
-		if err != nil {
-			// shutdown 失敗してもプロセス終了は試みる
-		}
+	ls.shutdownRequested = true
+
+	// アイドルタイマーを停止
+	select {
+	case <-ls.stopIdleTimer:
+		// already closed
+	default:
+		close(ls.stopIdleTimer)
+	}
+
+	// ロックを解放してから conn 操作（conn.Request はブロックする可能性がある）
+	conn := ls.conn
+	ls.mu.Unlock()
+
+	if conn != nil {
+		// shutdown リクエストを送信（失敗してもプロセス終了は試みる）
+		_ = conn.Request(ctx, "shutdown", nil, nil)
 
 		// exit 通知を送信
-		_ = ls.conn.Notify(ctx, "exit", nil)
+		_ = conn.Notify(ctx, "exit", nil)
 
-		ls.conn.Close()
+		conn.Close()
 	}
+
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
 
 	// プロセスの終了を待つ（タイムアウト付き）
 	if ls.cmd != nil && ls.cmd.Process != nil {
@@ -226,4 +268,111 @@ func (ls *LanguageServer) Capabilities() *ServerCapabilities {
 	ls.mu.RLock()
 	defer ls.mu.RUnlock()
 	return ls.capabilities
+}
+
+// idleChecker はアイドルタイムアウトを定期的にチェックするゴルーチン。
+// lastActivity から idleTimeout が経過したら Shutdown を呼ぶ。
+func (ls *LanguageServer) idleChecker() {
+	timeout := ls.getIdleTimeout()
+	// チェック間隔はタイムアウトの 1/4（ただし最小 50ms）
+	interval := timeout / 4
+	if interval < 50*time.Millisecond {
+		interval = 50 * time.Millisecond
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ls.stopIdleTimer:
+			return
+		case <-ticker.C:
+			ls.mu.RLock()
+			elapsed := time.Since(ls.lastActivity)
+			status := ls.status
+			ls.mu.RUnlock()
+
+			if status != StatusReady {
+				return
+			}
+
+			if elapsed >= timeout {
+				// アイドルタイムアウト → シャットダウン
+				ls.Shutdown(context.Background())
+				if ls.onIdle != nil {
+					ls.onIdle()
+				}
+				return
+			}
+		}
+	}
+}
+
+// processMonitor はプロセスの異常終了を検出し、自動再起動するゴルーチン。
+func (ls *LanguageServer) processMonitor() {
+	if ls.cmd == nil {
+		return
+	}
+
+	err := ls.cmd.Wait()
+
+	ls.mu.RLock()
+	shutdownRequested := ls.shutdownRequested
+	ls.mu.RUnlock()
+
+	if shutdownRequested {
+		// 意図的なシャットダウンの場合は何もしない
+		return
+	}
+
+	// 予期しないクラッシュ
+	_ = err // プロセス終了のエラーは記録のみ
+
+	ls.mu.Lock()
+	if ls.restartCount >= ls.maxRestarts {
+		ls.status = StatusError
+		ls.mu.Unlock()
+		return
+	}
+
+	restartCount := ls.restartCount
+	ls.restartCount++
+	ls.status = StatusStarting
+	ls.mu.Unlock()
+
+	// 指数バックオフ（テスト用に上限を設ける: 最大 30 秒）
+	backoff := time.Duration(1<<uint(restartCount)) * time.Second
+	const maxBackoff = 30 * time.Second
+	if backoff > maxBackoff {
+		backoff = maxBackoff
+	}
+
+	select {
+	case <-time.After(backoff):
+	case <-ls.stopIdleTimer:
+		return
+	}
+
+	// 再起動
+	ls.mu.Lock()
+	if ls.shutdownRequested {
+		ls.mu.Unlock()
+		return
+	}
+
+	// 古い conn をクリーンアップ
+	if ls.conn != nil {
+		ls.conn.Close()
+		ls.conn = nil
+	}
+	ls.cmd = nil
+	ls.mu.Unlock()
+
+	// Start を再実行（新しいプロセスを起動）
+	if err := ls.Start(context.Background()); err != nil {
+		ls.mu.Lock()
+		ls.status = StatusError
+		ls.mu.Unlock()
+	}
 }

@@ -11,6 +11,7 @@ import (
 // testServerFactory は Manager テスト用のサーバーファクトリ。
 // 新しい LanguageServer を作成する際、パイプ接続でモック LSP サーバーを起動する。
 type testServerFactory struct {
+	t       *testing.T
 	mu      sync.Mutex
 	servers []*mockLSPServer
 	pipes   []io.Closer
@@ -22,16 +23,17 @@ func (f *testServerFactory) create(config ServerConfig, rootDir string) *Languag
 	serverToClientR, serverToClientW := io.Pipe()
 
 	ls := &LanguageServer{
-		config:      config,
-		language:    config.Language,
-		rootDir:     rootDir,
-		status:      StatusStopped,
-		maxRestarts: 3,
+		config:        config,
+		language:      config.Language,
+		rootDir:       rootDir,
+		status:        StatusStopped,
+		maxRestarts:   3,
+		stopIdleTimer: make(chan struct{}),
 	}
 
 	ls.conn = newJSONRPCConn(serverToClientR, clientToServerW, clientToServerW, serverToClientR)
 
-	mock := newMockLSPServer(clientToServerR, serverToClientW)
+	mock := newMockLSPServer(f.t, clientToServerR, serverToClientW)
 	go mock.serve()
 
 	f.mu.Lock()
@@ -63,7 +65,7 @@ func (f *testServerFactory) cleanup() {
 func newTestManager(t *testing.T, configs []ServerConfig) (*Manager, *testServerFactory) {
 	t.Helper()
 
-	factory := &testServerFactory{}
+	factory := &testServerFactory{t: t}
 
 	m := NewManager(configs)
 
@@ -77,19 +79,6 @@ func newTestManager(t *testing.T, configs []ServerConfig) (*Manager, *testServer
 	})
 
 	return m, factory
-}
-
-// overrideStart は Manager.GetServer で呼ばれる Start を、
-// パイプ接続のサーバー向けにオーバーライドする。
-// テスト用のサーバーはプロセスを起動しないため、Start をパイプ用に書き換える。
-func startTestServer(ls *LanguageServer, ctx context.Context) error {
-	// conn は既にセットされている。initialize のみ実行。
-	if err := ls.initialize(ctx); err != nil {
-		ls.status = StatusError
-		return err
-	}
-	ls.status = StatusReady
-	return nil
 }
 
 func TestManagerGetServer(t *testing.T) {
@@ -220,17 +209,18 @@ func TestManagerGetServerWithPipe(t *testing.T) {
 			serverToClientR, serverToClientW := io.Pipe()
 
 			ls := &LanguageServer{
-				config:      config,
-				language:    config.Language,
-				rootDir:     rootDir,
-				status:      StatusStopped,
-				maxRestarts: 3,
+				config:        config,
+				language:      config.Language,
+				rootDir:       rootDir,
+				status:        StatusStopped,
+				maxRestarts:   3,
+				stopIdleTimer: make(chan struct{}),
 			}
 
 			// conn を事前にセットすることで Start がプロセス起動をスキップする
 			ls.conn = newJSONRPCConn(serverToClientR, clientToServerW, clientToServerW, serverToClientR)
 
-			mock := newMockLSPServer(clientToServerR, serverToClientW)
+			mock := newMockLSPServer(t, clientToServerR, serverToClientW)
 			go mock.serve()
 
 			t.Cleanup(func() {
@@ -281,16 +271,17 @@ func TestManagerGetServerWithPipe(t *testing.T) {
 			serverToClientR, serverToClientW := io.Pipe()
 
 			ls := &LanguageServer{
-				config:      config,
-				language:    config.Language,
-				rootDir:     rootDir,
-				status:      StatusStopped,
-				maxRestarts: 3,
+				config:        config,
+				language:      config.Language,
+				rootDir:       rootDir,
+				status:        StatusStopped,
+				maxRestarts:   3,
+				stopIdleTimer: make(chan struct{}),
 			}
 
 			ls.conn = newJSONRPCConn(serverToClientR, clientToServerW, clientToServerW, serverToClientR)
 
-			mock := newMockLSPServer(clientToServerR, serverToClientW)
+			mock := newMockLSPServer(t, clientToServerR, serverToClientW)
 			go mock.serve()
 
 			t.Cleanup(func() {
