@@ -741,6 +741,270 @@ func TestCrashDetection(t *testing.T) {
 	})
 }
 
+func TestFileToURI(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		expected URI
+	}{
+		{"通常のパス", "/home/user/foo.go", "file:///home/user/foo.go"},
+		{"ルートパス", "/foo.go", "file:///foo.go"},
+		{"深いパス", "/a/b/c/d/e.go", "file:///a/b/c/d/e.go"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := fileToURI(tt.path)
+			if got != tt.expected {
+				t.Errorf("fileToURI(%q) = %q, want %q", tt.path, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestURIToFile(t *testing.T) {
+	tests := []struct {
+		name     string
+		uri      URI
+		expected string
+	}{
+		{"通常のURI", "file:///home/user/foo.go", "/home/user/foo.go"},
+		{"ルートURI", "file:///foo.go", "/foo.go"},
+		{"file://プレフィックスなし", "/home/user/foo.go", "/home/user/foo.go"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := uriToFile(tt.uri)
+			if got != tt.expected {
+				t.Errorf("uriToFile(%q) = %q, want %q", tt.uri, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestDefinition(t *testing.T) {
+	t.Run("定義ジャンプが正常に動作する", func(t *testing.T) {
+		ls, mock := setupTestServer(t)
+
+		mock.handlers["textDocument/definition"] = func(params json.RawMessage) (interface{}, *jsonrpcError) {
+			var p TextDocumentPositionParams
+			if err := json.Unmarshal(params, &p); err != nil {
+				return nil, &jsonrpcError{Code: -32600, Message: err.Error()}
+			}
+
+			// URI が正しく変換されていることを確認
+			if p.TextDocument.URI != "file:///tmp/test-project/main.go" {
+				return nil, &jsonrpcError{Code: -32600, Message: "unexpected URI: " + string(p.TextDocument.URI)}
+			}
+
+			return []Location{
+				{
+					URI: "file:///tmp/test-project/other.go",
+					Range: Range{
+						Start: Position{Line: 10, Character: 5},
+						End:   Position{Line: 10, Character: 15},
+					},
+				},
+			}, nil
+		}
+
+		go mock.serve()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := ls.initialize(ctx); err != nil {
+			t.Fatalf("initialize エラー: %v", err)
+		}
+		ls.status = StatusReady
+
+		locations, err := ls.Definition(ctx, "/tmp/test-project/main.go", 5, 10)
+		if err != nil {
+			t.Fatalf("Definition エラー: %v", err)
+		}
+
+		if len(locations) != 1 {
+			t.Fatalf("len(locations) = %d, want 1", len(locations))
+		}
+
+		// URI がファイルパスに戻されていることを確認
+		if locations[0].URI != "file:///tmp/test-project/other.go" {
+			t.Errorf("URI = %q, want %q", locations[0].URI, "file:///tmp/test-project/other.go")
+		}
+
+		if locations[0].Range.Start.Line != 10 {
+			t.Errorf("Start.Line = %d, want 10", locations[0].Range.Start.Line)
+		}
+	})
+
+	t.Run("サーバーがreadyでない場合エラーを返す", func(t *testing.T) {
+		ls := &LanguageServer{status: StatusStopped}
+
+		_, err := ls.Definition(context.Background(), "/tmp/test.go", 0, 0)
+		if err == nil {
+			t.Fatal("エラーが返るべき")
+		}
+	})
+}
+
+func TestDocumentSymbols(t *testing.T) {
+	t.Run("ドキュメントシンボルが正常に返される", func(t *testing.T) {
+		ls, mock := setupTestServer(t)
+
+		mock.handlers["textDocument/documentSymbol"] = func(params json.RawMessage) (interface{}, *jsonrpcError) {
+			return []DocumentSymbol{
+				{
+					Name: "main",
+					Kind: SymbolKindFunction,
+					Range: Range{
+						Start: Position{Line: 5, Character: 0},
+						End:   Position{Line: 10, Character: 1},
+					},
+					SelectionRange: Range{
+						Start: Position{Line: 5, Character: 5},
+						End:   Position{Line: 5, Character: 9},
+					},
+				},
+				{
+					Name: "MyStruct",
+					Kind: SymbolKindStruct,
+					Range: Range{
+						Start: Position{Line: 12, Character: 0},
+						End:   Position{Line: 20, Character: 1},
+					},
+					SelectionRange: Range{
+						Start: Position{Line: 12, Character: 5},
+						End:   Position{Line: 12, Character: 13},
+					},
+					Children: []DocumentSymbol{
+						{
+							Name: "Field1",
+							Kind: SymbolKindField,
+							Range: Range{
+								Start: Position{Line: 13, Character: 1},
+								End:   Position{Line: 13, Character: 20},
+							},
+							SelectionRange: Range{
+								Start: Position{Line: 13, Character: 1},
+								End:   Position{Line: 13, Character: 7},
+							},
+						},
+					},
+				},
+			}, nil
+		}
+
+		go mock.serve()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := ls.initialize(ctx); err != nil {
+			t.Fatalf("initialize エラー: %v", err)
+		}
+		ls.status = StatusReady
+
+		symbols, err := ls.DocumentSymbols(ctx, "/tmp/test-project/main.go")
+		if err != nil {
+			t.Fatalf("DocumentSymbols エラー: %v", err)
+		}
+
+		if len(symbols) != 2 {
+			t.Fatalf("len(symbols) = %d, want 2", len(symbols))
+		}
+
+		if symbols[0].Name != "main" {
+			t.Errorf("symbols[0].Name = %q, want %q", symbols[0].Name, "main")
+		}
+
+		if symbols[0].Kind != SymbolKindFunction {
+			t.Errorf("symbols[0].Kind = %d, want %d", symbols[0].Kind, SymbolKindFunction)
+		}
+
+		if symbols[1].Name != "MyStruct" {
+			t.Errorf("symbols[1].Name = %q, want %q", symbols[1].Name, "MyStruct")
+		}
+
+		if len(symbols[1].Children) != 1 {
+			t.Fatalf("len(symbols[1].Children) = %d, want 1", len(symbols[1].Children))
+		}
+
+		if symbols[1].Children[0].Name != "Field1" {
+			t.Errorf("children[0].Name = %q, want %q", symbols[1].Children[0].Name, "Field1")
+		}
+	})
+
+	t.Run("サーバーがreadyでない場合エラーを返す", func(t *testing.T) {
+		ls := &LanguageServer{status: StatusStopped}
+
+		_, err := ls.DocumentSymbols(context.Background(), "/tmp/test.go")
+		if err == nil {
+			t.Fatal("エラーが返るべき")
+		}
+	})
+}
+
+func TestDidOpen(t *testing.T) {
+	t.Run("didOpen通知が正しく送信される", func(t *testing.T) {
+		ls, mock := setupTestServer(t)
+
+		go mock.serve()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := ls.initialize(ctx); err != nil {
+			t.Fatalf("initialize エラー: %v", err)
+		}
+		ls.status = StatusReady
+
+		err := ls.DidOpen(ctx, "/tmp/test-project/main.go", "go", "package main\n")
+		if err != nil {
+			t.Fatalf("DidOpen エラー: %v", err)
+		}
+	})
+
+	t.Run("サーバーがreadyでない場合エラーを返す", func(t *testing.T) {
+		ls := &LanguageServer{status: StatusStopped}
+
+		err := ls.DidOpen(context.Background(), "/tmp/test.go", "go", "")
+		if err == nil {
+			t.Fatal("エラーが返るべき")
+		}
+	})
+}
+
+func TestDidClose(t *testing.T) {
+	t.Run("didClose通知が正しく送信される", func(t *testing.T) {
+		ls, mock := setupTestServer(t)
+
+		go mock.serve()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := ls.initialize(ctx); err != nil {
+			t.Fatalf("initialize エラー: %v", err)
+		}
+		ls.status = StatusReady
+
+		err := ls.DidClose(ctx, "/tmp/test-project/main.go")
+		if err != nil {
+			t.Fatalf("DidClose エラー: %v", err)
+		}
+	})
+
+	t.Run("サーバーがreadyでない場合エラーを返す", func(t *testing.T) {
+		ls := &LanguageServer{status: StatusStopped}
+
+		err := ls.DidClose(context.Background(), "/tmp/test.go")
+		if err == nil {
+			t.Fatal("エラーが返るべき")
+		}
+	})
+}
+
 func TestGetIdleTimeout(t *testing.T) {
 	tests := []struct {
 		name     string

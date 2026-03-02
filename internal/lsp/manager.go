@@ -101,6 +101,17 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
+// GetServerForFile はファイルパスに適した言語サーバーを返す。
+// ファイルの拡張子から言語を検出し、適切なサーバーを取得/起動する。
+func (m *Manager) GetServerForFile(filePath, rootDir string) (*LanguageServer, error) {
+	language := LanguageForFile(filePath)
+	if language == "" {
+		return nil, fmt.Errorf("unsupported file type: %s", filePath)
+	}
+
+	return m.GetServer(language, rootDir)
+}
+
 // Status は全ての言語サーバーのステータスを返す。
 func (m *Manager) Status() []ServerInfo {
 	m.mu.RLock()

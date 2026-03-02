@@ -528,3 +528,87 @@ func TestManagerFindConfig(t *testing.T) {
 		}
 	})
 }
+
+func TestManagerGetServerForFile(t *testing.T) {
+	configs := []ServerConfig{
+		{Language: "go", Command: "gopls", Enabled: true},
+		{Language: "typescript", Command: "typescript-language-server", Enabled: true},
+		{Language: "python", Command: "pyright-langserver", Enabled: true},
+	}
+
+	t.Run("Goファイルでgoサーバーが返される", func(t *testing.T) {
+		m := NewManager(configs)
+
+		// テスト用にサーバーを直接セット
+		key := serverKey("go", "/tmp/project")
+		srv := newLanguageServer(configs[0], "/tmp/project")
+		srv.status = StatusReady
+		m.servers[key] = srv
+
+		got, err := m.GetServerForFile("/tmp/project/main.go", "/tmp/project")
+		if err != nil {
+			t.Fatalf("GetServerForFile エラー: %v", err)
+		}
+
+		if got.Language() != "go" {
+			t.Errorf("Language() = %q, want %q", got.Language(), "go")
+		}
+	})
+
+	t.Run("TypeScriptファイルでtypescriptサーバーが返される", func(t *testing.T) {
+		m := NewManager(configs)
+
+		key := serverKey("typescript", "/tmp/project")
+		srv := newLanguageServer(configs[1], "/tmp/project")
+		srv.status = StatusReady
+		m.servers[key] = srv
+
+		got, err := m.GetServerForFile("/tmp/project/index.ts", "/tmp/project")
+		if err != nil {
+			t.Fatalf("GetServerForFile エラー: %v", err)
+		}
+
+		if got.Language() != "typescript" {
+			t.Errorf("Language() = %q, want %q", got.Language(), "typescript")
+		}
+	})
+
+	t.Run("Pythonファイルでpythonサーバーが返される", func(t *testing.T) {
+		m := NewManager(configs)
+
+		key := serverKey("python", "/tmp/project")
+		srv := newLanguageServer(configs[2], "/tmp/project")
+		srv.status = StatusReady
+		m.servers[key] = srv
+
+		got, err := m.GetServerForFile("/tmp/project/app.py", "/tmp/project")
+		if err != nil {
+			t.Fatalf("GetServerForFile エラー: %v", err)
+		}
+
+		if got.Language() != "python" {
+			t.Errorf("Language() = %q, want %q", got.Language(), "python")
+		}
+	})
+
+	t.Run("不明な拡張子でエラーを返す", func(t *testing.T) {
+		m := NewManager(configs)
+
+		_, err := m.GetServerForFile("/tmp/project/file.unknown", "/tmp/project")
+		if err == nil {
+			t.Fatal("エラーが返るべき")
+		}
+	})
+
+	t.Run("対応するサーバー設定がない場合エラーを返す", func(t *testing.T) {
+		// rust の設定がないマネージャー
+		m := NewManager([]ServerConfig{
+			{Language: "go", Command: "gopls", Enabled: true},
+		})
+
+		_, err := m.GetServerForFile("/tmp/project/lib.rs", "/tmp/project")
+		if err == nil {
+			t.Fatal("エラーが返るべき")
+		}
+	})
+}

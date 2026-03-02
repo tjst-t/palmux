@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 )
@@ -375,4 +376,89 @@ func (ls *LanguageServer) processMonitor() {
 		ls.status = StatusError
 		ls.mu.Unlock()
 	}
+}
+
+// fileToURI はファイルパスを file:// URI に変換する。
+func fileToURI(path string) URI {
+	return URI("file://" + path)
+}
+
+// uriToFile は file:// URI をファイルパスに変換する。
+func uriToFile(uri URI) string {
+	s := string(uri)
+	if strings.HasPrefix(s, "file://") {
+		return s[len("file://"):]
+	}
+	return s
+}
+
+// Definition は指定位置のシンボルの定義場所を返す。
+func (ls *LanguageServer) Definition(ctx context.Context, file string, line, col int) ([]Location, error) {
+	params := TextDocumentPositionParams{
+		TextDocument: TextDocumentIdentifier{
+			URI: fileToURI(file),
+		},
+		Position: Position{
+			Line:      line,
+			Character: col,
+		},
+	}
+
+	var locations []Location
+	if err := ls.Request(ctx, "textDocument/definition", params, &locations); err != nil {
+		return nil, fmt.Errorf("textDocument/definition: %w", err)
+	}
+
+	return locations, nil
+}
+
+// DocumentSymbols は指定ドキュメントの全シンボルを返す。
+func (ls *LanguageServer) DocumentSymbols(ctx context.Context, file string) ([]DocumentSymbol, error) {
+	params := struct {
+		TextDocument TextDocumentIdentifier `json:"textDocument"`
+	}{
+		TextDocument: TextDocumentIdentifier{
+			URI: fileToURI(file),
+		},
+	}
+
+	var symbols []DocumentSymbol
+	if err := ls.Request(ctx, "textDocument/documentSymbol", params, &symbols); err != nil {
+		return nil, fmt.Errorf("textDocument/documentSymbol: %w", err)
+	}
+
+	return symbols, nil
+}
+
+// DidOpen はドキュメントが開かれたことをサーバーに通知する。
+func (ls *LanguageServer) DidOpen(ctx context.Context, file, languageID, content string) error {
+	params := DidOpenTextDocumentParams{
+		TextDocument: TextDocumentItem{
+			URI:        fileToURI(file),
+			LanguageID: languageID,
+			Version:    1,
+			Text:       content,
+		},
+	}
+
+	if err := ls.Notify(ctx, "textDocument/didOpen", params); err != nil {
+		return fmt.Errorf("textDocument/didOpen: %w", err)
+	}
+
+	return nil
+}
+
+// DidClose はドキュメントが閉じられたことをサーバーに通知する。
+func (ls *LanguageServer) DidClose(ctx context.Context, file string) error {
+	params := DidCloseTextDocumentParams{
+		TextDocument: TextDocumentIdentifier{
+			URI: fileToURI(file),
+		},
+	}
+
+	if err := ls.Notify(ctx, "textDocument/didClose", params); err != nil {
+		return fmt.Errorf("textDocument/didClose: %w", err)
+	}
+
+	return nil
 }
