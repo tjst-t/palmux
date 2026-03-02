@@ -1,0 +1,229 @@
+package lsp
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"sync"
+	"time"
+)
+
+// LanguageServer は言語サーバープロセスとの接続を管理する。
+type LanguageServer struct {
+	config   ServerConfig
+	cmd      *exec.Cmd
+	conn     *jsonrpcConn
+	language string
+	rootDir  string
+	status   ServerStatus
+	mu       sync.RWMutex
+
+	// Lifecycle
+	lastActivity time.Time
+	restartCount int
+	maxRestarts  int
+
+	// サーバーケイパビリティ（initialize 後に設定される）
+	capabilities *ServerCapabilities
+}
+
+// newLanguageServer は新しい LanguageServer を作成する。
+func newLanguageServer(config ServerConfig, rootDir string) *LanguageServer {
+	return &LanguageServer{
+		config:      config,
+		language:    config.Language,
+		rootDir:     rootDir,
+		status:      StatusStopped,
+		maxRestarts: 3,
+	}
+}
+
+// Start はサーバープロセスを起動し、Initialize ハンドシェイクを実行する。
+// conn が事前に設定されている場合はプロセス起動をスキップする（テスト用）。
+func (ls *LanguageServer) Start(ctx context.Context) error {
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+
+	ls.status = StatusStarting
+	ls.lastActivity = time.Now()
+
+	// conn が事前に設定されていない場合はプロセスを起動する
+	if ls.conn == nil {
+		cmd := exec.CommandContext(ctx, ls.config.Command, ls.config.Args...)
+		cmd.Stderr = os.Stderr
+
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			ls.status = StatusError
+			return fmt.Errorf("create stdin pipe: %w", err)
+		}
+
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			ls.status = StatusError
+			return fmt.Errorf("create stdout pipe: %w", err)
+		}
+
+		if err := cmd.Start(); err != nil {
+			ls.status = StatusError
+			return fmt.Errorf("start server: %w", err)
+		}
+
+		ls.cmd = cmd
+		ls.conn = newJSONRPCConn(stdout, stdin, stdin, stdout)
+	}
+
+	// Initialize ハンドシェイク
+	if err := ls.initialize(ctx); err != nil {
+		ls.status = StatusError
+		if ls.cmd != nil && ls.cmd.Process != nil {
+			ls.cmd.Process.Kill()
+		}
+		ls.conn.Close()
+		return fmt.Errorf("initialize: %w", err)
+	}
+
+	ls.status = StatusReady
+	return nil
+}
+
+// initialize は LSP の Initialize ハンドシェイクを実行する。
+func (ls *LanguageServer) initialize(ctx context.Context) error {
+	params := InitializeParams{
+		ProcessID: os.Getpid(),
+		RootURI:   URI("file://" + ls.rootDir),
+		Capabilities: ClientCapabilities{
+			TextDocument: &TextDocumentClientCapabilities{
+				Hover: &HoverClientCapabilities{
+					ContentFormat: []MarkupKind{MarkupKindMarkdown, MarkupKindPlainText},
+				},
+				Definition: &DefinitionClientCapabilities{
+					LinkSupport: true,
+				},
+				DocumentSymbol: &DocumentSymbolClientCapabilities{
+					HierarchicalDocumentSymbolSupport: true,
+				},
+			},
+		},
+	}
+
+	var result InitializeResult
+	if err := ls.conn.Request(ctx, "initialize", params, &result); err != nil {
+		return fmt.Errorf("initialize request: %w", err)
+	}
+
+	ls.capabilities = &result.Capabilities
+
+	// initialized 通知を送信
+	if err := ls.conn.Notify(ctx, "initialized", struct{}{}); err != nil {
+		return fmt.Errorf("initialized notification: %w", err)
+	}
+
+	return nil
+}
+
+// Shutdown はサーバーをグレースフルにシャットダウンする。
+func (ls *LanguageServer) Shutdown(ctx context.Context) error {
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+
+	if ls.status == StatusStopped {
+		return nil
+	}
+
+	if ls.conn != nil {
+		// shutdown リクエストを送信
+		err := ls.conn.Request(ctx, "shutdown", nil, nil)
+		if err != nil {
+			// shutdown 失敗してもプロセス終了は試みる
+		}
+
+		// exit 通知を送信
+		_ = ls.conn.Notify(ctx, "exit", nil)
+
+		ls.conn.Close()
+	}
+
+	// プロセスの終了を待つ（タイムアウト付き）
+	if ls.cmd != nil && ls.cmd.Process != nil {
+		done := make(chan error, 1)
+		go func() {
+			done <- ls.cmd.Wait()
+		}()
+
+		select {
+		case <-done:
+			// 正常終了
+		case <-time.After(5 * time.Second):
+			// タイムアウト → kill
+			ls.cmd.Process.Kill()
+			<-done
+		case <-ctx.Done():
+			ls.cmd.Process.Kill()
+			<-done
+			return ctx.Err()
+		}
+	}
+
+	ls.status = StatusStopped
+	return nil
+}
+
+// Status はサーバーの現在のステータスを返す。
+func (ls *LanguageServer) Status() ServerStatus {
+	ls.mu.RLock()
+	defer ls.mu.RUnlock()
+	return ls.status
+}
+
+// Request は言語サーバーにリクエストを送信する。
+func (ls *LanguageServer) Request(ctx context.Context, method string, params, result interface{}) error {
+	ls.mu.RLock()
+	if ls.status != StatusReady {
+		ls.mu.RUnlock()
+		return fmt.Errorf("server not ready: status=%s", ls.status)
+	}
+	conn := ls.conn
+	ls.mu.RUnlock()
+
+	ls.mu.Lock()
+	ls.lastActivity = time.Now()
+	ls.mu.Unlock()
+
+	return conn.Request(ctx, method, params, result)
+}
+
+// Notify は言語サーバーに通知を送信する。
+func (ls *LanguageServer) Notify(ctx context.Context, method string, params interface{}) error {
+	ls.mu.RLock()
+	if ls.status != StatusReady {
+		ls.mu.RUnlock()
+		return fmt.Errorf("server not ready: status=%s", ls.status)
+	}
+	conn := ls.conn
+	ls.mu.RUnlock()
+
+	ls.mu.Lock()
+	ls.lastActivity = time.Now()
+	ls.mu.Unlock()
+
+	return conn.Notify(ctx, method, params)
+}
+
+// Language はサーバーの言語名を返す。
+func (ls *LanguageServer) Language() string {
+	return ls.language
+}
+
+// RootDir はサーバーのルートディレクトリを返す。
+func (ls *LanguageServer) RootDir() string {
+	return ls.rootDir
+}
+
+// Capabilities はサーバーのケイパビリティを返す。
+func (ls *LanguageServer) Capabilities() *ServerCapabilities {
+	ls.mu.RLock()
+	defer ls.mu.RUnlock()
+	return ls.capabilities
+}
