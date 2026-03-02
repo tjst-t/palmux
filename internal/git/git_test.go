@@ -379,6 +379,276 @@ func TestErrNotGitRepo(t *testing.T) {
 	}
 }
 
+func TestErrInvalidPath(t *testing.T) {
+	if !errors.Is(ErrInvalidPath, ErrInvalidPath) {
+		t.Error("ErrInvalidPath should be detectable with errors.Is")
+	}
+}
+
+func TestGit_DiscardChanges(t *testing.T) {
+	tests := []struct {
+		name      string
+		paths     []string
+		cmdErr    error
+		wantErr   bool
+		wantErrIs error
+		wantArgs  []string
+	}{
+		{
+			name:     "正常系: 単一ファイル",
+			paths:    []string{"file.go"},
+			wantArgs: []string{"checkout", "--", "file.go"},
+		},
+		{
+			name:     "正常系: 複数ファイル",
+			paths:    []string{"file.go", "main.go", "internal/server/server.go"},
+			wantArgs: []string{"checkout", "--", "file.go", "main.go", "internal/server/server.go"},
+		},
+		{
+			name:      "異常系: 空のパス配列",
+			paths:     []string{},
+			wantErr:   true,
+			wantErrIs: ErrInvalidPath,
+		},
+		{
+			name:      "異常系: 空文字列のパス要素",
+			paths:     []string{"file.go", ""},
+			wantErr:   true,
+			wantErrIs: ErrInvalidPath,
+		},
+		{
+			name:      "異常系: .. を含むパス",
+			paths:     []string{"../etc/passwd"},
+			wantErr:   true,
+			wantErrIs: ErrInvalidPath,
+		},
+		{
+			name:      "異常系: パス中間に .. を含む",
+			paths:     []string{"foo/../bar"},
+			wantErr:   true,
+			wantErrIs: ErrInvalidPath,
+		},
+		{
+			name:      "異常系: .. のみのパス",
+			paths:     []string{".."},
+			wantErr:   true,
+			wantErrIs: ErrInvalidPath,
+		},
+		{
+			name:    "異常系: コマンドエラー",
+			paths:   []string{"file.go"},
+			cmdErr:  errors.New("git error"),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockCommandRunner{
+				err: tt.cmdErr,
+			}
+			g := &Git{Cmd: mock}
+
+			err := g.DiscardChanges("/test/dir", tt.paths)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tt.wantErrIs != nil && !errors.Is(err, tt.wantErrIs) {
+					t.Errorf("error = %v, want %v", err, tt.wantErrIs)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if mock.calledDir != "/test/dir" {
+				t.Errorf("dir = %q, want %q", mock.calledDir, "/test/dir")
+			}
+			if !containsExactSlice(mock.calledArgs, tt.wantArgs) {
+				t.Errorf("args = %v, want %v", mock.calledArgs, tt.wantArgs)
+			}
+		})
+	}
+}
+
+func TestGit_Stage(t *testing.T) {
+	tests := []struct {
+		name      string
+		paths     []string
+		cmdErr    error
+		wantErr   bool
+		wantErrIs error
+		wantArgs  []string
+	}{
+		{
+			name:     "正常系: 単一ファイル",
+			paths:    []string{"file.go"},
+			wantArgs: []string{"add", "file.go"},
+		},
+		{
+			name:     "正常系: 複数ファイル",
+			paths:    []string{"file.go", "main.go", "internal/server/server.go"},
+			wantArgs: []string{"add", "file.go", "main.go", "internal/server/server.go"},
+		},
+		{
+			name:      "異常系: 空のパス配列",
+			paths:     []string{},
+			wantErr:   true,
+			wantErrIs: ErrInvalidPath,
+		},
+		{
+			name:      "異常系: 空文字列のパス要素",
+			paths:     []string{"file.go", ""},
+			wantErr:   true,
+			wantErrIs: ErrInvalidPath,
+		},
+		{
+			name:      "異常系: .. を含むパス",
+			paths:     []string{"../etc/passwd"},
+			wantErr:   true,
+			wantErrIs: ErrInvalidPath,
+		},
+		{
+			name:      "異常系: パス中間に .. を含む",
+			paths:     []string{"foo/../bar"},
+			wantErr:   true,
+			wantErrIs: ErrInvalidPath,
+		},
+		{
+			name:      "異常系: .. のみのパス",
+			paths:     []string{".."},
+			wantErr:   true,
+			wantErrIs: ErrInvalidPath,
+		},
+		{
+			name:    "異常系: コマンドエラー",
+			paths:   []string{"file.go"},
+			cmdErr:  errors.New("git error"),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockCommandRunner{
+				err: tt.cmdErr,
+			}
+			g := &Git{Cmd: mock}
+
+			err := g.Stage("/test/dir", tt.paths)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tt.wantErrIs != nil && !errors.Is(err, tt.wantErrIs) {
+					t.Errorf("error = %v, want %v", err, tt.wantErrIs)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if mock.calledDir != "/test/dir" {
+				t.Errorf("dir = %q, want %q", mock.calledDir, "/test/dir")
+			}
+			if !containsExactSlice(mock.calledArgs, tt.wantArgs) {
+				t.Errorf("args = %v, want %v", mock.calledArgs, tt.wantArgs)
+			}
+		})
+	}
+}
+
+func TestGit_Unstage(t *testing.T) {
+	tests := []struct {
+		name      string
+		paths     []string
+		cmdErr    error
+		wantErr   bool
+		wantErrIs error
+		wantArgs  []string
+	}{
+		{
+			name:     "正常系: 単一ファイル",
+			paths:    []string{"file.go"},
+			wantArgs: []string{"reset", "HEAD", "file.go"},
+		},
+		{
+			name:     "正常系: 複数ファイル",
+			paths:    []string{"file.go", "main.go", "internal/server/server.go"},
+			wantArgs: []string{"reset", "HEAD", "file.go", "main.go", "internal/server/server.go"},
+		},
+		{
+			name:      "異常系: 空のパス配列",
+			paths:     []string{},
+			wantErr:   true,
+			wantErrIs: ErrInvalidPath,
+		},
+		{
+			name:      "異常系: 空文字列のパス要素",
+			paths:     []string{"file.go", ""},
+			wantErr:   true,
+			wantErrIs: ErrInvalidPath,
+		},
+		{
+			name:      "異常系: .. を含むパス",
+			paths:     []string{"../etc/passwd"},
+			wantErr:   true,
+			wantErrIs: ErrInvalidPath,
+		},
+		{
+			name:      "異常系: パス中間に .. を含む",
+			paths:     []string{"foo/../bar"},
+			wantErr:   true,
+			wantErrIs: ErrInvalidPath,
+		},
+		{
+			name:      "異常系: .. のみのパス",
+			paths:     []string{".."},
+			wantErr:   true,
+			wantErrIs: ErrInvalidPath,
+		},
+		{
+			name:    "異常系: コマンドエラー",
+			paths:   []string{"file.go"},
+			cmdErr:  errors.New("git error"),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockCommandRunner{
+				err: tt.cmdErr,
+			}
+			g := &Git{Cmd: mock}
+
+			err := g.Unstage("/test/dir", tt.paths)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tt.wantErrIs != nil && !errors.Is(err, tt.wantErrIs) {
+					t.Errorf("error = %v, want %v", err, tt.wantErrIs)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if mock.calledDir != "/test/dir" {
+				t.Errorf("dir = %q, want %q", mock.calledDir, "/test/dir")
+			}
+			if !containsExactSlice(mock.calledArgs, tt.wantArgs) {
+				t.Errorf("args = %v, want %v", mock.calledArgs, tt.wantArgs)
+			}
+		})
+	}
+}
+
 // containsAll はスライスにすべての文字列が含まれるか確認する。
 func containsAll(slice []string, targets ...string) bool {
 	for _, target := range targets {
@@ -407,4 +677,17 @@ func containsExact(slice []string, target string) bool {
 		}
 	}
 	return false
+}
+
+// containsExactSlice は2つのスライスが完全一致するか確認する。
+func containsExactSlice(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
