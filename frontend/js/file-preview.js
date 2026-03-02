@@ -297,6 +297,7 @@ export class FilePreview {
     this._getRawURL = options.getRawURL || null;
     this._fetchFile = options.fetchFile || null;
     this._saveFile = options.saveFile || null;
+    this._onLoad = options.onLoad || null;
     this._disposed = false;
 
     // Edit mode state
@@ -1038,6 +1039,11 @@ export class FilePreview {
           break;
         }
       }
+
+      // Fire onLoad callback after content is rendered
+      if (this._onLoad && !this._disposed) {
+        this._onLoad();
+      }
     } catch (err) {
       if (this._disposed) return;
       console.error('Failed to load file preview:', err);
@@ -1159,6 +1165,7 @@ export class FilePreview {
 
     for (let i = 0; i < lines.length; i++) {
       const tr = document.createElement('tr');
+      tr.id = `L${i + 1}`;
 
       const lineNumTd = document.createElement('td');
       lineNumTd.className = 'fp-code-linenum';
@@ -1368,6 +1375,31 @@ export class FilePreview {
     notice.className = 'fp-truncated';
     notice.textContent = 'File is large. Only partial content is shown.';
     return notice;
+  }
+
+  /**
+   * Scroll to a specific line and optionally highlight match text.
+   * @param {number} lineNumber - Line number to scroll to
+   * @param {string} [highlightText] - Text to highlight on that line
+   */
+  scrollToLine(lineNumber, highlightText) {
+    if (!this._contentEl) return;
+    const row = this._contentEl.querySelector(`#L${lineNumber}`);
+    if (!row) return;
+
+    // Scroll into view
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    // Add highlight class
+    row.classList.add('fp-code-line--highlight');
+
+    // Fade out after 3 seconds
+    setTimeout(() => {
+      row.classList.add('fp-code-line--highlight-fade');
+      setTimeout(() => {
+        row.classList.remove('fp-code-line--highlight', 'fp-code-line--highlight-fade');
+      }, 500);
+    }, 3000);
   }
 
   /**

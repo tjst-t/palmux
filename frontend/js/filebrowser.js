@@ -1,7 +1,7 @@
 // filebrowser.js - ファイルブラウザ UI
 // セッションの CWD をルートとしてディレクトリを閲覧する
 
-import { getSessionCwd, listFiles, searchFiles, getFileContent, getFileRawURL, saveFile } from './api.js';
+import { getSessionCwd, listFiles, searchFiles, grepFiles, getFileContent, getFileRawURL, saveFile } from './api.js';
 import { FilePreview } from './file-preview.js';
 
 /**
@@ -137,6 +137,27 @@ export class FileBrowser {
 
     /** @type {HTMLInputElement|null} 検索入力要素 */
     this._searchInputEl = null;
+
+    /** @type {boolean} 全文検索モードフラグ */
+    this._grepMode = false;
+
+    /** @type {string} grep 検索クエリ */
+    this._grepQuery = '';
+
+    /** @type {boolean} 大文字小文字区別 */
+    this._grepCaseSensitive = false;
+
+    /** @type {boolean} 正規表現 */
+    this._grepRegex = false;
+
+    /** @type {string} glob フィルタ */
+    this._grepGlob = '';
+
+    /** @type {AbortController|null} */
+    this._grepAbortController = null;
+
+    /** @type {number} デバウンスタイマー */
+    this._grepDebounceTimer = null;
 
     this._render();
     this._applyFontSize();
@@ -438,10 +459,37 @@ export class FileBrowser {
     const searchBox = document.createElement('div');
     searchBox.className = 'fb-search-box';
 
+    // Grep mode toggle button
+    const modeToggle = document.createElement('button');
+    modeToggle.className = 'fb-search-mode-toggle';
+    if (this._grepMode) {
+      modeToggle.classList.add('fb-search-mode-toggle--active');
+    }
+    modeToggle.textContent = this._grepMode ? 'Grep' : 'File';
+    modeToggle.title = this._grepMode ? 'Full-text search mode' : 'Filename search mode';
+    modeToggle.setAttribute('aria-label', 'Toggle search mode');
+    modeToggle.addEventListener('click', () => {
+      this._grepMode = !this._grepMode;
+      modeToggle.textContent = this._grepMode ? 'Grep' : 'File';
+      modeToggle.title = this._grepMode ? 'Full-text search mode' : 'Filename search mode';
+      modeToggle.classList.toggle('fb-search-mode-toggle--active', this._grepMode);
+      searchInput.placeholder = this._grepMode ? 'Grep...' : '\uD83D\uDD0D';
+      // Show/hide grep filter bar
+      if (this._grepMode) {
+        if (!nav.querySelector('.fb-grep-filters')) {
+          nav.parentElement.insertBefore(this._createGrepFilterBar(), nav.nextSibling);
+        }
+      } else {
+        const filterBar = nav.parentElement && nav.parentElement.querySelector('.fb-grep-filters');
+        if (filterBar) filterBar.remove();
+      }
+    });
+    searchBox.appendChild(modeToggle);
+
     const searchInput = document.createElement('input');
     searchInput.type = 'search';
     searchInput.className = 'fb-search-input';
-    searchInput.placeholder = '🔍';
+    searchInput.placeholder = this._grepMode ? 'Grep...' : '\uD83D\uDD0D';
     searchInput.value = this._searchQuery;
     searchInput.setAttribute('aria-label', 'ファイル検索');
     searchInput.addEventListener('keydown', (e) => {
@@ -474,6 +522,11 @@ export class FileBrowser {
   async _handleSearch(query) {
     if (!this._session || !query) return;
 
+    if (this._grepMode) {
+      this._handleGrepSearch(query);
+      return;
+    }
+
     this._searchMode = true;
     this._searchQuery = query;
 
@@ -491,11 +544,250 @@ export class FileBrowser {
   }
 
   /**
+   * grep フィルタバーを作成する。
+   * @returns {HTMLElement}
+   */
+  _createGrepFilterBar() {
+    const bar = document.createElement('div');
+    bar.className = 'fb-grep-filters';
+
+    // Glob filter input
+    const globInput = document.createElement('input');
+    globInput.type = 'text';
+    globInput.className = 'fb-grep-filter-input';
+    globInput.placeholder = '*.go';
+    globInput.value = this._grepGlob;
+    globInput.setAttribute('aria-label', 'Glob filter');
+    globInput.addEventListener('input', () => {
+      this._grepGlob = globInput.value;
+    });
+    bar.appendChild(globInput);
+
+    // Case-sensitive toggle
+    const caseBtn = document.createElement('button');
+    caseBtn.className = 'fb-grep-filter-btn';
+    if (this._grepCaseSensitive) caseBtn.classList.add('fb-grep-filter-btn--active');
+    caseBtn.textContent = 'Aa';
+    caseBtn.title = 'Case sensitive';
+    caseBtn.addEventListener('click', () => {
+      this._grepCaseSensitive = !this._grepCaseSensitive;
+      caseBtn.classList.toggle('fb-grep-filter-btn--active', this._grepCaseSensitive);
+    });
+    bar.appendChild(caseBtn);
+
+    // Regex toggle
+    const regexBtn = document.createElement('button');
+    regexBtn.className = 'fb-grep-filter-btn';
+    if (this._grepRegex) regexBtn.classList.add('fb-grep-filter-btn--active');
+    regexBtn.textContent = '.*';
+    regexBtn.title = 'Regex';
+    regexBtn.addEventListener('click', () => {
+      this._grepRegex = !this._grepRegex;
+      regexBtn.classList.toggle('fb-grep-filter-btn--active', this._grepRegex);
+    });
+    bar.appendChild(regexBtn);
+
+    return bar;
+  }
+
+  /**
+   * grep 検索を実行する。
+   * @param {string} query - 検索クエリ
+   */
+  async _handleGrepSearch(query) {
+    if (!this._session || !query) return;
+
+    // Cancel previous request
+    if (this._grepAbortController) {
+      this._grepAbortController.abort();
+    }
+    this._grepAbortController = new AbortController();
+
+    this._searchMode = true;
+    this._grepQuery = query;
+    this._searchQuery = query;
+    this._showLoading();
+
+    try {
+      const result = await grepFiles(this._session, query, this._currentPath, {
+        caseSensitive: this._grepCaseSensitive,
+        regex: this._grepRegex,
+        glob: this._grepGlob,
+        signal: this._grepAbortController.signal,
+      });
+      if (this._disposed) return;
+      this._renderGrepResults(result);
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      console.error('Grep search failed:', err);
+      this._searchMode = false;
+      this._showError(`Search failed: ${err.message}`);
+    }
+  }
+
+  /**
+   * grep 検索結果をレンダリングする。
+   * @param {Object} response - grep API レスポンス
+   */
+  _renderGrepResults(response) {
+    if (!this._wrapper) this._render();
+    this._wrapper.innerHTML = '';
+
+    this._wrapper.appendChild(this._createBreadcrumb());
+
+    // If grep mode, re-add the filter bar
+    if (this._grepMode && !this._searchMode) {
+      // Not in search result mode, filter bar is handled by toggle
+    }
+
+    const list = document.createElement('div');
+    list.className = 'fb-list';
+
+    const results = response.results || [];
+
+    if (results.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'fb-empty';
+      empty.textContent = 'No matches found';
+      list.appendChild(empty);
+    } else {
+      // Group results by file path
+      const grouped = new Map();
+      for (const r of results) {
+        if (!grouped.has(r.path)) {
+          grouped.set(r.path, []);
+        }
+        grouped.get(r.path).push(r);
+      }
+
+      for (const [filePath, matches] of grouped) {
+        const group = document.createElement('div');
+        group.className = 'fb-grep-file-group';
+
+        // File header
+        const header = document.createElement('div');
+        header.className = 'fb-grep-file-header';
+
+        const fileName = document.createElement('span');
+        fileName.textContent = filePath;
+        header.appendChild(fileName);
+
+        const matchCount = document.createElement('span');
+        matchCount.className = 'fb-grep-match-count';
+        matchCount.textContent = `${matches.length} match${matches.length !== 1 ? 'es' : ''}`;
+        header.appendChild(matchCount);
+
+        // Toggle collapse
+        let collapsed = false;
+        const matchContainer = document.createElement('div');
+
+        header.addEventListener('click', () => {
+          collapsed = !collapsed;
+          matchContainer.style.display = collapsed ? 'none' : '';
+        });
+
+        group.appendChild(header);
+
+        // Match lines
+        for (const match of matches) {
+          const line = document.createElement('div');
+          line.className = 'fb-grep-match-line';
+
+          const lineNum = document.createElement('span');
+          lineNum.className = 'fb-grep-line-number';
+          lineNum.textContent = match.line_number;
+
+          const lineText = document.createElement('span');
+          lineText.className = 'fb-grep-line-text';
+
+          // Highlight match portion using match_start and match_end
+          const text = match.line_text || '';
+          const start = match.match_start || 0;
+          const end = match.match_end || 0;
+
+          if (start < end && start < text.length) {
+            const before = document.createTextNode(text.substring(0, start));
+            const mark = document.createElement('mark');
+            mark.textContent = text.substring(start, end);
+            const after = document.createTextNode(text.substring(end));
+            lineText.appendChild(before);
+            lineText.appendChild(mark);
+            lineText.appendChild(after);
+          } else {
+            lineText.textContent = text;
+          }
+
+          line.appendChild(lineNum);
+          line.appendChild(lineText);
+
+          // Click to open file preview at matched line
+          line.addEventListener('click', () => {
+            const matchText = (start < end) ? text.substring(start, end) : '';
+            this.showPreview(this._session, filePath, { name: filePath.split('/').pop(), extension: this._getExtension(filePath) }, {
+              lineNumber: match.line_number,
+              highlightText: matchText,
+            });
+            if (this._onFileSelect) {
+              this._onFileSelect(this._session, filePath, { name: filePath.split('/').pop() });
+            }
+          });
+
+          matchContainer.appendChild(line);
+        }
+
+        group.appendChild(matchContainer);
+        list.appendChild(group);
+      }
+    }
+
+    this._wrapper.appendChild(list);
+
+    // Footer with engine name and truncated status
+    const footer = document.createElement('div');
+    footer.className = 'fb-grep-footer';
+    if (response.truncated) {
+      const truncSpan = document.createElement('span');
+      truncSpan.className = 'fb-grep-truncated';
+      truncSpan.textContent = 'Results truncated';
+      footer.appendChild(truncSpan);
+    }
+    if (response.engine) {
+      const engineSpan = document.createElement('span');
+      engineSpan.className = 'fb-grep-engine';
+      engineSpan.textContent = `engine: ${response.engine}`;
+      footer.appendChild(engineSpan);
+    }
+    if (response.truncated || response.engine) {
+      this._wrapper.appendChild(footer);
+    }
+  }
+
+  /**
+   * ファイルパスから拡張子を取得する。
+   * @param {string} path - ファイルパス
+   * @returns {string} 拡張子（ドット付き）
+   */
+  _getExtension(path) {
+    const dot = path.lastIndexOf('.');
+    if (dot === -1) return '';
+    return path.substring(dot);
+  }
+
+  /**
    * 検索モードを終了してディレクトリ一覧に戻る。
    */
   _exitSearchMode() {
     this._searchMode = false;
     this._searchQuery = '';
+    this._grepQuery = '';
+    if (this._grepAbortController) {
+      this._grepAbortController.abort();
+      this._grepAbortController = null;
+    }
+    if (this._grepDebounceTimer) {
+      clearTimeout(this._grepDebounceTimer);
+      this._grepDebounceTimer = null;
+    }
     this._loadDirectory(this._currentPath, { silent: true });
   }
 
@@ -623,8 +915,11 @@ export class FileBrowser {
    * @param {string} session - セッション名
    * @param {string} path - ファイルの相対パス
    * @param {Object} entry - ファイルエントリ情報
+   * @param {Object} [opts] - オプション
+   * @param {number} [opts.lineNumber] - スクロール先の行番号
+   * @param {string} [opts.highlightText] - ハイライトするテキスト
    */
-  showPreview(session, path, entry) {
+  showPreview(session, path, entry, { lineNumber, highlightText } = {}) {
     // 既存プレビューを破棄
     if (this._preview) {
       this._preview.dispose();
@@ -652,6 +947,15 @@ export class FileBrowser {
       getRawURL: (s, p) => getFileRawURL(s, p),
       fetchFile: (s, p) => getFileContent(s, p),
       saveFile: (s, p, c) => saveFile(s, p, c),
+      onLoad: () => {
+        if (lineNumber && this._preview) {
+          requestAnimationFrame(() => {
+            if (this._preview) {
+              this._preview.scrollToLine(lineNumber, highlightText);
+            }
+          });
+        }
+      },
     });
   }
 
@@ -707,6 +1011,14 @@ export class FileBrowser {
       this._preview.dispose();
       this._preview = null;
     }
+    if (this._grepAbortController) {
+      this._grepAbortController.abort();
+      this._grepAbortController = null;
+    }
+    if (this._grepDebounceTimer) {
+      clearTimeout(this._grepDebounceTimer);
+      this._grepDebounceTimer = null;
+    }
     this._container.innerHTML = '';
     this._session = null;
     this._rootPath = null;
@@ -716,6 +1028,11 @@ export class FileBrowser {
     this._searchMode = false;
     this._searchQuery = '';
     this._searchInputEl = null;
+    this._grepMode = false;
+    this._grepQuery = '';
+    this._grepCaseSensitive = false;
+    this._grepRegex = false;
+    this._grepGlob = '';
     this._disposed = true;
   }
 }
