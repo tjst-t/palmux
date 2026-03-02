@@ -2119,3 +2119,143 @@ html, body {
     font-size: 14px;
   }
 }
+
+/* LSP Symbol Links */
+.fp-symbol-link {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+
+.fp-symbol-link:hover {
+  text-decoration-style: solid;
+  background-color: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+}
+
+/* Code line highlight (for definition jumps) */
+.fp-code-highlight {
+  background-color: rgba(255, 213, 79, 0.15) !important;
+}
+
+.fp-code-highlight .fp-code-linenum {
+  color: #ffd54f;
+}
+
+/* Navigation buttons */
+.fp-nav-buttons {
+  display: flex;
+  gap: 2px;
+  margin-left: 4px;
+}
+
+.fp-nav-btn {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #ccc;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.fp-nav-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.fp-nav-btn:not(:disabled):hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Outline button */
+.fp-outline-btn {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #ccc;
+  font-size: 16px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.fp-outline-btn:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Outline panel */
+.fp-outline-panel {
+  background-color: #1e1e1e;
+  border-bottom: 1px solid #333;
+  max-height: 50vh;
+  overflow-y: auto;
+  font-size: 13px;
+}
+
+.fp-outline-title {
+  padding: 6px 8px;
+  font-weight: bold;
+  color: #aaa;
+  border-bottom: 1px solid #333;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.fp-outline-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.fp-outline-item {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.fp-outline-item-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  background: none;
+  border: none;
+  color: #ccc;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.fp-outline-item-btn:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.fp-outline-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: bold;
+  background-color: #2d5a9e;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.fp-outline-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fp-outline-kind {
+  color: #666;
+  font-size: 11px;
+  flex-shrink: 0;
+}

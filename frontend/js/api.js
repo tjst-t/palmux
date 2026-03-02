@@ -475,6 +475,39 @@ export async function deleteProjectBranch(project, branch, force = false) {
   });
 }
 
+// --- LSP API ---
+
+/**
+ * LSP ステータスを取得する。
+ * @param {string} session - セッション名
+ * @returns {Promise<{servers: Array, available: boolean}>}
+ */
+export async function getLspStatus(session) {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/lsp/status`);
+}
+
+/**
+ * シンボルの定義位置を取得する。
+ * @param {string} session - セッション名
+ * @param {string} file - 相対ファイルパス
+ * @param {number} line - 行番号 (1-based)
+ * @param {number} col - 列番号 (1-based)
+ * @returns {Promise<{locations: Array<{file: string, line: number, column: number}>}>}
+ */
+export async function getLspDefinition(session, file, line, col) {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/lsp/definition?file=${encodeURIComponent(file)}&line=${line}&col=${col}`);
+}
+
+/**
+ * ドキュメントシンボル一覧を取得する。
+ * @param {string} session - セッション名
+ * @param {string} file - 相対ファイルパス
+ * @returns {Promise<{symbols: Array<{name: string, kind: string, line: number, end_line: number, children: Array}>}>}
+ */
+export async function getLspDocumentSymbols(session, file) {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/lsp/document-symbols?file=${encodeURIComponent(file)}`);
+}
+
 /**
  * WebSocket 接続用の URL を生成する。
  * base-path とプロトコル（ws/wss）を考慮し、認証トークンをクエリパラメータに付与する。
