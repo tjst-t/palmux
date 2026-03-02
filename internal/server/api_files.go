@@ -6,8 +6,10 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/tjst-t/palmux/internal/fileserver"
+	"github.com/tjst-t/palmux/internal/grep"
 	"github.com/tjst-t/palmux/internal/tmux"
 )
 
@@ -186,6 +188,71 @@ func (s *Server) handleSearchFiles() http.Handler {
 			"query":   query,
 			"results": results,
 		})
+	})
+}
+
+// handleGrepSearch は GET /api/sessions/{session}/files/grep のハンドラ。
+// クエリパラメータ q で検索文字列を指定し、ファイル内容を全文検索する。
+// オプション: path（検索起点）、case（大文字小文字区別）、regex（正規表現）、glob（ファイルパターン）、limit（最大件数）。
+func (s *Server) handleGrepSearch() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		session := r.PathValue("session")
+
+		cwd, err := s.tmux.GetSessionProjectDir(session)
+		if err != nil {
+			if errors.Is(err, tmux.ErrSessionNotFound) {
+				writeError(w, http.StatusNotFound, "session not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		query := r.URL.Query().Get("q")
+		if query == "" {
+			writeError(w, http.StatusBadRequest, "q parameter is required")
+			return
+		}
+
+		basePath := r.URL.Query().Get("path")
+		if basePath == "" {
+			basePath = "."
+		}
+
+		// パス検証（パストラバーサル防止）
+		fs := &fileserver.FileServer{RootDir: cwd}
+		searchDir, err := fs.ValidatePath(basePath)
+		if err != nil {
+			writeFilesError(w, err, basePath)
+			return
+		}
+
+		caseSensitive := r.URL.Query().Get("case") == "true"
+		regex := r.URL.Query().Get("regex") == "true"
+		glob := r.URL.Query().Get("glob")
+
+		limit := 500
+		if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+			if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
+				limit = parsed
+			}
+		}
+
+		opts := grep.Options{
+			CaseSensitive: caseSensitive,
+			Regex:         regex,
+			Glob:          glob,
+			MaxResults:    limit,
+		}
+
+		results, err := s.searcher.Search(r.Context(), query, searchDir, opts)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		resp := grep.BuildResponse(query, s.searcher.Name(), results, limit)
+		writeJSON(w, http.StatusOK, resp)
 	})
 }
 

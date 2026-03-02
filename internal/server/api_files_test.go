@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/tjst-t/palmux/internal/fileserver"
+	"github.com/tjst-t/palmux/internal/grep"
 	"github.com/tjst-t/palmux/internal/tmux"
 )
 
@@ -663,5 +665,348 @@ func TestHandleGetFiles_Authentication(t *testing.T) {
 	rec = doRequest(t, srv.Handler(), http.MethodGet, "/api/sessions/main/files?path=.", "wrong-token", "")
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+// --- GET /api/sessions/{session}/files/grep テスト ---
+
+// mockSearcher は grep.Searcher のモック実装。
+type mockSearcher struct {
+	results     []grep.Result
+	err         error
+	name        string
+	calledQuery string
+	calledDir   string
+	calledOpts  grep.Options
+}
+
+func (m *mockSearcher) Search(ctx context.Context, query, dir string, opts grep.Options) ([]grep.Result, error) {
+	m.calledQuery = query
+	m.calledDir = dir
+	m.calledOpts = opts
+	return m.results, m.err
+}
+
+func (m *mockSearcher) Name() string {
+	if m.name != "" {
+		return m.name
+	}
+	return "mock"
+}
+
+func TestHandleGrepSearch_Basic(t *testing.T) {
+	root := setupFilesTestDir(t)
+	mock := &configurableMock{cwd: root}
+	searcher := &mockSearcher{
+		results: []grep.Result{
+			{Path: "file.txt", LineNumber: 1, LineText: "hello world", MatchStart: 0, MatchEnd: 5},
+		},
+		name: "mock",
+	}
+
+	const token = "test-token"
+	srv := NewServer(Options{
+		Tmux:     mock,
+		Token:    token,
+		BasePath: "/",
+		Searcher: searcher,
+	})
+
+	rec := doRequest(t, srv.Handler(), http.MethodGet, "/api/sessions/main/files/grep?q=hello", token, "")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp grep.Response
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Query != "hello" {
+		t.Errorf("Query = %q, want %q", resp.Query, "hello")
+	}
+	if len(resp.Results) != 1 {
+		t.Fatalf("Results len = %d, want 1", len(resp.Results))
+	}
+	if resp.Results[0].Path != "file.txt" {
+		t.Errorf("Results[0].Path = %q, want %q", resp.Results[0].Path, "file.txt")
+	}
+	if resp.Results[0].LineText != "hello world" {
+		t.Errorf("Results[0].LineText = %q, want %q", resp.Results[0].LineText, "hello world")
+	}
+
+	// Searcher に正しいクエリが渡されたか
+	if searcher.calledQuery != "hello" {
+		t.Errorf("searcher.calledQuery = %q, want %q", searcher.calledQuery, "hello")
+	}
+	// デフォルトオプション確認
+	if searcher.calledOpts.CaseSensitive {
+		t.Error("CaseSensitive should be false by default")
+	}
+	if searcher.calledOpts.Regex {
+		t.Error("Regex should be false by default")
+	}
+	if searcher.calledOpts.MaxResults != 500 {
+		t.Errorf("MaxResults = %d, want 500", searcher.calledOpts.MaxResults)
+	}
+}
+
+func TestHandleGrepSearch_WithPath(t *testing.T) {
+	root := setupFilesTestDir(t)
+	mock := &configurableMock{cwd: root}
+	searcher := &mockSearcher{
+		results: []grep.Result{
+			{Path: "nested.txt", LineNumber: 1, LineText: "nested content", MatchStart: 0, MatchEnd: 6},
+		},
+	}
+
+	const token = "test-token"
+	srv := NewServer(Options{
+		Tmux:     mock,
+		Token:    token,
+		BasePath: "/",
+		Searcher: searcher,
+	})
+
+	rec := doRequest(t, srv.Handler(), http.MethodGet, "/api/sessions/main/files/grep?q=nested&path=subdir", token, "")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp grep.Response
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(resp.Results) != 1 {
+		t.Fatalf("Results len = %d, want 1", len(resp.Results))
+	}
+
+	// 検索ディレクトリが subdir のフルパスであることを確認
+	expectedDir := filepath.Join(root, "subdir")
+	if searcher.calledDir != expectedDir {
+		t.Errorf("searcher.calledDir = %q, want %q", searcher.calledDir, expectedDir)
+	}
+}
+
+func TestHandleGrepSearch_EmptyQuery(t *testing.T) {
+	root := setupFilesTestDir(t)
+	mock := &configurableMock{cwd: root}
+	searcher := &mockSearcher{}
+
+	const token = "test-token"
+	srv := NewServer(Options{
+		Tmux:     mock,
+		Token:    token,
+		BasePath: "/",
+		Searcher: searcher,
+	})
+
+	rec := doRequest(t, srv.Handler(), http.MethodGet, "/api/sessions/main/files/grep?q=", token, "")
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d, body = %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}
+
+func TestHandleGrepSearch_NoQueryParam(t *testing.T) {
+	root := setupFilesTestDir(t)
+	mock := &configurableMock{cwd: root}
+	searcher := &mockSearcher{}
+
+	const token = "test-token"
+	srv := NewServer(Options{
+		Tmux:     mock,
+		Token:    token,
+		BasePath: "/",
+		Searcher: searcher,
+	})
+
+	rec := doRequest(t, srv.Handler(), http.MethodGet, "/api/sessions/main/files/grep", token, "")
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d, body = %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}
+
+func TestHandleGrepSearch_SessionNotFound(t *testing.T) {
+	mock := &configurableMock{
+		cwdErr: fmt.Errorf("get session cwd: %w", tmux.ErrSessionNotFound),
+	}
+	searcher := &mockSearcher{}
+
+	const token = "test-token"
+	srv := NewServer(Options{
+		Tmux:     mock,
+		Token:    token,
+		BasePath: "/",
+		Searcher: searcher,
+	})
+
+	rec := doRequest(t, srv.Handler(), http.MethodGet, "/api/sessions/nonexistent/files/grep?q=hello", token, "")
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d, body = %s", rec.Code, http.StatusNotFound, rec.Body.String())
+	}
+
+	var errResp map[string]string
+	if err := json.NewDecoder(rec.Body).Decode(&errResp); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+	if errResp["error"] == "" {
+		t.Error("error response should contain 'error' field")
+	}
+}
+
+func TestHandleGrepSearch_PathTraversal(t *testing.T) {
+	root := setupFilesTestDir(t)
+	mock := &configurableMock{cwd: root}
+	searcher := &mockSearcher{}
+
+	const token = "test-token"
+	srv := NewServer(Options{
+		Tmux:     mock,
+		Token:    token,
+		BasePath: "/",
+		Searcher: searcher,
+	})
+
+	attacks := []string{
+		"../../etc",
+		"../../../etc",
+		"/etc",
+	}
+
+	for _, path := range attacks {
+		t.Run(path, func(t *testing.T) {
+			rec := doRequest(t, srv.Handler(), http.MethodGet, "/api/sessions/main/files/grep?q=hello&path="+path, token, "")
+
+			if rec.Code == http.StatusOK {
+				t.Errorf("path traversal should not return 200 for path %q, got %d", path, rec.Code)
+			}
+		})
+	}
+}
+
+func TestHandleGrepSearch_EngineField(t *testing.T) {
+	root := setupFilesTestDir(t)
+	mock := &configurableMock{cwd: root}
+	searcher := &mockSearcher{
+		name:    "ripgrep",
+		results: []grep.Result{},
+	}
+
+	const token = "test-token"
+	srv := NewServer(Options{
+		Tmux:     mock,
+		Token:    token,
+		BasePath: "/",
+		Searcher: searcher,
+	})
+
+	rec := doRequest(t, srv.Handler(), http.MethodGet, "/api/sessions/main/files/grep?q=hello", token, "")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp grep.Response
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Engine != "ripgrep" {
+		t.Errorf("Engine = %q, want %q", resp.Engine, "ripgrep")
+	}
+}
+
+func TestHandleGrepSearch_Authentication(t *testing.T) {
+	root := setupFilesTestDir(t)
+	mock := &configurableMock{cwd: root}
+	searcher := &mockSearcher{}
+
+	srv := NewServer(Options{
+		Tmux:     mock,
+		Token:    "test-token",
+		BasePath: "/",
+		Searcher: searcher,
+	})
+
+	// トークンなしでアクセス → 401
+	rec := doRequest(t, srv.Handler(), http.MethodGet, "/api/sessions/main/files/grep?q=hello", "", "")
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+
+	// 不正なトークンでアクセス → 401
+	rec = doRequest(t, srv.Handler(), http.MethodGet, "/api/sessions/main/files/grep?q=hello", "wrong-token", "")
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestHandleGrepSearch_WithBasePath(t *testing.T) {
+	root := setupFilesTestDir(t)
+	mock := &configurableMock{cwd: root}
+	searcher := &mockSearcher{
+		results: []grep.Result{
+			{Path: "file.txt", LineNumber: 1, LineText: "hello world", MatchStart: 0, MatchEnd: 5},
+		},
+	}
+
+	const token = "test-token"
+	srv := NewServer(Options{
+		Tmux:     mock,
+		Token:    token,
+		BasePath: "/palmux/",
+		Searcher: searcher,
+	})
+
+	rec := doRequest(t, srv.Handler(), http.MethodGet, "/palmux/api/sessions/main/files/grep?q=hello", token, "")
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	if mock.calledGetProjectDir != "main" {
+		t.Errorf("GetSessionProjectDir called with %q, want %q", mock.calledGetProjectDir, "main")
+	}
+}
+
+func TestHandleGrepSearch_QueryOptions(t *testing.T) {
+	root := setupFilesTestDir(t)
+	mock := &configurableMock{cwd: root}
+	searcher := &mockSearcher{results: []grep.Result{}}
+
+	const token = "test-token"
+	srv := NewServer(Options{
+		Tmux:     mock,
+		Token:    token,
+		BasePath: "/",
+		Searcher: searcher,
+	})
+
+	// case=true, regex=true, glob=*.go, limit=100 を指定
+	rec := doRequest(t, srv.Handler(), http.MethodGet,
+		"/api/sessions/main/files/grep?q=hello&case=true&regex=true&glob=*.go&limit=100",
+		token, "")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	if !searcher.calledOpts.CaseSensitive {
+		t.Error("CaseSensitive should be true")
+	}
+	if !searcher.calledOpts.Regex {
+		t.Error("Regex should be true")
+	}
+	if searcher.calledOpts.Glob != "*.go" {
+		t.Errorf("Glob = %q, want %q", searcher.calledOpts.Glob, "*.go")
+	}
+	if searcher.calledOpts.MaxResults != 100 {
+		t.Errorf("MaxResults = %d, want 100", searcher.calledOpts.MaxResults)
 	}
 }
