@@ -11,15 +11,27 @@ type mockCommandRunner struct {
 	output []byte
 	err    error
 
+	// RunWithStdin 用
+	stdinOutput []byte
+	stdinErr    error
+
 	// 呼び出し記録
-	calledDir  string
-	calledArgs []string
+	calledDir   string
+	calledArgs  []string
+	calledStdin []byte
 }
 
 func (m *mockCommandRunner) RunInDir(dir string, args ...string) ([]byte, error) {
 	m.calledDir = dir
 	m.calledArgs = args
 	return m.output, m.err
+}
+
+func (m *mockCommandRunner) RunWithStdin(dir string, input []byte, args ...string) ([]byte, error) {
+	m.calledDir = dir
+	m.calledStdin = input
+	m.calledArgs = args
+	return m.stdinOutput, m.stdinErr
 }
 
 // multiMockCommandRunner は複数の呼び出しに対して異なるレスポンスを返すモック。
@@ -35,6 +47,15 @@ type mockCall struct {
 }
 
 func (m *multiMockCommandRunner) RunInDir(dir string, args ...string) ([]byte, error) {
+	if m.callIdx < len(m.calls) {
+		call := m.calls[m.callIdx]
+		m.callIdx++
+		return call.output, call.err
+	}
+	return m.fallback.output, m.fallback.err
+}
+
+func (m *multiMockCommandRunner) RunWithStdin(dir string, input []byte, args ...string) ([]byte, error) {
 	if m.callIdx < len(m.calls) {
 		call := m.calls[m.callIdx]
 		m.callIdx++
@@ -646,6 +667,222 @@ func TestGit_Unstage(t *testing.T) {
 				t.Errorf("args = %v, want %v", mock.calledArgs, tt.wantArgs)
 			}
 		})
+	}
+}
+
+func TestGit_DiscardHunk(t *testing.T) {
+	samplePatch := "@@ -10,7 +10,8 @@ func main() {\n context\n-old\n+new\n+added\n"
+
+	tests := []struct {
+		name      string
+		patch     string
+		stdinErr  error
+		wantErr   bool
+		wantErrIs error
+		wantArgs  []string
+	}{
+		{
+			name:     "正常系: hunk をリバート",
+			patch:    samplePatch,
+			wantArgs: []string{"apply", "--reverse"},
+		},
+		{
+			name:      "異常系: 空パッチ",
+			patch:     "",
+			wantErr:   true,
+			wantErrIs: ErrEmptyPatch,
+		},
+		{
+			name:     "異常系: コマンドエラー",
+			patch:    samplePatch,
+			stdinErr: errors.New("apply failed"),
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockCommandRunner{
+				stdinErr: tt.stdinErr,
+			}
+			g := &Git{Cmd: mock}
+
+			err := g.DiscardHunk("/test/dir", tt.patch)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tt.wantErrIs != nil && !errors.Is(err, tt.wantErrIs) {
+					t.Errorf("error = %v, want %v", err, tt.wantErrIs)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if mock.calledDir != "/test/dir" {
+				t.Errorf("dir = %q, want %q", mock.calledDir, "/test/dir")
+			}
+			if !containsExactSlice(mock.calledArgs, tt.wantArgs) {
+				t.Errorf("args = %v, want %v", mock.calledArgs, tt.wantArgs)
+			}
+			if string(mock.calledStdin) != tt.patch {
+				t.Errorf("stdin = %q, want %q", string(mock.calledStdin), tt.patch)
+			}
+		})
+	}
+}
+
+func TestGit_StageHunk(t *testing.T) {
+	samplePatch := "@@ -10,7 +10,8 @@ func main() {\n context\n-old\n+new\n+added\n"
+
+	tests := []struct {
+		name      string
+		patch     string
+		stdinErr  error
+		wantErr   bool
+		wantErrIs error
+		wantArgs  []string
+	}{
+		{
+			name:     "正常系: hunk をステージ",
+			patch:    samplePatch,
+			wantArgs: []string{"apply", "--cached"},
+		},
+		{
+			name:      "異常系: 空パッチ",
+			patch:     "",
+			wantErr:   true,
+			wantErrIs: ErrEmptyPatch,
+		},
+		{
+			name:     "異常系: コマンドエラー",
+			patch:    samplePatch,
+			stdinErr: errors.New("apply failed"),
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockCommandRunner{
+				stdinErr: tt.stdinErr,
+			}
+			g := &Git{Cmd: mock}
+
+			err := g.StageHunk("/test/dir", tt.patch)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tt.wantErrIs != nil && !errors.Is(err, tt.wantErrIs) {
+					t.Errorf("error = %v, want %v", err, tt.wantErrIs)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if mock.calledDir != "/test/dir" {
+				t.Errorf("dir = %q, want %q", mock.calledDir, "/test/dir")
+			}
+			if !containsExactSlice(mock.calledArgs, tt.wantArgs) {
+				t.Errorf("args = %v, want %v", mock.calledArgs, tt.wantArgs)
+			}
+			if string(mock.calledStdin) != tt.patch {
+				t.Errorf("stdin = %q, want %q", string(mock.calledStdin), tt.patch)
+			}
+		})
+	}
+}
+
+func TestGit_UnstageHunk(t *testing.T) {
+	samplePatch := "@@ -10,7 +10,8 @@ func main() {\n context\n-old\n+new\n+added\n"
+
+	tests := []struct {
+		name      string
+		patch     string
+		stdinErr  error
+		wantErr   bool
+		wantErrIs error
+		wantArgs  []string
+	}{
+		{
+			name:     "正常系: hunk をアンステージ",
+			patch:    samplePatch,
+			wantArgs: []string{"apply", "--cached", "--reverse"},
+		},
+		{
+			name:      "異常系: 空パッチ",
+			patch:     "",
+			wantErr:   true,
+			wantErrIs: ErrEmptyPatch,
+		},
+		{
+			name:     "異常系: コマンドエラー",
+			patch:    samplePatch,
+			stdinErr: errors.New("apply failed"),
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockCommandRunner{
+				stdinErr: tt.stdinErr,
+			}
+			g := &Git{Cmd: mock}
+
+			err := g.UnstageHunk("/test/dir", tt.patch)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tt.wantErrIs != nil && !errors.Is(err, tt.wantErrIs) {
+					t.Errorf("error = %v, want %v", err, tt.wantErrIs)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if mock.calledDir != "/test/dir" {
+				t.Errorf("dir = %q, want %q", mock.calledDir, "/test/dir")
+			}
+			if !containsExactSlice(mock.calledArgs, tt.wantArgs) {
+				t.Errorf("args = %v, want %v", mock.calledArgs, tt.wantArgs)
+			}
+			if string(mock.calledStdin) != tt.patch {
+				t.Errorf("stdin = %q, want %q", string(mock.calledStdin), tt.patch)
+			}
+		})
+	}
+}
+
+func TestGit_StructuredDiff(t *testing.T) {
+	diffOutput := "diff --git a/main.go b/main.go\nindex 1234567..abcdefg 100644\n--- a/main.go\n+++ b/main.go\n@@ -10,7 +10,8 @@ func main() {\n \tfmt.Println(\"hello\")\n-\tfmt.Println(\"old\")\n+\tfmt.Println(\"new\")\n+\tfmt.Println(\"added\")\n \tfmt.Println(\"world\")\n"
+
+	mock := &mockCommandRunner{
+		output: []byte(diffOutput),
+	}
+	g := &Git{Cmd: mock}
+
+	result, err := g.StructuredDiff("/test/dir", "", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(result) != 1 {
+		t.Fatalf("len(result) = %d, want 1", len(result))
+	}
+	if result[0].FilePath != "main.go" {
+		t.Errorf("FilePath = %q, want %q", result[0].FilePath, "main.go")
+	}
+	if len(result[0].Hunks) != 1 {
+		t.Errorf("Hunks count = %d, want 1", len(result[0].Hunks))
 	}
 }
 

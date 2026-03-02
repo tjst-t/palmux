@@ -1,0 +1,11 @@
+diff --git a/deleted.go b/deleted.go
+deleted file mode 100644
+index 1234567..0000000
+--- a/deleted.go
++++ /dev/null
+@@ -1,5 +0,0 @@
+-package main
+-
+-func oldFunc() {
+-	return
+-}
