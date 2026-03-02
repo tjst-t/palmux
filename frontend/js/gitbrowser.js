@@ -1714,16 +1714,18 @@ export class GitBrowser {
     this._contextMenu = menu;
 
     // メニュー外クリックで閉じる
+    // bubble phase を使用: capture phase だとロングプレス後の synthetic click で
+    // file entry の stopPropagation() より先に発火してメニューが閉じてしまう
     const closeHandler = (e) => {
       if (!menu.contains(e.target)) {
         this._closeContextMenu();
-        document.removeEventListener('click', closeHandler, true);
-        document.removeEventListener('touchstart', closeHandler, true);
+        document.removeEventListener('click', closeHandler);
+        document.removeEventListener('touchstart', closeHandler);
       }
     };
     setTimeout(() => {
-      document.addEventListener('click', closeHandler, true);
-      document.addEventListener('touchstart', closeHandler, true);
+      document.addEventListener('click', closeHandler);
+      document.addEventListener('touchstart', closeHandler);
     }, 10);
   }
 
