@@ -699,6 +699,13 @@
   -webkit-user-select: none;
 }
 
+/* Context menu overlay - catches outside taps and blocks pass-through */
+.gb-context-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+}
+
 /* Context menu */
 .gb-context-menu {
   position: fixed;

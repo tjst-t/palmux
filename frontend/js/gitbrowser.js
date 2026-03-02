@@ -1663,8 +1663,24 @@ export class GitBrowser {
     // 既存メニューを閉じる
     this._closeContextMenu();
 
+    // オーバーレイ: メニュー外タップでメニューを閉じ、下の要素へのイベント伝播を防ぐ
+    const overlay = document.createElement('div');
+    overlay.className = 'gb-context-overlay';
+    overlay.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this._closeContextMenu();
+    });
+    overlay.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this._closeContextMenu();
+    });
+
     const menu = document.createElement('div');
     menu.className = 'gb-context-menu';
+
+    // メニュー内のタッチイベントがオーバーレイに伝播しないようにする
+    menu.addEventListener('touchstart', (e) => e.stopPropagation());
 
     if (file.staged) {
       // Unstage
@@ -1695,7 +1711,8 @@ export class GitBrowser {
     menu.style.left = `${x}px`;
     menu.style.top = `${y}px`;
 
-    this._wrapper.appendChild(menu);
+    document.body.appendChild(overlay);
+    document.body.appendChild(menu);
 
     // 画面外はみ出しチェック（DOM に追加後に寸法を取得）
     requestAnimationFrame(() => {
@@ -1712,21 +1729,7 @@ export class GitBrowser {
     });
 
     this._contextMenu = menu;
-
-    // メニュー外クリックで閉じる
-    // bubble phase を使用: capture phase だとロングプレス後の synthetic click で
-    // file entry の stopPropagation() より先に発火してメニューが閉じてしまう
-    const closeHandler = (e) => {
-      if (!menu.contains(e.target)) {
-        this._closeContextMenu();
-        document.removeEventListener('click', closeHandler);
-        document.removeEventListener('touchstart', closeHandler);
-      }
-    };
-    setTimeout(() => {
-      document.addEventListener('click', closeHandler);
-      document.addEventListener('touchstart', closeHandler);
-    }, 10);
+    this._contextOverlay = overlay;
   }
 
   /**
@@ -1736,6 +1739,10 @@ export class GitBrowser {
     if (this._contextMenu) {
       this._contextMenu.remove();
       this._contextMenu = null;
+    }
+    if (this._contextOverlay) {
+      this._contextOverlay.remove();
+      this._contextOverlay = null;
     }
   }
 
