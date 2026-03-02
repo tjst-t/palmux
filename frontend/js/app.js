@@ -867,22 +867,22 @@ document.addEventListener('DOMContentLoaded', () => {
    * @param {string} baseCommand - claude コマンドのベース（例: "claude" or "claude --continue"）
    */
   function _showTabModelSelectDialog(sessionName, baseCommand) {
-    const existing = document.querySelector('.drawer-context-menu-overlay');
+    const existing = document.querySelector('.context-menu-overlay');
     if (existing) existing.remove();
 
     const overlay = document.createElement('div');
-    overlay.className = 'drawer-context-menu-overlay';
+    overlay.className = 'context-menu-overlay';
 
     const menu = document.createElement('div');
-    menu.className = 'drawer-context-menu';
+    menu.className = 'context-menu';
 
     const title = document.createElement('div');
-    title.className = 'drawer-context-menu-title';
+    title.className = 'context-menu__title';
     title.textContent = 'Select Model';
     menu.appendChild(title);
 
     const closeDialog = () => {
-      overlay.classList.remove('drawer-context-menu-overlay--visible');
+      overlay.classList.remove('context-menu-overlay--visible');
       setTimeout(() => overlay.remove(), 200);
     };
 
@@ -894,7 +894,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     for (const model of models) {
       const btn = document.createElement('button');
-      btn.className = 'drawer-context-menu-item';
+      btn.className = 'context-menu__item';
       btn.textContent = model.label;
       btn.addEventListener('click', async () => {
         closeDialog();
@@ -914,7 +914,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.body.appendChild(overlay);
 
     requestAnimationFrame(() => {
-      overlay.classList.add('drawer-context-menu-overlay--visible');
+      overlay.classList.add('context-menu-overlay--visible');
     });
 
     overlay.addEventListener('click', (e) => {
@@ -930,17 +930,17 @@ document.addEventListener('DOMContentLoaded', () => {
    * @param {string} currentName
    */
   function _showTabRenameDialog(sessionName, windowIndex, currentName) {
-    const existing = document.querySelector('.drawer-context-menu-overlay');
+    const existing = document.querySelector('.context-menu-overlay');
     if (existing) existing.remove();
 
     const overlay = document.createElement('div');
-    overlay.className = 'drawer-context-menu-overlay';
+    overlay.className = 'context-menu-overlay';
 
     const menu = document.createElement('div');
-    menu.className = 'drawer-context-menu';
+    menu.className = 'context-menu';
 
     const title = document.createElement('div');
-    title.className = 'drawer-context-menu-title';
+    title.className = 'context-menu__title';
     title.textContent = 'Rename Window';
     menu.appendChild(title);
 
@@ -960,7 +960,7 @@ document.addEventListener('DOMContentLoaded', () => {
     menu.appendChild(inputWrapper);
 
     const closeDialog = () => {
-      overlay.classList.remove('drawer-context-menu-overlay--visible');
+      overlay.classList.remove('context-menu-overlay--visible');
       setTimeout(() => overlay.remove(), 200);
     };
 
@@ -994,7 +994,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.body.appendChild(overlay);
 
     requestAnimationFrame(() => {
-      overlay.classList.add('drawer-context-menu-overlay--visible');
+      overlay.classList.add('context-menu-overlay--visible');
       input.focus();
       input.select();
     });

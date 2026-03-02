@@ -663,10 +663,10 @@ describe('TabBar', () => {
       const termTab = container.querySelector('.tab[data-type="terminal"][data-window="0"]');
       termTab.dispatchEvent(new Event('contextmenu', { bubbles: true }));
 
-      const overlay = document.querySelector('.drawer-context-menu-overlay');
+      const overlay = document.querySelector('.context-menu-overlay');
       expect(overlay).not.toBeNull();
 
-      const menuItems = overlay.querySelectorAll('.drawer-context-menu-item');
+      const menuItems = overlay.querySelectorAll('.context-menu__item');
       expect(menuItems.length).toBe(2);
       expect(menuItems[0].textContent).toBe('Rename');
       expect(menuItems[1].textContent).toBe('Delete');
@@ -680,10 +680,10 @@ describe('TabBar', () => {
       const claudeTab = container.querySelector('.tab[data-type="terminal"][data-window="1"]');
       claudeTab.dispatchEvent(new Event('contextmenu', { bubbles: true }));
 
-      const overlay = document.querySelector('.drawer-context-menu-overlay');
+      const overlay = document.querySelector('.context-menu-overlay');
       expect(overlay).not.toBeNull();
 
-      const menuItems = overlay.querySelectorAll('.drawer-context-menu-item');
+      const menuItems = overlay.querySelectorAll('.context-menu__item');
       expect(menuItems.length).toBe(2);
       expect(menuItems[0].textContent).toBe('Restart');
       expect(menuItems[1].textContent).toBe('Resume');
@@ -696,7 +696,7 @@ describe('TabBar', () => {
       const filesTab = container.querySelector('.tab[data-type="files"]');
       filesTab.dispatchEvent(new Event('contextmenu', { bubbles: true }));
 
-      const overlay = document.querySelector('.drawer-context-menu-overlay');
+      const overlay = document.querySelector('.context-menu-overlay');
       expect(overlay).toBeNull();
     });
 
@@ -707,7 +707,7 @@ describe('TabBar', () => {
       const gitTab = container.querySelector('.tab[data-type="git"]');
       gitTab.dispatchEvent(new Event('contextmenu', { bubbles: true }));
 
-      const overlay = document.querySelector('.drawer-context-menu-overlay');
+      const overlay = document.querySelector('.context-menu-overlay');
       expect(overlay).toBeNull();
     });
 
@@ -718,7 +718,7 @@ describe('TabBar', () => {
       const addBtn = container.querySelector('.tab[data-type="add"]');
       addBtn.dispatchEvent(new Event('contextmenu', { bubbles: true }));
 
-      const overlay = document.querySelector('.drawer-context-menu-overlay');
+      const overlay = document.querySelector('.context-menu-overlay');
       expect(overlay).toBeNull();
     });
 
@@ -730,7 +730,7 @@ describe('TabBar', () => {
       const termTab = container.querySelector('.tab[data-type="terminal"]');
       termTab.dispatchEvent(new Event('contextmenu', { bubbles: true }));
 
-      const renameBtn = document.querySelector('.drawer-context-menu-item');
+      const renameBtn = document.querySelector('.context-menu__item');
       renameBtn.click();
 
       expect(onContextAction).toHaveBeenCalledWith({
@@ -748,7 +748,7 @@ describe('TabBar', () => {
       const termTab = container.querySelector('.tab[data-type="terminal"]');
       termTab.dispatchEvent(new Event('contextmenu', { bubbles: true }));
 
-      const items = document.querySelectorAll('.drawer-context-menu-item');
+      const items = document.querySelectorAll('.context-menu__item');
       const deleteBtn = items[1]; // second item is Delete
       deleteBtn.click();
 
@@ -767,7 +767,7 @@ describe('TabBar', () => {
       const claudeTab = container.querySelector('.tab[data-type="terminal"][data-window="1"]');
       claudeTab.dispatchEvent(new Event('contextmenu', { bubbles: true }));
 
-      const items = document.querySelectorAll('.drawer-context-menu-item');
+      const items = document.querySelectorAll('.context-menu__item');
       items[0].click(); // Restart
 
       expect(onContextAction).toHaveBeenCalledWith({
@@ -785,7 +785,7 @@ describe('TabBar', () => {
       const claudeTab = container.querySelector('.tab[data-type="terminal"][data-window="1"]');
       claudeTab.dispatchEvent(new Event('contextmenu', { bubbles: true }));
 
-      const items = document.querySelectorAll('.drawer-context-menu-item');
+      const items = document.querySelectorAll('.context-menu__item');
       items[1].click(); // Resume
 
       expect(onContextAction).toHaveBeenCalledWith({
@@ -802,7 +802,7 @@ describe('TabBar', () => {
       const termTab = container.querySelector('.tab[data-type="terminal"]');
       termTab.dispatchEvent(new Event('contextmenu', { bubbles: true }));
 
-      let overlay = document.querySelector('.drawer-context-menu-overlay');
+      let overlay = document.querySelector('.context-menu-overlay');
       expect(overlay).not.toBeNull();
 
       // Click overlay itself to close
@@ -819,7 +819,7 @@ describe('TabBar', () => {
       const termTab = container.querySelector('.tab[data-type="terminal"]');
       termTab.dispatchEvent(new Event('contextmenu', { bubbles: true }));
 
-      const title = document.querySelector('.drawer-context-menu-title');
+      const title = document.querySelector('.context-menu__title');
       expect(title.textContent).toBe('3: myterm');
     });
 
@@ -833,25 +833,9 @@ describe('TabBar', () => {
       event.clientY = 80;
       termTab.dispatchEvent(event);
 
-      const menu = document.querySelector('.drawer-context-menu');
+      const menu = document.querySelector('.context-menu');
       expect(menu).not.toBeNull();
       expect(menu.style.position).toBe('absolute');
-    });
-
-    it('centers menu on long press (mobile, no cursorPos)', () => {
-      const bar = new TabBar({ container, onTabSelect });
-      bar.setWindows('main', [makeWindow(0, 'zsh')], false);
-
-      // Directly call _showContextMenu without cursorPos (simulates long press path)
-      bar._showContextMenu(
-        container.querySelector('.tab[data-type="terminal"]'),
-        'terminal', 0, 'zsh',
-      );
-
-      const menu = document.querySelector('.drawer-context-menu');
-      expect(menu).not.toBeNull();
-      // No absolute positioning when no cursorPos
-      expect(menu.style.position).toBe('');
     });
 
     it('delete button has danger class', () => {
@@ -861,26 +845,18 @@ describe('TabBar', () => {
       const termTab = container.querySelector('.tab[data-type="terminal"]');
       termTab.dispatchEvent(new Event('contextmenu', { bubbles: true }));
 
-      const items = document.querySelectorAll('.drawer-context-menu-item');
-      expect(items[1].classList.contains('drawer-context-menu-item--danger')).toBe(true);
+      const items = document.querySelectorAll('.context-menu__item');
+      expect(items[1].classList.contains('context-menu__item--danger')).toBe(true);
     });
   });
 
   describe('long press detection', () => {
-    it('suppresses click after long press detection', () => {
+    it('has context menu handles after setWindows', () => {
       const bar = new TabBar({ container, onTabSelect });
       bar.setWindows('main', [makeWindow(0, 'zsh')], false);
 
-      // Simulate long press detected state
-      bar._longPressDetected = true;
-
-      const termTab = container.querySelector('.tab[data-type="terminal"]');
-      termTab.click();
-
-      // Should NOT have called onTabSelect because longPressDetected was true
-      expect(onTabSelect).not.toHaveBeenCalled();
-      // Should reset the flag
-      expect(bar._longPressDetected).toBe(false);
+      // Each terminal tab should have a context menu handle
+      expect(bar._contextMenuHandles.length).toBe(1);
     });
   });
 
@@ -896,15 +872,14 @@ describe('TabBar', () => {
       expect(bar._scrollEl).toBeNull();
     });
 
-    it('clears long press timer on dispose', () => {
+    it('detaches context menu handles on dispose', () => {
       const bar = new TabBar({ container, onTabSelect });
       bar.setWindows('main', [makeWindow(0, 'zsh')], false);
 
-      // Simulate an active timer
-      bar._longPressTimer = setTimeout(() => {}, 10000);
+      expect(bar._contextMenuHandles.length).toBe(1);
       bar.dispose();
 
-      expect(bar._longPressTimer).toBeNull();
+      expect(bar._contextMenuHandles.length).toBe(0);
     });
   });
 });

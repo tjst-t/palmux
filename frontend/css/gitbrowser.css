@@ -795,18 +795,6 @@
     font-size: calc(var(--gb-font-size, 13px) - 2px);
   }
 
-  .gb-context-menu {
-    min-width: 160px;
-  }
-
-  .gb-context-menu-item {
-    padding: 14px 16px;
-    font-size: var(--gb-font-size, 13px);
-    min-height: 44px;
-    display: flex;
-    align-items: center;
-  }
-
   .gb-diff-hunk-row {
     flex-wrap: wrap;
   }
