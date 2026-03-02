@@ -387,6 +387,58 @@ export async function gitUnstage(session, paths) {
 }
 
 /**
+ * structured diff を取得する。
+ * @param {string} session - セッション名
+ * @param {string} [path] - ファイルパス
+ * @param {string} [commit] - コミットハッシュ
+ * @returns {Promise<Array<{file_path: string, status: string, hunks: Array<{header: string, old_start: number, old_lines: number, new_start: number, new_lines: number, content: string}>}>>}
+ */
+export async function getGitStructuredDiff(session, path, commit) {
+  const params = new URLSearchParams();
+  if (path) params.set('path', path);
+  if (commit) params.set('commit', commit);
+  params.set('structured', 'true');
+  const qs = params.toString();
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/git/diff${qs ? '?' + qs : ''}`);
+}
+
+/**
+ * hunk の変更を破棄する。
+ * @param {string} session - セッション名
+ * @param {string} patch - パッチ内容
+ */
+export async function gitDiscardHunk(session, patch) {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/git/discard-hunk`, {
+    method: 'POST',
+    body: JSON.stringify({ patch }),
+  });
+}
+
+/**
+ * hunk をステージする。
+ * @param {string} session - セッション名
+ * @param {string} patch - パッチ内容
+ */
+export async function gitStageHunk(session, patch) {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/git/stage-hunk`, {
+    method: 'POST',
+    body: JSON.stringify({ patch }),
+  });
+}
+
+/**
+ * hunk をアンステージする。
+ * @param {string} session - セッション名
+ * @param {string} patch - パッチ内容
+ */
+export async function gitUnstageHunk(session, patch) {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/git/unstage-hunk`, {
+    method: 'POST',
+    body: JSON.stringify({ patch }),
+  });
+}
+
+/**
  * 画像ファイルをサーバーにアップロードし、保存先パスを返す。
  * fetchAPI() は Content-Type: application/json を固定するため、直接 fetch + FormData を使用する。
  * @param {File} file - アップロードする画像ファイル

@@ -584,6 +584,72 @@
   color: #8888aa;
 }
 
+/* Hunk action buttons */
+.gb-diff-hunk-row {
+  display: flex;
+  align-items: center;
+  background: rgba(100, 181, 246, 0.08);
+  border-bottom: 1px solid rgba(42, 42, 74, 0.3);
+  min-height: 32px;
+}
+
+.gb-diff-hunk-text {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+.gb-hunk-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  flex-shrink: 0;
+}
+
+.gb-hunk-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border: 1px solid #3a3a5a;
+  border-radius: 4px;
+  font-size: calc(var(--gb-font-size, 14px) - 3px);
+  font-family: inherit;
+  cursor: pointer;
+  background: none;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  white-space: nowrap;
+  min-height: 28px;
+}
+
+.gb-hunk-btn--stage {
+  color: #81c784;
+  border-color: rgba(129, 199, 132, 0.3);
+}
+
+.gb-hunk-btn--stage:hover {
+  background: rgba(129, 199, 132, 0.15);
+}
+
+.gb-hunk-btn--stage:active {
+  background: rgba(129, 199, 132, 0.25);
+}
+
+.gb-hunk-btn--revert {
+  color: #e57373;
+  border-color: rgba(229, 115, 115, 0.3);
+}
+
+.gb-hunk-btn--revert:hover {
+  background: rgba(229, 115, 115, 0.15);
+}
+
+.gb-hunk-btn--revert:active {
+  background: rgba(229, 115, 115, 0.25);
+}
+
 /* Side-by-side diff (PC/iPad) */
 .gb-diff-content--sbs {
   display: flex;
@@ -789,6 +855,23 @@
     min-height: 44px;
     display: flex;
     align-items: center;
+  }
+
+  .gb-diff-hunk-row {
+    flex-wrap: wrap;
+  }
+
+  .gb-hunk-actions {
+    width: 100%;
+    padding: 4px 8px;
+    justify-content: flex-end;
+    border-top: 1px solid rgba(42, 42, 74, 0.2);
+  }
+
+  .gb-hunk-btn {
+    min-height: 36px;
+    padding: 6px 14px;
+    font-size: calc(var(--gb-font-size, 13px) - 2px);
   }
 }
 
