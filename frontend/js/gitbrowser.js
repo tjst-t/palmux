@@ -2,6 +2,7 @@
 // セッションの CWD における git status, log, diff, branches を表示する
 
 import { getGitStatus, getGitLog, getGitDiff, getGitStructuredDiff, getGitCommitFiles, getGitBranches, gitDiscard, gitStage, gitUnstage, gitDiscardHunk, gitStageHunk, gitUnstageHunk } from './api.js';
+import { attachContextMenu, ContextMenu } from './context-menu.js';
 
 /**
  * 日時を相対的な短い形式にフォーマットする。
@@ -695,12 +696,29 @@ export class GitBrowser {
     el.appendChild(badge);
     el.appendChild(name);
 
-    // クリックハンドラ（ロングプレス発火時は抑制）
-    let longPressTriggered = false;
+    // コンテキストメニュー: コミット未選択時のみ
+    let handle = null;
+    if (!this._selectedCommit) {
+      handle = attachContextMenu(el, {
+        onTrigger: ({ x, y, isMobile }) => {
+          const items = [];
+          if (file.staged) {
+            items.push({ label: '\u2212 Unstage File', onClick: () => this._doUnstage(file) });
+          } else {
+            items.push({ label: '\uFF0B Stage File', onClick: () => this._doStage(file) });
+            if (file.status !== '?') {
+              items.push({ label: '\u21A9 Discard Changes', danger: true, onClick: () => this._doDiscard(file) });
+            }
+          }
+          this._activeContextMenu = new ContextMenu({ items });
+          this._activeContextMenu.show({ x, y, isMobile });
+        },
+      });
+    }
 
+    // クリックハンドラ（ロングプレス発火時は抑制）
     el.addEventListener('click', (e) => {
-      if (longPressTriggered) {
-        longPressTriggered = false;
+      if (handle && handle.wasLongPress()) {
         e.preventDefault();
         e.stopPropagation();
         return;
@@ -711,51 +729,6 @@ export class GitBrowser {
         this._showDiff(file.path, { push: true });
       }
     });
-
-    // コンテキストメニュー: コミット未選択時のみ
-    if (!this._selectedCommit) {
-      // ロングプレス（スマホ）
-      let pressTimer = null;
-      let pressStartPos = null;
-
-      const onPressStart = (e) => {
-        pressStartPos = { x: e.touches?.[0]?.clientX ?? e.clientX, y: e.touches?.[0]?.clientY ?? e.clientY };
-        pressTimer = setTimeout(() => {
-          longPressTriggered = true;
-          this._showContextMenu(file, pressStartPos.x, pressStartPos.y);
-          pressTimer = null;
-        }, 500);
-      };
-
-      const onPressMove = (e) => {
-        if (pressTimer) {
-          const x = e.touches?.[0]?.clientX ?? e.clientX;
-          const y = e.touches?.[0]?.clientY ?? e.clientY;
-          if (Math.abs(x - pressStartPos.x) > 10 || Math.abs(y - pressStartPos.y) > 10) {
-            clearTimeout(pressTimer);
-            pressTimer = null;
-          }
-        }
-      };
-
-      const onPressEnd = () => {
-        if (pressTimer) {
-          clearTimeout(pressTimer);
-          pressTimer = null;
-        }
-      };
-
-      el.addEventListener('touchstart', onPressStart, { passive: true });
-      el.addEventListener('touchmove', onPressMove, { passive: true });
-      el.addEventListener('touchend', onPressEnd);
-      el.addEventListener('touchcancel', onPressEnd);
-
-      // PC: 右クリック
-      el.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        this._showContextMenu(file, e.clientX, e.clientY);
-      });
-    }
 
     return el;
   }
@@ -1659,90 +1632,13 @@ export class GitBrowser {
    * @param {number} x - 表示 X 座標
    * @param {number} y - 表示 Y 座標
    */
-  _showContextMenu(file, x, y) {
-    // 既存メニューを閉じる
-    this._closeContextMenu();
-
-    // オーバーレイ: メニュー外タップでメニューを閉じ、下の要素へのイベント伝播を防ぐ
-    const overlay = document.createElement('div');
-    overlay.className = 'gb-context-overlay';
-    overlay.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this._closeContextMenu();
-    });
-    overlay.addEventListener('touchstart', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      this._closeContextMenu();
-    });
-
-    const menu = document.createElement('div');
-    menu.className = 'gb-context-menu';
-
-    // メニュー内のタッチイベントがオーバーレイに伝播しないようにする
-    menu.addEventListener('touchstart', (e) => e.stopPropagation());
-
-    if (file.staged) {
-      // Unstage
-      const unstageItem = document.createElement('div');
-      unstageItem.className = 'gb-context-menu-item';
-      unstageItem.textContent = '\u2212 Unstage File';
-      unstageItem.addEventListener('click', () => this._doUnstage(file));
-      menu.appendChild(unstageItem);
-    } else {
-      // Stage
-      const stageItem = document.createElement('div');
-      stageItem.className = 'gb-context-menu-item';
-      stageItem.textContent = '\uFF0B Stage File';
-      stageItem.addEventListener('click', () => this._doStage(file));
-      menu.appendChild(stageItem);
-
-      // Discard (untracked ファイルには表示しない)
-      if (file.status !== '?') {
-        const discardItem = document.createElement('div');
-        discardItem.className = 'gb-context-menu-item gb-context-menu-item--danger';
-        discardItem.textContent = '\u21A9 Discard Changes';
-        discardItem.addEventListener('click', () => this._doDiscard(file));
-        menu.appendChild(discardItem);
-      }
-    }
-
-    // 位置調整（画面外にはみ出さないように）
-    menu.style.left = `${x}px`;
-    menu.style.top = `${y}px`;
-
-    document.body.appendChild(overlay);
-    document.body.appendChild(menu);
-
-    // 画面外はみ出しチェック（DOM に追加後に寸法を取得）
-    requestAnimationFrame(() => {
-      const rect = menu.getBoundingClientRect();
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-
-      if (rect.right > vw) {
-        menu.style.left = `${Math.max(0, vw - rect.width)}px`;
-      }
-      if (rect.bottom > vh) {
-        menu.style.top = `${Math.max(0, vh - rect.height)}px`;
-      }
-    });
-
-    this._contextMenu = menu;
-    this._contextOverlay = overlay;
-  }
-
   /**
-   * コンテキストメニューを閉じる。
+   * アクティブなコンテキストメニューを閉じる。
    */
   _closeContextMenu() {
-    if (this._contextMenu) {
-      this._contextMenu.remove();
-      this._contextMenu = null;
-    }
-    if (this._contextOverlay) {
-      this._contextOverlay.remove();
-      this._contextOverlay = null;
+    if (this._activeContextMenu) {
+      this._activeContextMenu.close();
+      this._activeContextMenu = null;
     }
   }
 
