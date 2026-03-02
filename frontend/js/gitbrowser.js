@@ -1,7 +1,7 @@
 // gitbrowser.js - Git ブラウザ UI
 // セッションの CWD における git status, log, diff, branches を表示する
 
-import { getGitStatus, getGitLog, getGitDiff, getGitCommitFiles, getGitBranches, gitDiscard, gitStage, gitUnstage } from './api.js';
+import { getGitStatus, getGitLog, getGitDiff, getGitStructuredDiff, getGitCommitFiles, getGitBranches, gitDiscard, gitStage, gitUnstage, gitDiscardHunk, gitStageHunk, gitUnstageHunk } from './api.js';
 
 /**
  * 日時を相対的な短い形式にフォーマットする。
@@ -1089,7 +1089,14 @@ export class GitBrowser {
     rightPane.appendChild(content);
 
     try {
-      const result = await getGitDiff(this._session, path, this._selectedCommit || undefined);
+      if (!this._selectedCommit) {
+        // 未コミット変更: hunk 操作ボタン付き structured diff
+        await this._renderDiffWithHunkActions(content, path);
+        return;
+      }
+
+      // コミット選択時: 既存の挙動
+      const result = await getGitDiff(this._session, path, this._selectedCommit);
       if (!this._showingDiff || this._diffPath !== path) return;
 
       content.innerHTML = '';
@@ -1169,6 +1176,12 @@ export class GitBrowser {
     this._pushHistory(push);
 
     try {
+      if (!this._selectedCommit) {
+        // 未コミット変更: hunk 操作ボタン付き
+        await this._renderDiffWithHunkActions(content, path);
+        return;
+      }
+
       const result = await getGitDiff(this._session, path, this._selectedCommit || undefined);
       if (!this._showingDiff || this._diffPath !== path) return;
 
@@ -1204,6 +1217,160 @@ export class GitBrowser {
   }
 
   // --- Diff ヘルパー ---
+
+  /**
+   * hunk からパッチ文字列を生成する。
+   * @param {string} filePath - ファイルパス
+   * @param {Object} hunk - DiffHunk ({header, content})
+   * @returns {string} パッチ文字列
+   */
+  _buildHunkPatch(filePath, hunk) {
+    const lines = [
+      `diff --git a/${filePath} b/${filePath}`,
+      `--- a/${filePath}`,
+      `+++ b/${filePath}`,
+    ];
+    // content には hunk ヘッダー行（@@...@@）とその下の行が含まれている
+    // content をそのまま追加
+    lines.push(hunk.content);
+    // 末尾に改行がなければ追加
+    let patch = lines.join('\n');
+    if (!patch.endsWith('\n')) {
+      patch += '\n';
+    }
+    return patch;
+  }
+
+  /**
+   * hunk 操作ボタン付きの diff を描画する。
+   * @param {HTMLElement} container
+   * @param {string} filePath
+   */
+  async _renderDiffWithHunkActions(container, filePath) {
+    try {
+      const diffs = await getGitStructuredDiff(this._session, filePath);
+      if (!this._showingDiff || this._diffPath !== filePath) return;
+
+      container.innerHTML = '';
+
+      if (!diffs || diffs.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'gb-empty';
+        empty.textContent = 'No diff available';
+        container.appendChild(empty);
+        return;
+      }
+
+      const diff = diffs[0]; // 1ファイル分
+
+      const pre = document.createElement('pre');
+      pre.className = 'gb-diff-pre';
+
+      for (const hunk of diff.hunks) {
+        // hunk ヘッダー行 + アクションボタン
+        const hunkHeaderRow = document.createElement('div');
+        hunkHeaderRow.className = 'gb-diff-hunk-row';
+
+        const hunkHeaderText = document.createElement('span');
+        hunkHeaderText.className = 'gb-diff-line gb-diff-line--hunk gb-diff-hunk-text';
+        hunkHeaderText.textContent = hunk.header;
+        hunkHeaderRow.appendChild(hunkHeaderText);
+
+        // ボタンコンテナ
+        const btnContainer = document.createElement('span');
+        btnContainer.className = 'gb-hunk-actions';
+
+        // Stage ボタン
+        const stageBtn = document.createElement('button');
+        stageBtn.className = 'gb-hunk-btn gb-hunk-btn--stage';
+        stageBtn.textContent = '\uFF0B Stage';
+        stageBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          try {
+            const patch = this._buildHunkPatch(diff.file_path, hunk);
+            await gitStageHunk(this._session, patch);
+            // diff をリロード
+            await this._reloadDiff(container, filePath);
+          } catch (err) {
+            console.error('Failed to stage hunk:', err);
+            alert(`Failed to stage hunk: ${err.message}`);
+          }
+        });
+        btnContainer.appendChild(stageBtn);
+
+        // Revert ボタン（確認ダイアログ付き）
+        const revertBtn = document.createElement('button');
+        revertBtn.className = 'gb-hunk-btn gb-hunk-btn--revert';
+        revertBtn.textContent = '\u21A9 Revert';
+        revertBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (!confirm('\u3053\u306E hunk \u306E\u5909\u66F4\u3092\u53D6\u308A\u6D88\u3057\u307E\u3059\u304B\uFF1F\u3053\u306E\u64CD\u4F5C\u306F\u5143\u306B\u623B\u305B\u307E\u305B\u3093\u3002')) return;
+          try {
+            const patch = this._buildHunkPatch(diff.file_path, hunk);
+            await gitDiscardHunk(this._session, patch);
+            await this._reloadDiff(container, filePath);
+          } catch (err) {
+            console.error('Failed to revert hunk:', err);
+            alert(`Failed to revert hunk: ${err.message}`);
+          }
+        });
+        btnContainer.appendChild(revertBtn);
+
+        hunkHeaderRow.appendChild(btnContainer);
+        pre.appendChild(hunkHeaderRow);
+
+        // hunk の本体行（ヘッダー行を除く content の行）
+        const contentLines = hunk.content.split('\n');
+        for (const line of contentLines) {
+          // hunk ヘッダー行はスキップ（既に描画済み）
+          if (line.startsWith('@@')) continue;
+          if (line === '') continue; // 末尾の空行はスキップ
+
+          const lineEl = document.createElement('div');
+          lineEl.className = 'gb-diff-line';
+
+          if (line.startsWith('+')) {
+            lineEl.classList.add('gb-diff-line--added');
+          } else if (line.startsWith('-')) {
+            lineEl.classList.add('gb-diff-line--removed');
+          }
+
+          lineEl.textContent = line;
+          pre.appendChild(lineEl);
+        }
+      }
+
+      container.appendChild(pre);
+    } catch (err) {
+      console.error('Failed to load structured diff:', err);
+      container.innerHTML = '';
+      const error = document.createElement('div');
+      error.className = 'gb-error';
+      error.textContent = `Failed to load diff: ${err.message}`;
+      container.appendChild(error);
+    }
+  }
+
+  /**
+   * diff を再読み込みする。
+   * @param {HTMLElement} container
+   * @param {string} filePath
+   */
+  async _reloadDiff(container, filePath) {
+    container.innerHTML = '<div class="gb-loading">Loading diff...</div>';
+    if (!this._selectedCommit) {
+      await this._renderDiffWithHunkActions(container, filePath);
+    } else {
+      // コミット選択時は通常の diff（hunk 操作なし）
+      const result = await getGitDiff(this._session, filePath, this._selectedCommit);
+      container.innerHTML = '';
+      if (!result.diff) {
+        container.innerHTML = '<div class="gb-empty">No diff available</div>';
+        return;
+      }
+      this._renderUnifiedDiff(container, result.diff);
+    }
+  }
 
   /**
    * ファイルパスに対応するステータスコードを返す。
