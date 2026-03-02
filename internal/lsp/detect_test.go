@@ -24,10 +24,10 @@ func TestDetectServers(t *testing.T) {
 	t.Run("全サーバーが利用可能な場合", func(t *testing.T) {
 		looker := &mockPathLooker{
 			available: map[string]string{
-				"gopls":                        "/usr/bin/gopls",
-				"typescript-language-server":    "/usr/bin/typescript-language-server",
-				"pyright-langserver":            "/usr/bin/pyright-langserver",
-				"rust-analyzer":                 "/usr/bin/rust-analyzer",
+				"gopls":                      "/usr/bin/gopls",
+				"typescript-language-server": "/usr/bin/typescript-language-server",
+				"pyright-langserver":         "/usr/bin/pyright-langserver",
+				"rust-analyzer":              "/usr/bin/rust-analyzer",
 			},
 		}
 
