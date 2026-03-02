@@ -7,6 +7,7 @@ import { listSessions, listWindows, listNotifications, deleteNotification, getSe
 import { Drawer } from './drawer.js';
 import { PanelManager } from './panel-manager.js';
 import { Panel } from './panel.js';
+import { Router } from './router.js';
 import { TabBar } from './tab-bar.js';
 
 /** @type {Drawer|null} */
@@ -17,6 +18,9 @@ let panelManager = null;
 
 /** @type {TabBar|null} */
 let tabBar = null;
+
+/** @type {Router|null} */
+let router = null;
 
 /** ツールバー/IME のグローバル状態（セッション切替で保持） */
 const globalUIState = {
@@ -72,37 +76,6 @@ function _checkClaudeNotificationHaptic(notifications) {
       tag: 'palmux-claude-approval',
     });
   }
-}
-
-/**
- * パネルの状態を URL フラグメントに変換する。
- * @param {import('./panel.js').Panel} panel
- * @returns {string} - "terminal/session/0", "files/session/0/path", "git/session/0"
- */
-function _buildPanelFragment(panel) {
-  const s = encodeURIComponent(panel.session);
-  const w = panel.windowIndex;
-  switch (panel.viewMode) {
-    case 'filebrowser': {
-      const path = panel.getCurrentFilePath();
-      return `files/${s}/${w}${path && path !== '.' ? '/' + path : ''}`;
-    }
-    case 'gitbrowser':
-      return `git/${s}/${w}`;
-    default:
-      return `terminal/${s}/${w}`;
-  }
-}
-
-/**
- * 分割モード時の URL サフィックスを返す。
- * @returns {string} - "", "&split", "&split=terminal/dev/1" など
- */
-function _getSplitSuffix() {
-  if (!panelManager || !panelManager.isSplit) return '';
-  const right = panelManager.getRightPanel();
-  if (!right || !right.isConnected) return '&split';
-  return '&split=' + _buildPanelFragment(right);
 }
 
 /**
@@ -223,10 +196,13 @@ async function showSessionList({ push = true, replace = false } = {}) {
   _switchToSessionListView();
 
   // ブラウザ履歴を更新
-  if (replace) {
-    history.replaceState({ view: 'sessions' }, '', '#sessions');
-  } else if (push) {
-    history.pushState({ view: 'sessions' }, '', '#sessions');
+  if (router) {
+    const state = { view: 'sessions' };
+    if (replace) {
+      router.replace(state);
+    } else if (push) {
+      router.push(state);
+    }
   }
 
   const sessionItemsEl = document.getElementById('session-items');
@@ -283,12 +259,8 @@ async function showWindowList(sessionName, { push = true } = {}) {
   sessionItemsEl.innerHTML = '<div class="loading">Loading windows...</div>';
 
   // ブラウザ履歴を更新（非同期処理の前に行う）
-  if (push) {
-    history.pushState(
-      { view: 'windows', session: sessionName },
-      '',
-      `#windows/${encodeURIComponent(sessionName)}`
-    );
+  if (push && router) {
+    router.push({ view: 'windows', session: sessionName });
   }
 
   try {
@@ -386,13 +358,13 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
   }
 
   // ブラウザ履歴を更新
-  const splitSuffix = _getSplitSuffix();
-  const hash = `#terminal/${encodeURIComponent(sessionName)}/${windowIndex}${splitSuffix}`;
-  const state = { view: 'terminal', session: sessionName, window: windowIndex, split: !!(panelManager && panelManager.isSplit), rightPanel: _buildRightPanelState() };
-  if (replace) {
-    history.replaceState(state, '', hash);
-  } else if (push) {
-    history.pushState(state, '', hash);
+  if (router) {
+    const state = { view: 'terminal', session: sessionName, window: windowIndex, split: !!(panelManager && panelManager.isSplit), rightPanel: _buildRightPanelState() };
+    if (replace) {
+      router.replace(state);
+    } else if (push) {
+      router.push(state);
+    }
   }
 
   // Drawer の現在位置を更新
@@ -516,15 +488,12 @@ function showFileBrowser(sessionName, { push = true, path = null } = {}) {
   // ブラウザ履歴を更新
   const currentSession = panelManager.getCurrentSession();
   const currentWindowIndex = panelManager.getCurrentWindowIndex();
-  if (push && currentSession !== null && currentWindowIndex !== null) {
-    const splitSuffix = _getSplitSuffix();
+  if (push && router && currentSession !== null && currentWindowIndex !== null) {
     const filePath = path || '.';
-    const hash = `#files/${encodeURIComponent(sessionName)}/${currentWindowIndex}${filePath !== '.' ? '/' + filePath : ''}${splitSuffix}`;
-    history.pushState(
-      { view: 'files', session: sessionName, window: currentWindowIndex, path: filePath, split: panelManager.isSplit, rightPanel: _buildRightPanelState() },
-      '',
-      hash,
-    );
+    router.push({
+      view: 'files', session: sessionName, window: currentWindowIndex,
+      filePath, split: panelManager.isSplit, rightPanel: _buildRightPanelState(),
+    });
   }
 
   // Drawer の状態を更新
@@ -557,10 +526,11 @@ function showTerminalView({ push = true } = {}) {
   // ブラウザ履歴を更新
   const currentSession = panelManager.getCurrentSession();
   const currentWindowIndex = panelManager.getCurrentWindowIndex();
-  if (push && currentSession !== null && currentWindowIndex !== null) {
-    const splitSuffix = _getSplitSuffix();
-    const hash = `#terminal/${encodeURIComponent(currentSession)}/${currentWindowIndex}${splitSuffix}`;
-    history.pushState({ view: 'terminal', session: currentSession, window: currentWindowIndex, split: panelManager.isSplit, rightPanel: _buildRightPanelState() }, '', hash);
+  if (push && router && currentSession !== null && currentWindowIndex !== null) {
+    router.push({
+      view: 'terminal', session: currentSession, window: currentWindowIndex,
+      split: panelManager.isSplit, rightPanel: _buildRightPanelState(),
+    });
   }
 
   // Drawer の状態を更新
@@ -594,14 +564,11 @@ function showGitBrowser(sessionName, { push = true } = {}) {
   // ブラウザ履歴を更新
   const currentSession = panelManager.getCurrentSession();
   const currentWindowIndex = panelManager.getCurrentWindowIndex();
-  if (push && currentSession !== null && currentWindowIndex !== null) {
-    const splitSuffix = _getSplitSuffix();
-    const hash = `#git/${encodeURIComponent(sessionName)}/${currentWindowIndex}${splitSuffix}`;
-    history.pushState(
-      { view: 'git', session: sessionName, window: currentWindowIndex, split: panelManager.isSplit, rightPanel: _buildRightPanelState() },
-      '',
-      hash,
-    );
+  if (push && router && currentSession !== null && currentWindowIndex !== null) {
+    router.push({
+      view: 'git', session: sessionName, window: currentWindowIndex,
+      split: panelManager.isSplit, rightPanel: _buildRightPanelState(),
+    });
   }
 
   // Drawer の状態を更新
@@ -678,100 +645,6 @@ async function _refreshTabBar(sessionName, activeTab) {
     }
   } catch (err) {
     console.error('Failed to refresh tab bar:', err);
-  }
-}
-
-/**
- * URL ハッシュから初期画面を復元する。
- * @param {string} hash - window.location.hash（例: "#terminal/main/0" or "#terminal/main/0&split=terminal/dev/1"）
- */
-async function navigateFromHash(hash) {
-  // Parse &split and optional right panel fragment
-  const hashBody = hash.slice(1);
-  const splitIdx = hashBody.indexOf('&split');
-  let hasSplit = false;
-  let rightFragment = null;
-  let cleanHash = hashBody;
-
-  if (splitIdx !== -1) {
-    hasSplit = true;
-    cleanHash = hashBody.slice(0, splitIdx);
-    const splitPart = hashBody.slice(splitIdx + 6); // "&split".length = 6
-    if (splitPart.startsWith('=') && splitPart.length > 1) {
-      rightFragment = splitPart.slice(1); // "=" の後ろ
-    }
-  }
-
-  const parts = cleanHash.split('/');
-  const view = parts[0];
-
-  /**
-   * 分割モードを復元し、右パネルの状態を適用する。
-   */
-  const restoreSplit = () => {
-    if (hasSplit && panelManager && !panelManager.isSplit && window.innerWidth >= 900) {
-      // rightFragment がある場合は自動接続をスキップ
-      panelManager.toggleSplit({ skipAutoConnect: !!rightFragment });
-    }
-    if (hasSplit && rightFragment && panelManager && panelManager.isSplit) {
-      _restoreRightPanel(rightFragment);
-    }
-  };
-
-  try {
-    switch (view) {
-      case 'sessions':
-        await showSessionList({ replace: true });
-        break;
-
-      case 'windows': {
-        const session = decodeURIComponent(parts[1] || '');
-        if (!session) { await autoConnect(); break; }
-        _switchToSessionListView();
-        history.replaceState({ view: 'windows', session }, '', hash);
-        await showWindowList(session, { push: false });
-        break;
-      }
-
-      case 'terminal': {
-        const session = decodeURIComponent(parts[1] || '');
-        const win = parseInt(parts[2], 10);
-        if (!session || isNaN(win)) { await autoConnect(); break; }
-        history.replaceState({ view: 'terminal', session, window: win, split: hasSplit }, '', hash);
-        connectToWindow(session, win, { push: false });
-        restoreSplit();
-        break;
-      }
-
-      case 'files': {
-        const session = decodeURIComponent(parts[1] || '');
-        const win = parseInt(parts[2], 10);
-        const filePath = parts.slice(3).map(decodeURIComponent).join('/') || '.';
-        if (!session || isNaN(win)) { await autoConnect(); break; }
-        history.replaceState({ view: 'files', session, window: win, path: filePath, split: hasSplit }, '', hash);
-        connectToWindow(session, win, { push: false });
-        showFileBrowser(session, { push: false, path: filePath });
-        restoreSplit();
-        break;
-      }
-
-      case 'git': {
-        const session = decodeURIComponent(parts[1] || '');
-        const win = parseInt(parts[2], 10);
-        if (!session || isNaN(win)) { await autoConnect(); break; }
-        history.replaceState({ view: 'git', session, window: win, split: hasSplit }, '', hash);
-        connectToWindow(session, win, { push: false });
-        showGitBrowser(session, { push: false });
-        restoreSplit();
-        break;
-      }
-
-      default:
-        await autoConnect();
-    }
-  } catch (err) {
-    console.error('Hash navigation failed:', err);
-    await autoConnect();
   }
 }
 
@@ -1119,6 +992,46 @@ document.addEventListener('DOMContentLoaded', () => {
       // Drawer パネルターゲットを更新
       _updateDrawerPanelTarget();
     },
+    onFileBrowserNavigate: (session, path) => {
+      // ファイルブラウザ内でディレクトリ移動した時
+      if (!router || !panelManager) return;
+      const win = panelManager.getCurrentWindowIndex();
+      router.push({
+        view: 'files', session, window: win,
+        filePath: path, split: panelManager.isSplit, rightPanel: _buildRightPanelState(),
+      });
+    },
+    onFileBrowserPreview: (session, filePath) => {
+      // ファイルプレビューを開いた時
+      if (!router || !panelManager) return;
+      const win = panelManager.getCurrentWindowIndex();
+      const panel = panelManager.getFocusedPanel();
+      const dirPath = panel.getCurrentFilePath() || '.';
+      router.push({
+        view: 'files', session, window: win,
+        filePath: dirPath, previewFile: filePath,
+        split: panelManager.isSplit, rightPanel: _buildRightPanelState(),
+      });
+    },
+    onFileBrowserPreviewClose: (session, dirPath) => {
+      // ファイルプレビューを閉じた時
+      if (!router || !panelManager) return;
+      const win = panelManager.getCurrentWindowIndex();
+      router.push({
+        view: 'files', session, window: win,
+        filePath: dirPath, previewFile: null,
+        split: panelManager.isSplit, rightPanel: _buildRightPanelState(),
+      });
+    },
+    onGitBrowserNavigate: (session, gitState) => {
+      // Gitブラウザ内部遷移時
+      if (!router || !panelManager) return;
+      const win = panelManager.getCurrentWindowIndex();
+      router.push({
+        view: 'git', session, window: win,
+        gitState, split: panelManager.isSplit, rightPanel: _buildRightPanelState(),
+      });
+    },
   });
 
   // Drawer 初期化
@@ -1250,100 +1163,117 @@ document.addEventListener('DOMContentLoaded', () => {
     window.visualViewport.addEventListener('scroll', updateViewport);
   }
 
-  // ブラウザの戻る/進むボタン（popstate）ハンドラ
-  window.addEventListener('popstate', async (event) => {
-    const s = event.state;
-    if (!s) {
+  // Router 初期化 — popstate と history 管理を一元化
+  /**
+   * popstate / navigateFromHash で右パネルの状態を復元する共通ヘルパー。
+   * @param {object} s - RouteState
+   */
+  const _restoreRightPanelFromState = (s) => {
+    if (!panelManager) return;
+
+    // 分割状態の同期
+    if (s.split && !panelManager.isSplit && window.innerWidth >= 900) {
+      panelManager.toggleSplit({ skipAutoConnect: !!s.rightPanel });
+    } else if (!s.split && panelManager.isSplit) {
+      panelManager.toggleSplit();
+    }
+
+    // 右パネルの状態を復元
+    if (s.rightPanel && panelManager.isSplit) {
+      const rp = s.rightPanel;
+      const rightPanel = panelManager.getRightPanel();
+      if (rightPanel && rp.session) {
+        rightPanel.connectToWindow(rp.session, rp.window);
+        switch (rp.view) {
+          case 'files':
+            rightPanel.showFileBrowser(rp.session, { path: rp.path || '.' });
+            break;
+          case 'git':
+            rightPanel.showGitBrowser(rp.session);
+            break;
+        }
+      }
+    }
+
+    // _rightFragment は navigateFromHash 時に右パネルフラグメントをパースした結果
+    if (s._rightFragment && panelManager) {
+      if (!panelManager.isSplit && s.split && window.innerWidth >= 900) {
+        panelManager.toggleSplit({ skipAutoConnect: true });
+      }
+      if (panelManager.isSplit) {
+        _restoreRightPanel(s._rightFragment);
+      }
+    }
+  };
+
+  /**
+   * 既に同じセッション/ウィンドウに接続中か判定するヘルパー。
+   */
+  const _isAlreadyConnected = (s) => {
+    if (!panelManager) return false;
+    const currentSession = panelManager.getCurrentSession();
+    const currentWindowIndex = panelManager.getCurrentWindowIndex();
+    const terminal = panelManager.getTerminal();
+    return currentSession === s.session && currentWindowIndex === s.window && terminal !== null;
+  };
+
+  router = new Router({
+    onSessions: async (s) => {
       await showSessionList({ push: false });
-      return;
-    }
+    },
+    onWindows: async (s) => {
+      if (!s.session) { await autoConnect(); return; }
+      _switchToSessionListView();
+      await showWindowList(s.session, { push: false });
+    },
+    onTerminal: async (s) => {
+      if (!s.session || isNaN(s.window)) { await autoConnect(); return; }
+      if (_isAlreadyConnected(s)) {
+        showTerminalView({ push: false });
+      } else {
+        connectToWindow(s.session, s.window, { push: false });
+      }
+      _restoreRightPanelFromState(s);
+    },
+    onFiles: async (s) => {
+      if (!s.session || isNaN(s.window)) { await autoConnect(); return; }
+      const filePath = s.filePath || s.path || '.';
+      if (!_isAlreadyConnected(s)) {
+        connectToWindow(s.session, s.window, { push: false });
+      }
+      showFileBrowser(s.session, { push: false, path: filePath });
 
-    /**
-     * popstate で右パネルの状態を復元する。
-     */
-    const restoreRightPanelFromState = () => {
-      if (!panelManager) return;
+      // プレビュー復元（previewFile が state に保存されている場合）
+      if (s.previewFile && panelManager) {
+        const browsers = panelManager.getFileBrowsers();
+        if (browsers.has(s.session)) {
+          const fb = browsers.get(s.session).browser;
+          fb.showPreview(s.session, s.previewFile, {
+            name: s.previewFile.split('/').pop(),
+            extension: s.previewFile.includes('.') ? s.previewFile.substring(s.previewFile.lastIndexOf('.')) : '',
+          });
+        }
+      }
 
-      // 分割状態の同期
-      if (s.split && !panelManager.isSplit && window.innerWidth >= 900) {
-        panelManager.toggleSplit({ skipAutoConnect: !!s.rightPanel });
-      } else if (!s.split && panelManager.isSplit) {
-        panelManager.toggleSplit();
+      _restoreRightPanelFromState(s);
+    },
+    onGit: async (s) => {
+      if (!s.session || isNaN(s.window)) { await autoConnect(); return; }
+      if (!_isAlreadyConnected(s)) {
+        connectToWindow(s.session, s.window, { push: false });
+      }
+      showGitBrowser(s.session, { push: false });
+
+      // git 内部状態（コミット選択、diff 表示など）を復元
+      if (s.gitState && panelManager) {
+        const gitBrowsers = panelManager.getGitBrowsers();
+        if (gitBrowsers.has(s.session)) {
+          gitBrowsers.get(s.session).browser.restoreState(s.gitState);
+        }
       }
 
-      // 右パネルの状態を復元
-      if (s.rightPanel && panelManager.isSplit) {
-        const rp = s.rightPanel;
-        const rightPanel = panelManager.getRightPanel();
-        if (rightPanel && rp.session) {
-          rightPanel.connectToWindow(rp.session, rp.window);
-          switch (rp.view) {
-            case 'files':
-              rightPanel.showFileBrowser(rp.session, { path: rp.path || '.' });
-              break;
-            case 'git':
-              rightPanel.showGitBrowser(rp.session);
-              break;
-          }
-        }
-      }
-    };
-
-    switch (s.view) {
-      case 'sessions':
-        await showSessionList({ push: false });
-        break;
-      case 'windows':
-        _switchToSessionListView();
-        await showWindowList(s.session, { push: false });
-        break;
-      case 'terminal': {
-        const currentSession = panelManager ? panelManager.getCurrentSession() : null;
-        const currentWindowIndex = panelManager ? panelManager.getCurrentWindowIndex() : null;
-        const terminal = panelManager ? panelManager.getTerminal() : null;
-        if (currentSession === s.session && currentWindowIndex === s.window && terminal !== null) {
-          showTerminalView({ push: false });
-        } else {
-          connectToWindow(s.session, s.window, { push: false });
-        }
-        restoreRightPanelFromState();
-        break;
-      }
-      case 'files': {
-        const filePath = s.path || '.';
-        const currentSession = panelManager ? panelManager.getCurrentSession() : null;
-        const currentWindowIndex = panelManager ? panelManager.getCurrentWindowIndex() : null;
-        const terminal = panelManager ? panelManager.getTerminal() : null;
-        if (currentSession === s.session && currentWindowIndex === s.window && terminal !== null) {
-          showFileBrowser(s.session, { push: false, path: filePath });
-        } else {
-          connectToWindow(s.session, s.window, { push: false });
-          showFileBrowser(s.session, { push: false, path: filePath });
-        }
-        restoreRightPanelFromState();
-        break;
-      }
-      case 'git': {
-        const currentSession = panelManager ? panelManager.getCurrentSession() : null;
-        const currentWindowIndex = panelManager ? panelManager.getCurrentWindowIndex() : null;
-        const terminal = panelManager ? panelManager.getTerminal() : null;
-        if (currentSession === s.session && currentWindowIndex === s.window && terminal !== null) {
-          showGitBrowser(s.session, { push: false });
-        } else {
-          connectToWindow(s.session, s.window, { push: false });
-          showGitBrowser(s.session, { push: false });
-        }
-        // git 内部状態（コミット選択、diff 表示など）を復元
-        if (s.gitState && panelManager) {
-          const gitBrowsers = panelManager.getGitBrowsers();
-          if (gitBrowsers.has(s.session)) {
-            gitBrowsers.get(s.session).browser.restoreState(s.gitState);
-          }
-        }
-        restoreRightPanelFromState();
-        break;
-      }
-    }
+      _restoreRightPanelFromState(s);
+    },
   });
 
   // 初期通知を取得してドロワーとタブバーに反映
@@ -1363,7 +1293,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // 初期表示: ハッシュがあればそこから復元、なければ自動接続
   const initialHash = window.location.hash;
   if (initialHash && initialHash !== '#') {
-    navigateFromHash(initialHash);
+    router.navigateFromHash(initialHash);
   } else {
     autoConnect();
   }

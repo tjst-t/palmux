@@ -43,6 +43,10 @@ export class Panel {
    * @param {function(string, number): void} [options.onClientStatus] - セッション/ウィンドウ変更通知
    * @param {function(Array): void} [options.onNotificationUpdate] - 通知更新コールバック
    * @param {function(string): void} [options.onConnectionStateChange] - 接続状態変更コールバック
+   * @param {function(string, string): void} [options.onFileBrowserNavigate] - ファイルブラウザ ディレクトリ移動時 (session, path)
+   * @param {function(string, string): void} [options.onFileBrowserPreview] - ファイルブラウザ プレビュー表示時 (session, filePath)
+   * @param {function(string, string): void} [options.onFileBrowserPreviewClose] - ファイルブラウザ プレビュー閉じた時 (session, dirPath)
+   * @param {function(string, Object): void} [options.onGitBrowserNavigate] - Gitブラウザ 内部遷移時 (session, gitState)
    */
   constructor(options) {
     this.id = options.id;
@@ -52,6 +56,10 @@ export class Panel {
     this._onClientStatusCb = options.onClientStatus || null;
     this._onNotificationUpdateCb = options.onNotificationUpdate || null;
     this._onConnectionStateChangeCb = options.onConnectionStateChange || null;
+    this._onFileBrowserNavigateCb = options.onFileBrowserNavigate || null;
+    this._onFileBrowserPreviewCb = options.onFileBrowserPreview || null;
+    this._onFileBrowserPreviewCloseCb = options.onFileBrowserPreviewClose || null;
+    this._onGitBrowserNavigateCb = options.onGitBrowserNavigate || null;
 
     /** @type {string|null} 現在接続中のセッション名 */
     this.session = null;
@@ -388,8 +396,21 @@ export class Panel {
     wrapper.style.height = '100%';
 
     const browser = new FileBrowser(wrapper, {
-      onFileSelect: () => {},
-      onNavigate: () => {},
+      onFileSelect: (session, filePath, entry) => {
+        if (this._onFileBrowserPreviewCb) {
+          this._onFileBrowserPreviewCb(session, filePath);
+        }
+      },
+      onNavigate: (path) => {
+        if (this._onFileBrowserNavigateCb) {
+          this._onFileBrowserNavigateCb(this.session, path);
+        }
+      },
+      onPreviewClose: (session, dirPath) => {
+        if (this._onFileBrowserPreviewCloseCb) {
+          this._onFileBrowserPreviewCloseCb(session, dirPath);
+        }
+      },
     });
 
     rootEl.appendChild(wrapper);
@@ -427,7 +448,11 @@ export class Panel {
     wrapper.style.position = 'relative';
 
     const browser = new GitBrowser(wrapper, {
-      onNavigate: () => {},
+      onNavigate: (gitState) => {
+        if (this._onGitBrowserNavigateCb) {
+          this._onGitBrowserNavigateCb(this.session, gitState);
+        }
+      },
     });
 
     rootEl.appendChild(wrapper);
