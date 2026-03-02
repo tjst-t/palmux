@@ -211,9 +211,18 @@ export class FileBrowser {
 
   /**
    * 指定パスに移動する（ブラウザ履歴へのプッシュなし）。
+   * プレビュー表示中の場合は閉じてからディレクトリを表示する。
    * @param {string} path - 移動先の相対パス
    */
   async navigateTo(path) {
+    // プレビュー表示中なら閉じてラッパーを再接続
+    if (this._preview) {
+      this._preview.dispose();
+      this._preview = null;
+      this._previewPath = null;
+      this._container.innerHTML = '';
+      this._container.appendChild(this._wrapper);
+    }
     await this._loadDirectory(path, { silent: true });
   }
 
