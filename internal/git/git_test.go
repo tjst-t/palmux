@@ -251,7 +251,7 @@ func TestGit_Diff_FallbackOnError(t *testing.T) {
 	// ワーキングツリーの差分で HEAD が無い場合、diff --cached にフォールバック
 	mock := &multiMockCommandRunner{
 		calls: []mockCall{
-			{err: errors.New("no HEAD")},                       // git diff HEAD 失敗
+			{err: errors.New("no HEAD")},                // git diff HEAD 失敗
 			{output: []byte("cached diff\n"), err: nil}, // git diff --cached 成功
 		},
 	}
