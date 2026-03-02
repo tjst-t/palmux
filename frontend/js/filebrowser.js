@@ -998,15 +998,18 @@ export class FileBrowser {
       path: path,
       entry: entry,
       onBack: () => {
-        // プレビューを閉じてファイル一覧に戻る
+        // プレビューを閉じて前の画面に戻る
         if (this._preview) {
           this._preview.dispose();
           this._preview = null;
         }
         this._container.innerHTML = '';
         this._container.appendChild(this._wrapper);
-        // 現在のディレクトリを再読み込み
-        this._loadDirectory(this._currentPath);
+        if (!this._searchMode) {
+          // 通常のディレクトリ一覧を再読み込み
+          this._loadDirectory(this._currentPath);
+        }
+        // 検索モード中は _wrapper に検索結果が残っているのでそのまま表示
       },
       getRawURL: (s, p) => getFileRawURL(s, p),
       fetchFile: (s, p) => getFileContent(s, p),
