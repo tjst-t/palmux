@@ -1091,7 +1091,9 @@ export class GitBrowser {
     try {
       if (!this._selectedCommit) {
         // 未コミット変更: hunk 操作ボタン付き structured diff
-        await this._renderDiffWithHunkActions(content, path);
+        const fileInfo = this._status?.files?.find(f => f.path === path);
+        const isStaged = fileInfo?.staged ?? false;
+        await this._renderDiffWithHunkActions(content, path, { staged: isStaged });
         return;
       }
 
@@ -1178,7 +1180,9 @@ export class GitBrowser {
     try {
       if (!this._selectedCommit) {
         // 未コミット変更: hunk 操作ボタン付き
-        await this._renderDiffWithHunkActions(content, path);
+        const fileInfo = this._status?.files?.find(f => f.path === path);
+        const isStaged = fileInfo?.staged ?? false;
+        await this._renderDiffWithHunkActions(content, path, { staged: isStaged });
         return;
       }
 
@@ -1245,8 +1249,10 @@ export class GitBrowser {
    * hunk 操作ボタン付きの diff を描画する。
    * @param {HTMLElement} container
    * @param {string} filePath
+   * @param {Object} [options]
+   * @param {boolean} [options.staged=false] - true の場合、Unstage ボタンを表示する
    */
-  async _renderDiffWithHunkActions(container, filePath) {
+  async _renderDiffWithHunkActions(container, filePath, { staged = false } = {}) {
     try {
       const diffs = await getGitStructuredDiff(this._session, filePath);
       if (!this._showingDiff || this._diffPath !== filePath) return;
@@ -1280,41 +1286,57 @@ export class GitBrowser {
         const btnContainer = document.createElement('span');
         btnContainer.className = 'gb-hunk-actions';
 
-        // Stage ボタン
-        const stageBtn = document.createElement('button');
-        stageBtn.className = 'gb-hunk-btn gb-hunk-btn--stage';
-        stageBtn.textContent = '\uFF0B Stage';
-        stageBtn.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          try {
-            const patch = this._buildHunkPatch(diff.file_path, hunk);
-            await gitStageHunk(this._session, patch);
-            // diff をリロード
-            await this._reloadDiff(container, filePath);
-          } catch (err) {
-            console.error('Failed to stage hunk:', err);
-            alert(`Failed to stage hunk: ${err.message}`);
-          }
-        });
-        btnContainer.appendChild(stageBtn);
+        if (staged) {
+          // Unstage ボタン
+          const unstageBtn = document.createElement('button');
+          unstageBtn.className = 'gb-hunk-btn gb-hunk-btn--stage';
+          unstageBtn.textContent = '\u2212 Unstage';
+          unstageBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            try {
+              const patch = this._buildHunkPatch(diff.file_path, hunk);
+              await gitUnstageHunk(this._session, patch);
+              await this._reloadDiff(container, filePath);
+            } catch (err) {
+              console.error('Failed to unstage hunk:', err);
+            }
+          });
+          btnContainer.appendChild(unstageBtn);
+        } else {
+          // Stage ボタン
+          const stageBtn = document.createElement('button');
+          stageBtn.className = 'gb-hunk-btn gb-hunk-btn--stage';
+          stageBtn.textContent = '\uFF0B Stage';
+          stageBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            try {
+              const patch = this._buildHunkPatch(diff.file_path, hunk);
+              await gitStageHunk(this._session, patch);
+              // diff をリロード
+              await this._reloadDiff(container, filePath);
+            } catch (err) {
+              console.error('Failed to stage hunk:', err);
+            }
+          });
+          btnContainer.appendChild(stageBtn);
 
-        // Revert ボタン（確認ダイアログ付き）
-        const revertBtn = document.createElement('button');
-        revertBtn.className = 'gb-hunk-btn gb-hunk-btn--revert';
-        revertBtn.textContent = '\u21A9 Revert';
-        revertBtn.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          if (!confirm('\u3053\u306E hunk \u306E\u5909\u66F4\u3092\u53D6\u308A\u6D88\u3057\u307E\u3059\u304B\uFF1F\u3053\u306E\u64CD\u4F5C\u306F\u5143\u306B\u623B\u305B\u307E\u305B\u3093\u3002')) return;
-          try {
-            const patch = this._buildHunkPatch(diff.file_path, hunk);
-            await gitDiscardHunk(this._session, patch);
-            await this._reloadDiff(container, filePath);
-          } catch (err) {
-            console.error('Failed to revert hunk:', err);
-            alert(`Failed to revert hunk: ${err.message}`);
-          }
-        });
-        btnContainer.appendChild(revertBtn);
+          // Revert ボタン（確認ダイアログ付き）
+          const revertBtn = document.createElement('button');
+          revertBtn.className = 'gb-hunk-btn gb-hunk-btn--revert';
+          revertBtn.textContent = '\u21A9 Revert';
+          revertBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (!confirm('\u3053\u306E hunk \u306E\u5909\u66F4\u3092\u53D6\u308A\u6D88\u3057\u307E\u3059\u304B\uFF1F\u3053\u306E\u64CD\u4F5C\u306F\u5143\u306B\u623B\u305B\u307E\u305B\u3093\u3002')) return;
+            try {
+              const patch = this._buildHunkPatch(diff.file_path, hunk);
+              await gitDiscardHunk(this._session, patch);
+              await this._reloadDiff(container, filePath);
+            } catch (err) {
+              console.error('Failed to revert hunk:', err);
+            }
+          });
+          btnContainer.appendChild(revertBtn);
+        }
 
         hunkHeaderRow.appendChild(btnContainer);
         pre.appendChild(hunkHeaderRow);
@@ -1359,7 +1381,9 @@ export class GitBrowser {
   async _reloadDiff(container, filePath) {
     container.innerHTML = '<div class="gb-loading">Loading diff...</div>';
     if (!this._selectedCommit) {
-      await this._renderDiffWithHunkActions(container, filePath);
+      const fileInfo = this._status?.files?.find(f => f.path === filePath);
+      const isStaged = fileInfo?.staged ?? false;
+      await this._renderDiffWithHunkActions(container, filePath, { staged: isStaged });
     } else {
       // コミット選択時は通常の diff（hunk 操作なし）
       const result = await getGitDiff(this._session, filePath, this._selectedCommit);
