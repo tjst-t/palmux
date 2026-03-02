@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // Options は全文検索のオプションを定義する。
@@ -88,6 +89,19 @@ func BuildResponse(query, engine string, results []Result, maxResults int) Respo
 	}
 
 	return resp
+}
+
+// byteToRuneOffset はバイトオフセットをルーン（文字）オフセットに変換する。
+// JavaScript の String.substring() は文字インデックスで動作するため、
+// マルチバイト文字（日本語等）を含む行ではバイトオフセットを文字オフセットに変換する必要がある。
+func byteToRuneOffset(s string, byteOff int) int {
+	if byteOff <= 0 {
+		return 0
+	}
+	if byteOff >= len(s) {
+		return utf8.RuneCountInString(s)
+	}
+	return utf8.RuneCountInString(s[:byteOff])
 }
 
 // RipgrepSearcher は ripgrep (rg) を使った検索エンジン。
@@ -343,8 +357,8 @@ func (s *GrepSearcher) parseOutput(data []byte, query string, opts Options) []Re
 			Path:       filePath,
 			LineNumber: lineNum,
 			LineText:   content,
-			MatchStart: matchStart,
-			MatchEnd:   matchEnd,
+			MatchStart: byteToRuneOffset(content, matchStart),
+			MatchEnd:   byteToRuneOffset(content, matchEnd),
 		})
 	}
 
@@ -555,8 +569,8 @@ func (s *BuiltinSearcher) searchFile(path, relPath string, matcher matchFunc, li
 			Path:       relPath,
 			LineNumber: lineNum,
 			LineText:   line,
-			MatchStart: matchStart,
-			MatchEnd:   matchEnd,
+			MatchStart: byteToRuneOffset(line, matchStart),
+			MatchEnd:   byteToRuneOffset(line, matchEnd),
 		})
 
 		if len(results) >= limit {
@@ -603,8 +617,9 @@ func parseRipgrepJSON(data []byte) ([]Result, error) {
 
 		var matchStart, matchEnd int
 		if len(matchData.Submatches) > 0 {
-			matchStart = matchData.Submatches[0].Start
-			matchEnd = matchData.Submatches[0].End
+			// ripgrep はバイトオフセットを返すので、ルーンオフセットに変換
+			matchStart = byteToRuneOffset(lineText, matchData.Submatches[0].Start)
+			matchEnd = byteToRuneOffset(lineText, matchData.Submatches[0].End)
 		}
 
 		// パスの正規化: バックスラッシュをスラッシュに統一

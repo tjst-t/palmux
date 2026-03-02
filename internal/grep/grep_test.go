@@ -3,6 +3,7 @@ package grep
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1200,6 +1201,170 @@ func TestNewSearcher_ReturnsNonNil(t *testing.T) {
 	s := NewSearcher()
 	if s == nil {
 		t.Fatal("NewSearcher() returned nil — should always return a searcher (at minimum BuiltinSearcher)")
+	}
+}
+
+// --- byteToRuneOffset テスト ---
+
+func TestByteToRuneOffset(t *testing.T) {
+	tests := []struct {
+		name    string
+		s       string
+		byteOff int
+		want    int
+	}{
+		{
+			name:    "ASCII のみ",
+			s:       "Hello World",
+			byteOff: 6,
+			want:    6, // byte offset == rune offset for ASCII
+		},
+		{
+			name:    "日本語テキスト内の ASCII マッチ",
+			s:       "# 通知バッジ — Claude Code",
+			byteOff: 22, // "# 通知バッジ — " = 2 + 3*4 + 1 + 3 + 1 = 19 bytes... let me calc
+			want:    10, // will compute correctly below
+		},
+		{
+			name:    "先頭のマッチ（オフセット0）",
+			s:       "テスト",
+			byteOff: 0,
+			want:    0,
+		},
+		{
+			name:    "末尾のマッチ",
+			s:       "テスト",
+			byteOff: 9, // 3 * 3 bytes
+			want:    3,
+		},
+		{
+			name:    "負のオフセット",
+			s:       "テスト",
+			byteOff: -1,
+			want:    0,
+		},
+		{
+			name:    "オフセットが文字列長を超える",
+			s:       "テスト",
+			byteOff: 100,
+			want:    3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// "日本語テキスト内の ASCII マッチ" のケースは実際の値を計算
+			if tt.name == "日本語テキスト内の ASCII マッチ" {
+				s := tt.s
+				idx := strings.Index(s, "Claude")
+				tt.byteOff = idx
+				// rune count up to byte offset
+				runeCount := 0
+				for i := range s {
+					if i >= idx {
+						break
+					}
+					runeCount++
+				}
+				tt.want = runeCount
+			}
+
+			got := byteToRuneOffset(tt.s, tt.byteOff)
+			if got != tt.want {
+				t.Errorf("byteToRuneOffset(%q, %d) = %d, want %d", tt.s, tt.byteOff, got, tt.want)
+			}
+		})
+	}
+}
+
+// --- マルチバイト文字の MatchStart/MatchEnd テスト ---
+
+func TestMultibyteMatchPosition(t *testing.T) {
+	// 日本語を含むファイルで検索し、MatchStart/MatchEnd がルーンオフセットであることを検証
+	root := t.TempDir()
+
+	// 日本語を含むテストファイルを作成
+	content := "# 通知バッジ — Claude Code の入力待ち状態\nClaude は AI アシスタントです\n"
+	if err := os.WriteFile(filepath.Join(root, "japanese.md"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	engines := []Searcher{&BuiltinSearcher{}}
+	if _, err := exec.LookPath("grep"); err == nil {
+		engines = append(engines, &GrepSearcher{})
+	}
+	if _, err := exec.LookPath("rg"); err == nil {
+		engines = append(engines, &RipgrepSearcher{})
+	}
+
+	for _, eng := range engines {
+		t.Run(eng.Name(), func(t *testing.T) {
+			results, err := eng.Search(context.Background(), "Claude", root, Options{CaseSensitive: true})
+			if err != nil {
+				t.Fatalf("Search error: %v", err)
+			}
+
+			if len(results) == 0 {
+				t.Fatal("expected at least one result")
+			}
+
+			for _, r := range results {
+				lineRunes := []rune(r.LineText)
+
+				// MatchStart/MatchEnd がルーンオフセットの範囲内であること
+				if r.MatchStart < 0 || r.MatchStart >= len(lineRunes) {
+					t.Errorf("MatchStart %d out of range for line with %d runes: %q", r.MatchStart, len(lineRunes), r.LineText)
+					continue
+				}
+				if r.MatchEnd <= r.MatchStart || r.MatchEnd > len(lineRunes) {
+					t.Errorf("MatchEnd %d invalid (MatchStart=%d, rune count=%d): %q", r.MatchEnd, r.MatchStart, len(lineRunes), r.LineText)
+					continue
+				}
+
+				// ルーンオフセットでスライスした結果が "Claude" を含むこと
+				matched := string(lineRunes[r.MatchStart:r.MatchEnd])
+				if matched != "Claude" {
+					t.Errorf("expected match text 'Claude', got %q (start=%d, end=%d, line=%q)",
+						matched, r.MatchStart, r.MatchEnd, r.LineText)
+				}
+			}
+		})
+	}
+}
+
+func TestParseRipgrepJSON_MultibyteCharacters(t *testing.T) {
+	// ripgrep は byte offset を返すので、マルチバイト文字があるとルーンオフセットと異なる
+	// "# 通知バッジ — Claude Code" で "Claude" のバイトオフセットは 22, ルーンオフセットは 10
+	lineText := "# 通知バッジ — Claude Code\n"
+	claudeByteStart := strings.Index(lineText, "Claude")
+	claudeByteEnd := claudeByteStart + len("Claude")
+
+	jsonLine := `{"type":"match","data":{"path":{"text":"japanese.md"},"lines":{"text":"` +
+		strings.ReplaceAll(lineText, "\n", `\n`) +
+		`"},"line_number":1,"submatches":[{"match":{"text":"Claude"},"start":` +
+		strings.Repeat("", 0) + fmt.Sprintf("%d", claudeByteStart) +
+		`,"end":` + fmt.Sprintf("%d", claudeByteEnd) + `}]}}`
+
+	results, err := parseRipgrepJSON([]byte(jsonLine))
+	if err != nil {
+		t.Fatalf("parseRipgrepJSON error: %v", err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("got %d results, want 1", len(results))
+	}
+
+	r := results[0]
+	lineRunes := []rune(r.LineText)
+
+	// MatchStart/MatchEnd はルーンオフセットに変換されているはず
+	if r.MatchStart >= len(lineRunes) || r.MatchEnd > len(lineRunes) {
+		t.Fatalf("match offsets out of range: start=%d, end=%d, rune count=%d", r.MatchStart, r.MatchEnd, len(lineRunes))
+	}
+
+	matched := string(lineRunes[r.MatchStart:r.MatchEnd])
+	if matched != "Claude" {
+		t.Errorf("expected match text 'Claude', got %q (start=%d, end=%d)", matched, r.MatchStart, r.MatchEnd)
 	}
 }
 

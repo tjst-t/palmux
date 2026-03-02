@@ -1072,6 +1072,7 @@
 .fb-grep-filters {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   padding: 4px 12px;
   background: #12192e;
   border-bottom: 1px solid #2a2a4a;
