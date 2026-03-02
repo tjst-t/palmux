@@ -124,7 +124,7 @@
   display: flex;
   align-items: center;
   flex-shrink: 0;
-  margin-left: 6px;
+  margin-left: auto;
 }
 
 .fb-search-input {
