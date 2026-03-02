@@ -19,19 +19,19 @@ import (
 // configurableMock は設定可能な TmuxManager モック。
 // 各メソッドの戻り値をフィールドで指定できる。
 type configurableMock struct {
-	sessions    []tmux.Session
-	sessionsErr error
-	newSession  *tmux.Session
-	newSessErr  error
-	killSessErr error
-	windows     []tmux.Window
-	windowsErr  error
-	newWindow   *tmux.Window
-	newWinErr   error
-	killWinErr   error
-	renameWinErr error
-	cwd          string
-	cwdErr       error
+	sessions      []tmux.Session
+	sessionsErr   error
+	newSession    *tmux.Session
+	newSessErr    error
+	killSessErr   error
+	windows       []tmux.Window
+	windowsErr    error
+	newWindow     *tmux.Window
+	newWinErr     error
+	killWinErr    error
+	renameWinErr  error
+	cwd           string
+	cwdErr        error
 	projectDir    string
 	projectDirErr error
 
@@ -50,23 +50,23 @@ type configurableMock struct {
 		index   int
 		name    string
 	}
-	calledGetCwd        string
-	calledGetProjectDir string
-	ghqRepos    []tmux.GhqRepo
-	ghqReposErr error
-	calledListGhqRepos bool
-	cloneGhqRepo    *tmux.GhqRepo
-	cloneGhqRepoErr error
-	calledCloneGhqRepo string
-	deleteGhqRepoErr    error
-	calledDeleteGhqRepo string
-	isGhqSession         bool
-	ensureClaudeWindow   *tmux.Window
-	ensureClaudeWindowErr error
-	calledIsGhqSession    string
-	calledEnsureClaudeWindow struct{ session, claudePath string }
-	replaceClaudeWindow      *tmux.Window
-	replaceClaudeWindowErr   error
+	calledGetCwd              string
+	calledGetProjectDir       string
+	ghqRepos                  []tmux.GhqRepo
+	ghqReposErr               error
+	calledListGhqRepos        bool
+	cloneGhqRepo              *tmux.GhqRepo
+	cloneGhqRepoErr           error
+	calledCloneGhqRepo        string
+	deleteGhqRepoErr          error
+	calledDeleteGhqRepo       string
+	isGhqSession              bool
+	ensureClaudeWindow        *tmux.Window
+	ensureClaudeWindowErr     error
+	calledIsGhqSession        string
+	calledEnsureClaudeWindow  struct{ session, claudePath string }
+	replaceClaudeWindow       *tmux.Window
+	replaceClaudeWindowErr    error
 	calledReplaceClaudeWindow struct{ session, name, command string }
 
 	// project/worktree 関連
@@ -75,19 +75,28 @@ type configurableMock struct {
 	calledListProjectWorktrees string
 	newWorktreeSession         *tmux.Session
 	newWorktreeSessionErr      error
-	calledNewWorktreeSession   struct{ project, branch string; createBranch bool }
-	deleteWorktreeSessionErr   error
-	calledDeleteWorktreeSession struct{ sessionName string; removeWorktree bool }
-	projectBranches            []git.Branch
-	projectBranchesErr         error
-	calledGetProjectBranches   string
-	isBranchMerged             bool
-	isBranchMergedErr          error
+	calledNewWorktreeSession   struct {
+		project, branch string
+		createBranch    bool
+	}
+	deleteWorktreeSessionErr    error
+	calledDeleteWorktreeSession struct {
+		sessionName    string
+		removeWorktree bool
+	}
+	projectBranches             []git.Branch
+	projectBranchesErr          error
+	calledGetProjectBranches    string
+	isBranchMerged              bool
+	isBranchMergedErr           error
 	calledIsProjectBranchMerged struct{ project, branch string }
-	deleteProjectBranchErr     error
-	calledDeleteProjectBranch  struct{ project, branch string; force bool }
-	resolvedProject            string
-	calledResolveProject       string
+	deleteProjectBranchErr      error
+	calledDeleteProjectBranch   struct {
+		project, branch string
+		force           bool
+	}
+	resolvedProject      string
+	calledResolveProject string
 }
 
 func (m *configurableMock) ListSessions() ([]tmux.Session, error) {
@@ -507,7 +516,7 @@ func TestHandleDeleteSession(t *testing.T) {
 func TestHandleCreateSession_GhqSession_CreatesClaudeWindow(t *testing.T) {
 	mock := &configurableMock{
 		newSession:         &tmux.Session{Name: "palmux", Windows: 1},
-		isGhqSession:      true,
+		isGhqSession:       true,
 		ensureClaudeWindow: &tmux.Window{Index: 1, Name: "claude"},
 	}
 	srv, token := newTestServer(mock)
@@ -542,7 +551,7 @@ func TestHandleCreateSession_NonGhqSession_NoClaudeWindow(t *testing.T) {
 func TestHandleCreateSession_GhqSession_ClaudeWindowError_StillCreatesSession(t *testing.T) {
 	mock := &configurableMock{
 		newSession:            &tmux.Session{Name: "palmux", Windows: 1},
-		isGhqSession:         true,
+		isGhqSession:          true,
 		ensureClaudeWindowErr: errors.New("failed to create window"),
 	}
 	srv, token := newTestServer(mock)

@@ -411,16 +411,16 @@ func TestHandleDeleteWindow(t *testing.T) {
 
 func TestHandleRenameWindow(t *testing.T) {
 	tests := []struct {
-		name         string
-		session      string
-		index        string
-		body         string
-		renameErr    error
-		windows      []tmux.Window
-		windowsErr   error
-		wantStatus   int
-		wantName     string
-		wantIndex    int
+		name       string
+		session    string
+		index      string
+		body       string
+		renameErr  error
+		windows    []tmux.Window
+		windowsErr error
+		wantStatus int
+		wantName   string
+		wantIndex  int
 	}{
 		{
 			name:    "正常系: ウィンドウをリネームする",
