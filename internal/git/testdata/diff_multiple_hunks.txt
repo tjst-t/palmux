@@ -1,0 +1,17 @@
+diff --git a/main.go b/main.go
+index 1234567..abcdefg 100644
+--- a/main.go
++++ b/main.go
+@@ -1,5 +1,5 @@
+ package main
+
+-import "fmt"
++import "log"
+
+ func main() {
+@@ -20,6 +20,7 @@ func helper() {
+ 	x := 1
+ 	y := 2
++	z := 3
+ 	return x + y
+ }

@@ -116,6 +116,17 @@ Claude Code との指示・会話で使う共通用語を定義する。
 | **Git ログ** | `git log` のコミット一覧を表示する画面 |
 | **Git ブランチ一覧** | ブランチの一覧と現在のブランチを表示する画面 |
 | **Git diff ビュー** | ファイルの変更差分を表示する画面 |
+| **Staged グループ** | Git ステータス画面で、ステージング済み（index に追加済み）のファイルをまとめるグループ。ヘッダー「Staged」付き |
+| **Unstaged グループ** | Git ステータス画面で、未ステージ（ワーキングツリーの変更）のファイルをまとめるグループ。ヘッダー「Changes」付き |
+| **ファイルコンテキストメニュー** | Git ステータス画面のファイルを長押し（500ms）または右クリックで表示される操作メニュー。Stage / Unstage / Discard を提供 |
+| **Stage** | ファイルをステージング（`git add`）する操作。コンテキストメニューから実行 |
+| **Unstage** | ファイルのステージングを解除（`git reset HEAD`）する操作。コンテキストメニューから実行 |
+| **Discard** | ファイルの変更を破棄（`git checkout --`）する操作。コンテキストメニューから実行。確認ダイアログ付き |
+| **Hunk アクションボタン** | Git diff ビュー内の各 hunk ヘッダー横に表示されるボタン群。hunk 単位の Stage / Unstage / Revert を提供 |
+| **Hunk Stage** | 差分の特定 hunk のみをステージング（`git apply --cached`）する操作 |
+| **Hunk Unstage** | ステージ済み hunk をアンステージ（`git apply --cached --reverse`）する操作 |
+| **Hunk Revert** | 差分の特定 hunk を破棄（`git apply --reverse`）する操作。確認ダイアログ付き |
+| **構造化 Diff** | diff をファイル・hunk 単位にパースした構造化データ（`StructuredDiff` 型）。`?structured=true` パラメータで取得 |
 
 ---
 

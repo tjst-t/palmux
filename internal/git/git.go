@@ -1,7 +1,9 @@
 package git
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -10,10 +12,17 @@ import (
 // ErrNotGitRepo はディレクトリが Git リポジトリでないことを示すエラー。
 var ErrNotGitRepo = errors.New("not a git repository")
 
+// ErrInvalidPath は不正なパスが指定されたことを示すエラー。
+var ErrInvalidPath = errors.New("invalid path")
+
+// ErrEmptyPatch はパッチ内容が空であることを示すエラー。
+var ErrEmptyPatch = errors.New("empty patch")
+
 // CommandRunner は git コマンドの実行を抽象化する。
 // テスト時にはモック実装を注入する。
 type CommandRunner interface {
 	RunInDir(dir string, args ...string) ([]byte, error)
+	RunWithStdin(dir string, input []byte, args ...string) ([]byte, error)
 }
 
 // RealCommandRunner は実際の git バイナリを実行する。
@@ -34,11 +43,27 @@ func (r *RealCommandRunner) RunInDir(dir string, args ...string) ([]byte, error)
 	return out, nil
 }
 
+// RunWithStdin は指定ディレクトリで git コマンドを実行し、stdin からデータを渡す。
+func (r *RealCommandRunner) RunWithStdin(dir string, input []byte, args ...string) ([]byte, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Stdin = bytes.NewReader(input)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "not a git repository") {
+			return nil, ErrNotGitRepo
+		}
+		return nil, err
+	}
+	return out, nil
+}
+
 // StatusFile はファイルの変更ステータスを表す。
 type StatusFile struct {
 	Path       string `json:"path"`
 	Status     string `json:"status"`      // "M","A","D","?","R"
 	StatusText string `json:"status_text"` // "modified","added","deleted","untracked","renamed"
+	Staged     bool   `json:"staged"`      // true if in staging area
 }
 
 // StatusResult は git status の結果を表す。
@@ -157,4 +182,94 @@ func (g *Git) Branches(dir string) ([]Branch, error) {
 		return nil, err
 	}
 	return ParseBranches(string(out)), nil
+}
+
+// validatePaths はパスのバリデーションを行う。
+// 空の配列、空文字列の要素、".." を含むパスを拒否する。
+func validatePaths(paths []string) error {
+	if len(paths) == 0 {
+		return fmt.Errorf("paths must not be empty: %w", ErrInvalidPath)
+	}
+	for _, p := range paths {
+		if p == "" {
+			return fmt.Errorf("path must not be empty string: %w", ErrInvalidPath)
+		}
+		// ".." を含むパスはディレクトリトラバーサル防止のため拒否
+		for _, part := range strings.Split(p, "/") {
+			if part == ".." {
+				return fmt.Errorf("path %q contains '..': %w", p, ErrInvalidPath)
+			}
+		}
+	}
+	return nil
+}
+
+// DiscardChanges はファイル単位のリバート（git checkout -- <paths>）を実行する。
+func (g *Git) DiscardChanges(dir string, paths []string) error {
+	if err := validatePaths(paths); err != nil {
+		return err
+	}
+	args := []string{"checkout", "--"}
+	args = append(args, paths...)
+	_, err := g.Cmd.RunInDir(dir, args...)
+	return err
+}
+
+// Stage はファイルのステージ（git add <paths>）を実行する。
+func (g *Git) Stage(dir string, paths []string) error {
+	if err := validatePaths(paths); err != nil {
+		return err
+	}
+	args := []string{"add"}
+	args = append(args, paths...)
+	_, err := g.Cmd.RunInDir(dir, args...)
+	return err
+}
+
+// Unstage はファイルのアンステージ（git reset HEAD <paths>）を実行する。
+func (g *Git) Unstage(dir string, paths []string) error {
+	if err := validatePaths(paths); err != nil {
+		return err
+	}
+	args := []string{"reset", "HEAD"}
+	args = append(args, paths...)
+	_, err := g.Cmd.RunInDir(dir, args...)
+	return err
+}
+
+// DiscardHunk は hunk 単位のリバート（git apply --reverse でパッチ適用）を実行する。
+func (g *Git) DiscardHunk(dir, patch string) error {
+	if patch == "" {
+		return ErrEmptyPatch
+	}
+	_, err := g.Cmd.RunWithStdin(dir, []byte(patch), "apply", "--reverse")
+	return err
+}
+
+// StageHunk は hunk 単位のステージ（git apply --cached でパッチ適用）を実行する。
+func (g *Git) StageHunk(dir, patch string) error {
+	if patch == "" {
+		return ErrEmptyPatch
+	}
+	_, err := g.Cmd.RunWithStdin(dir, []byte(patch), "apply", "--cached")
+	return err
+}
+
+// UnstageHunk は hunk 単位のアンステージ（git apply --cached --reverse でパッチを index から除去）を実行する。
+func (g *Git) UnstageHunk(dir, patch string) error {
+	if patch == "" {
+		return ErrEmptyPatch
+	}
+	_, err := g.Cmd.RunWithStdin(dir, []byte(patch), "apply", "--cached", "--reverse")
+	return err
+}
+
+// StructuredDiff は構造化された差分を返す。
+// 内部で Diff() を呼び出し、結果を ParseStructuredDiff() でパースして返す。
+func (g *Git) StructuredDiff(dir, commit, path string) ([]StructuredDiff, error) {
+	raw, err := g.Diff(dir, commit, path)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStructuredDiff(raw), nil
 }
