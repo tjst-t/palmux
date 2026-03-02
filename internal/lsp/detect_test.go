@@ -24,43 +24,48 @@ func TestDetectServers(t *testing.T) {
 	t.Run("全サーバーが利用可能な場合", func(t *testing.T) {
 		looker := &mockPathLooker{
 			available: map[string]string{
-				"gopls":                      "/usr/bin/gopls",
-				"typescript-language-server": "/usr/bin/typescript-language-server",
-				"pyright-langserver":         "/usr/bin/pyright-langserver",
-				"rust-analyzer":              "/usr/bin/rust-analyzer",
+				"gopls":                          "/usr/bin/gopls",
+				"typescript-language-server":     "/usr/bin/typescript-language-server",
+				"pyright-langserver":             "/usr/bin/pyright-langserver",
+				"rust-analyzer":                  "/usr/bin/rust-analyzer",
+				"clangd":                         "/usr/bin/clangd",
+				"jdtls":                          "/usr/bin/jdtls",
+				"solargraph":                     "/usr/bin/solargraph",
+				"phpactor":                       "/usr/bin/phpactor",
+				"sourcekit-lsp":                  "/usr/bin/sourcekit-lsp",
+				"kotlin-language-server":         "/usr/bin/kotlin-language-server",
+				"lua-language-server":            "/usr/bin/lua-language-server",
+				"zls":                            "/usr/bin/zls",
+				"elixir-ls":                      "/usr/bin/elixir-ls",
+				"haskell-language-server-wrapper": "/usr/bin/haskell-language-server-wrapper",
+				"OmniSharp":                      "/usr/bin/OmniSharp",
+				"dart":                           "/usr/bin/dart",
+				"bash-language-server":           "/usr/bin/bash-language-server",
 			},
 		}
 
 		configs := DetectServersWithLooker(looker)
-		if len(configs) != 4 {
-			t.Fatalf("len(configs) = %d, want 4", len(configs))
+		// clangd は c と cpp の2つ分登録されるので 18 個
+		if len(configs) != 18 {
+			t.Fatalf("len(configs) = %d, want 18", len(configs))
 		}
 
-		// 言語でソートして確認
-		sort.Slice(configs, func(i, j int) bool {
-			return configs[i].Language < configs[j].Language
-		})
-
-		expected := []struct {
-			language string
-			command  string
-			enabled  bool
-		}{
-			{"go", "gopls", true},
-			{"python", "pyright-langserver", true},
-			{"rust", "rust-analyzer", true},
-			{"typescript", "typescript-language-server", true},
+		// 言語名を集めて確認
+		langSet := make(map[string]bool)
+		for _, c := range configs {
+			langSet[c.Language] = true
+			if !c.Enabled {
+				t.Errorf("configs for %q should be enabled", c.Language)
+			}
 		}
 
-		for i, exp := range expected {
-			if configs[i].Language != exp.language {
-				t.Errorf("configs[%d].Language = %q, want %q", i, configs[i].Language, exp.language)
-			}
-			if configs[i].Command != exp.command {
-				t.Errorf("configs[%d].Command = %q, want %q", i, configs[i].Command, exp.command)
-			}
-			if configs[i].Enabled != exp.enabled {
-				t.Errorf("configs[%d].Enabled = %v, want %v", i, configs[i].Enabled, exp.enabled)
+		expectedLangs := []string{
+			"go", "typescript", "python", "rust", "c", "cpp", "java", "ruby",
+			"php", "swift", "kotlin", "lua", "zig", "elixir", "haskell", "csharp", "dart", "bash",
+		}
+		for _, lang := range expectedLangs {
+			if !langSet[lang] {
+				t.Errorf("expected language %q not found in configs", lang)
 			}
 		}
 	})
@@ -171,6 +176,17 @@ func TestLanguageForFile(t *testing.T) {
 		{"Rubyファイル", "app.rb", "ruby"},
 		{"Bashファイル(.sh)", "script.sh", "bash"},
 		{"Bashファイル(.bash)", "script.bash", "bash"},
+		{"PHPファイル", "index.php", "php"},
+		{"Swiftファイル", "main.swift", "swift"},
+		{"Kotlinファイル(.kt)", "Main.kt", "kotlin"},
+		{"Kotlinファイル(.kts)", "build.gradle.kts", "kotlin"},
+		{"Luaファイル", "init.lua", "lua"},
+		{"Zigファイル", "main.zig", "zig"},
+		{"Elixirファイル(.ex)", "app.ex", "elixir"},
+		{"Elixirファイル(.exs)", "test.exs", "elixir"},
+		{"Haskellファイル", "Main.hs", "haskell"},
+		{"C#ファイル", "Program.cs", "csharp"},
+		{"Dartファイル", "main.dart", "dart"},
 		{"不明な拡張子", "file.unknown", ""},
 		{"拡張子なし", "Makefile", ""},
 		{"パス付きGoファイル", "/home/user/project/main.go", "go"},
@@ -271,6 +287,54 @@ func TestLanguageForProject(t *testing.T) {
 		langs := LanguageForProject(dir)
 		if len(langs) != 1 || langs[0] != "rust" {
 			t.Errorf("LanguageForProject() = %v, want [\"rust\"]", langs)
+		}
+	})
+
+	t.Run("Gemfileが存在する場合", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "Gemfile"), []byte(""), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		langs := LanguageForProject(dir)
+		if len(langs) != 1 || langs[0] != "ruby" {
+			t.Errorf("LanguageForProject() = %v, want [\"ruby\"]", langs)
+		}
+	})
+
+	t.Run("composer.jsonが存在する場合", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "composer.json"), []byte("{}"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		langs := LanguageForProject(dir)
+		if len(langs) != 1 || langs[0] != "php" {
+			t.Errorf("LanguageForProject() = %v, want [\"php\"]", langs)
+		}
+	})
+
+	t.Run("mix.exsが存在する場合", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "mix.exs"), []byte(""), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		langs := LanguageForProject(dir)
+		if len(langs) != 1 || langs[0] != "elixir" {
+			t.Errorf("LanguageForProject() = %v, want [\"elixir\"]", langs)
+		}
+	})
+
+	t.Run("pubspec.yamlが存在する場合", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "pubspec.yaml"), []byte(""), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		langs := LanguageForProject(dir)
+		if len(langs) != 1 || langs[0] != "dart" {
+			t.Errorf("LanguageForProject() = %v, want [\"dart\"]", langs)
 		}
 	})
 
