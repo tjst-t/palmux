@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/tjst-t/palmux/internal/git"
+	"github.com/tjst-t/palmux/internal/grep"
 	"github.com/tjst-t/palmux/internal/tmux"
 )
 
@@ -47,6 +48,7 @@ type TmuxManager interface {
 type Server struct {
 	tmux        TmuxManager
 	gitCmd      git.CommandRunner
+	searcher    grep.Searcher
 	token       string
 	basePath    string
 	claudePath  string
@@ -59,6 +61,7 @@ type Server struct {
 type Options struct {
 	Tmux           TmuxManager
 	GitCmd         git.CommandRunner // git コマンドランナー（nil の場合 RealCommandRunner を使用）
+	Searcher       grep.Searcher    // 全文検索エンジン（nil の場合 grep.NewSearcher() を使用）
 	Token          string
 	BasePath       string
 	ClaudePath     string // Claude コマンドのパス（デフォルト: "claude"）
@@ -75,6 +78,11 @@ func NewServer(opts Options) *Server {
 		gitCmd = &git.RealCommandRunner{}
 	}
 
+	searcher := opts.Searcher
+	if searcher == nil {
+		searcher = grep.NewSearcher()
+	}
+
 	claudePath := opts.ClaudePath
 	if claudePath == "" {
 		claudePath = "claude"
@@ -83,6 +91,7 @@ func NewServer(opts Options) *Server {
 	s := &Server{
 		tmux:        opts.Tmux,
 		gitCmd:      gitCmd,
+		searcher:    searcher,
 		token:       opts.Token,
 		basePath:    NormalizeBasePath(opts.BasePath),
 		claudePath:  claudePath,
@@ -108,6 +117,7 @@ func NewServer(opts Options) *Server {
 	mux.Handle("GET /api/sessions/{session}/commands", auth(s.handleGetCommands()))
 	mux.Handle("GET /api/sessions/{session}/files", auth(s.handleGetFiles()))
 	mux.Handle("GET /api/sessions/{session}/files/search", auth(s.handleSearchFiles()))
+	mux.Handle("GET /api/sessions/{session}/files/grep", auth(s.handleGrepSearch()))
 	mux.Handle("PUT /api/sessions/{session}/files", auth(s.handlePutFile()))
 	mux.Handle("GET /api/connections", auth(s.handleListConnections()))
 	mux.Handle("GET /api/ghq/repos", auth(s.handleListGhqRepos()))

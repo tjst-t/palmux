@@ -195,6 +195,37 @@ export async function searchFiles(session, query, path = '.') {
 }
 
 /**
+ * ファイル内容を全文検索する。
+ * @param {string} session - セッション名
+ * @param {string} query - 検索クエリ
+ * @param {string} [path='.'] - 検索起点の相対パス
+ * @param {Object} [options]
+ * @param {boolean} [options.caseSensitive=false] - 大文字小文字を区別するか
+ * @param {boolean} [options.regex=false] - 正規表現検索か
+ * @param {string} [options.glob=''] - ファイルパターンフィルタ
+ * @param {number} [options.limit=500] - 最大結果数
+ * @param {AbortSignal} [options.signal] - AbortController のシグナル
+ * @returns {Promise<{query: string, engine: string, results: Array<{path: string, line_number: number, line_text: string, match_start: number, match_end: number}>, truncated: boolean}>}
+ */
+export async function grepFiles(session, query, path = '.', options = {}) {
+  const params = new URLSearchParams();
+  params.set('q', query);
+  params.set('path', path);
+  if (options.caseSensitive) params.set('case', 'true');
+  if (options.regex) params.set('regex', 'true');
+  if (options.glob) params.set('glob', options.glob);
+  if (options.limit) params.set('limit', String(options.limit));
+
+  const fetchOptions = {};
+  if (options.signal) fetchOptions.signal = options.signal;
+
+  return fetchAPI(
+    `api/sessions/${encodeURIComponent(session)}/files/grep?${params.toString()}`,
+    fetchOptions
+  );
+}
+
+/**
  * ファイルの内容を保存する（上書き）。
  * @param {string} session - セッション名
  * @param {string} path - ファイルの相対パス

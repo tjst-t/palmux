@@ -124,7 +124,7 @@
   display: flex;
   align-items: center;
   flex-shrink: 0;
-  margin-left: 6px;
+  margin-left: auto;
 }
 
 .fb-search-input {
@@ -1037,6 +1037,212 @@
   cursor: default;
 }
 
+/* Grep mode toggle */
+.fb-search-mode-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  min-height: 30px;
+  background: none;
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  color: #8888aa;
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  margin-right: 4px;
+}
+
+.fb-search-mode-toggle:hover {
+  background: rgba(126, 200, 227, 0.15);
+  color: #7ec8e3;
+}
+
+.fb-search-mode-toggle--active {
+  color: #4fc3f7;
+  border-color: #4fc3f7;
+  background: rgba(79, 195, 247, 0.1);
+}
+
+/* Grep filter bar */
+.fb-grep-filters {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 4px 12px;
+  background: #12192e;
+  border-bottom: 1px solid #2a2a4a;
+  flex-shrink: 0;
+  gap: 4px;
+}
+
+.fb-grep-filter-input {
+  width: 80px;
+  height: 26px;
+  padding: 0 6px;
+  background: rgba(42, 42, 74, 0.7);
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 11px;
+  outline: none;
+  font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
+}
+
+.fb-grep-filter-input:focus {
+  border-color: #7ec8e3;
+}
+
+.fb-grep-filter-input::placeholder {
+  color: #555;
+}
+
+.fb-grep-filter-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 26px;
+  padding: 0 6px;
+  background: rgba(42, 42, 74, 0.4);
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  color: #8888aa;
+  font-size: 11px;
+  font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.fb-grep-filter-btn:hover {
+  background: rgba(126, 200, 227, 0.15);
+}
+
+.fb-grep-filter-btn--active {
+  color: #4fc3f7;
+  border-color: #4fc3f7;
+  background: rgba(79, 195, 247, 0.15);
+}
+
+.fb-grep-engine {
+  margin-left: auto;
+  font-size: 10px;
+  color: #555;
+  white-space: nowrap;
+}
+
+/* Grep results */
+.fb-grep-file-group {
+  border-bottom: 1px solid rgba(42, 42, 74, 0.6);
+}
+
+.fb-grep-file-header {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(22, 33, 62, 0.5);
+  cursor: pointer;
+  gap: 8px;
+  font-size: 13px;
+  color: #81d4fa;
+  font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.fb-grep-file-header:hover {
+  background: rgba(126, 200, 227, 0.08);
+}
+
+.fb-grep-match-count {
+  color: #8888aa;
+  font-size: 11px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.fb-grep-match-line {
+  display: flex;
+  align-items: flex-start;
+  padding: 4px 12px 4px 36px;
+  cursor: pointer;
+  gap: 8px;
+  font-size: 12px;
+  font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  min-height: 28px;
+}
+
+.fb-grep-match-line:hover {
+  background: rgba(126, 200, 227, 0.06);
+}
+
+.fb-grep-line-number {
+  color: #555;
+  min-width: 40px;
+  text-align: right;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.fb-grep-line-text {
+  flex: 1;
+  color: #c0c0c0;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fb-grep-line-text mark {
+  background: rgba(255, 213, 79, 0.3);
+  color: #ffd54f;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.fb-grep-footer {
+  padding: 8px 12px;
+  text-align: center;
+  font-size: 11px;
+  color: #555;
+  border-top: 1px solid rgba(42, 42, 74, 0.4);
+}
+
+.fb-grep-truncated {
+  color: #ffb74d;
+  margin-right: 8px;
+}
+
+/* Line highlight in file preview */
+.fp-code-table tr.fp-code-line--highlight {
+  background: rgba(255, 213, 79, 0.15) !important;
+}
+
+.fp-code-table tr.fp-code-line--highlight .fp-code-linenum {
+  color: #ffd54f;
+  background: rgba(255, 213, 79, 0.1);
+}
+
+.fp-code-table tr.fp-code-line--highlight-fade {
+  transition: background 0.5s ease-out;
+  background: transparent !important;
+}
+
+.fp-code-table tr.fp-code-line--highlight-fade .fp-code-linenum {
+  transition: color 0.5s ease-out, background 0.5s ease-out;
+  color: #555;
+  background: rgba(22, 33, 62, 0.5);
+}
+
 /* Mobile optimizations */
 @media (max-width: 600px) {
   .fb-search-input {
@@ -1185,5 +1391,42 @@
 
   .fp-dialog {
     padding: 16px;
+  }
+
+  /* Grep mode mobile adjustments */
+  .fb-grep-filters {
+    padding: 3px 8px;
+  }
+
+  .fb-grep-filter-input {
+    width: 60px;
+    height: 24px;
+    font-size: 10px;
+  }
+
+  .fb-grep-filter-btn {
+    min-width: 24px;
+    height: 24px;
+    font-size: 10px;
+  }
+
+  .fb-grep-match-line {
+    padding: 3px 8px 3px 28px;
+    font-size: 11px;
+  }
+
+  .fb-grep-file-header {
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+
+  .fb-grep-line-number {
+    min-width: 32px;
+  }
+
+  .fb-search-mode-toggle {
+    min-width: 26px;
+    min-height: 26px;
+    font-size: 11px;
   }
 }
