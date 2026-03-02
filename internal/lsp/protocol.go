@@ -43,6 +43,18 @@ type TextDocumentPositionParams struct {
 	Position     Position               `json:"position"`
 }
 
+// ReferenceParams は textDocument/references のリクエストパラメータ。
+type ReferenceParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+	Context      ReferenceContext        `json:"context"`
+}
+
+// ReferenceContext は references リクエストのコンテキスト。
+type ReferenceContext struct {
+	IncludeDeclaration bool `json:"includeDeclaration"`
+}
+
 // DidOpenTextDocumentParams は textDocument/didOpen の通知パラメータ。
 type DidOpenTextDocumentParams struct {
 	TextDocument TextDocumentItem `json:"textDocument"`

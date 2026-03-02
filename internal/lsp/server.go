@@ -412,6 +412,29 @@ func (ls *LanguageServer) Definition(ctx context.Context, file string, line, col
 	return locations, nil
 }
 
+// References は指定位置のシンボルの参照箇所を返す。
+func (ls *LanguageServer) References(ctx context.Context, file string, line, col int) ([]Location, error) {
+	params := ReferenceParams{
+		TextDocument: TextDocumentIdentifier{
+			URI: fileToURI(file),
+		},
+		Position: Position{
+			Line:      line,
+			Character: col,
+		},
+		Context: ReferenceContext{
+			IncludeDeclaration: true,
+		},
+	}
+
+	var locations []Location
+	if err := ls.Request(ctx, "textDocument/references", params, &locations); err != nil {
+		return nil, fmt.Errorf("textDocument/references: %w", err)
+	}
+
+	return locations, nil
+}
+
 // DocumentSymbols は指定ドキュメントの全シンボルを返す。
 func (ls *LanguageServer) DocumentSymbols(ctx context.Context, file string) ([]DocumentSymbol, error) {
 	params := struct {

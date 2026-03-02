@@ -23,6 +23,10 @@ type LSPService interface {
 	// file は rootDir からの相対パス、line/col は 0-based。
 	Definition(ctx context.Context, rootDir, file string, line, col int) ([]Location, error)
 
+	// References は指定ファイル・位置のシンボルの参照箇所を返す。
+	// file は rootDir からの相対パス、line/col は 0-based。
+	References(ctx context.Context, rootDir, file string, line, col int) ([]Location, error)
+
 	// DocumentSymbols は指定ファイルの全シンボルを返す。
 	// file は rootDir からの相対パス。
 	DocumentSymbols(ctx context.Context, rootDir, file string) ([]DocumentSymbol, error)

@@ -499,6 +499,18 @@ export async function getLspDefinition(session, file, line, col) {
 }
 
 /**
+ * シンボルの参照箇所を取得する。
+ * @param {string} session - セッション名
+ * @param {string} file - 相対ファイルパス
+ * @param {number} line - 行番号 (1-based)
+ * @param {number} col - 列番号 (1-based)
+ * @returns {Promise<{locations: Array<{file: string, line: number, column: number}>}>}
+ */
+export async function getLspReferences(session, file, line, col) {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/lsp/references?file=${encodeURIComponent(file)}&line=${line}&col=${col}`);
+}
+
+/**
  * ドキュメントシンボル一覧を取得する。
  * @param {string} session - セッション名
  * @param {string} file - 相対ファイルパス

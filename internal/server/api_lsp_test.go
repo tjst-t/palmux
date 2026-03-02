@@ -17,6 +17,8 @@ type mockLSPService struct {
 	servers       []lsp.ServerInfo
 	definition    []lsp.Location
 	definitionErr error
+	references    []lsp.Location
+	referencesErr error
 	symbols       []lsp.DocumentSymbol
 	symbolsErr    error
 
@@ -26,6 +28,11 @@ type mockLSPService struct {
 	lastDefFile            string
 	lastDefLine            int
 	lastDefCol             int
+	calledReferences       bool
+	lastRefsRootDir        string
+	lastRefsFile           string
+	lastRefsLine           int
+	lastRefsCol            int
 	calledDocumentSymbols  bool
 	lastSymbolsRootDir     string
 	lastSymbolsFile        string
@@ -41,6 +48,15 @@ func (m *mockLSPService) Definition(ctx context.Context, rootDir, file string, l
 	m.lastDefLine = line
 	m.lastDefCol = col
 	return m.definition, m.definitionErr
+}
+
+func (m *mockLSPService) References(ctx context.Context, rootDir, file string, line, col int) ([]lsp.Location, error) {
+	m.calledReferences = true
+	m.lastRefsRootDir = rootDir
+	m.lastRefsFile = file
+	m.lastRefsLine = line
+	m.lastRefsCol = col
+	return m.references, m.referencesErr
 }
 
 func (m *mockLSPService) DocumentSymbols(ctx context.Context, rootDir, file string) ([]lsp.DocumentSymbol, error) {
@@ -568,6 +584,228 @@ func TestLspDocumentSymbols_SymbolConversion(t *testing.T) {
 	}
 	if sym.EndLine != 51 {
 		t.Errorf("sym[1].EndLine = %d, want %d", sym.EndLine, 51)
+	}
+}
+
+func TestLspReferences(t *testing.T) {
+	tests := []struct {
+		name       string
+		lspSvc     lsp.LSPService
+		queryStr   string
+		projectDir string
+		projDirErr error
+		wantStatus int
+		wantLocs   int
+		// 呼び出し検証
+		wantRefsFile string
+		wantRefsLine int
+		wantRefsCol  int
+	}{
+		{
+			name: "正常: 参照箇所を返す（1-based→0-basedの変換）",
+			lspSvc: &mockLSPService{
+				available: true,
+				references: []lsp.Location{
+					{
+						URI: "file:///project/main.go",
+						Range: lsp.Range{
+							Start: lsp.Position{Line: 10, Character: 5},
+							End:   lsp.Position{Line: 10, Character: 11},
+						},
+					},
+					{
+						URI: "file:///project/internal/server/server.go",
+						Range: lsp.Range{
+							Start: lsp.Position{Line: 20, Character: 3},
+							End:   lsp.Position{Line: 20, Character: 9},
+						},
+					},
+				},
+			},
+			queryStr:     "?file=server.go&line=10&col=5",
+			projectDir:   "/project",
+			wantStatus:   http.StatusOK,
+			wantLocs:     2,
+			wantRefsFile: "server.go",
+			wantRefsLine: 9, // API 1-based (10) → LSP 0-based (9)
+			wantRefsCol:  4, // API 1-based (5) → LSP 0-based (4)
+		},
+		{
+			name:       "LSPが無効: 503を返す",
+			lspSvc:     nil,
+			queryStr:   "?file=server.go&line=1&col=1",
+			projectDir: "/project",
+			wantStatus: http.StatusServiceUnavailable,
+		},
+		{
+			name: "fileパラメータなし: 400を返す",
+			lspSvc: &mockLSPService{
+				available: true,
+			},
+			queryStr:   "?line=1&col=1",
+			projectDir: "/project",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "lineパラメータなし: 400を返す",
+			lspSvc: &mockLSPService{
+				available: true,
+			},
+			queryStr:   "?file=server.go&col=1",
+			projectDir: "/project",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "colパラメータなし: 400を返す",
+			lspSvc: &mockLSPService{
+				available: true,
+			},
+			queryStr:   "?file=server.go&line=1",
+			projectDir: "/project",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "セッションが存在しない: 404を返す",
+			lspSvc: &mockLSPService{
+				available: true,
+			},
+			queryStr:   "?file=server.go&line=1&col=1",
+			projDirErr: tmux.ErrSessionNotFound,
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name: "LSPエラー: 500を返す",
+			lspSvc: &mockLSPService{
+				available:     true,
+				referencesErr: errors.New("LSP request failed"),
+			},
+			queryStr:   "?file=server.go&line=1&col=1",
+			projectDir: "/project",
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name: "参照が見つからない: 空配列を返す",
+			lspSvc: &mockLSPService{
+				available:  true,
+				references: nil,
+			},
+			queryStr:   "?file=server.go&line=1&col=1",
+			projectDir: "/project",
+			wantStatus: http.StatusOK,
+			wantLocs:   0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &configurableMock{
+				projectDir:    tt.projectDir,
+				projectDirErr: tt.projDirErr,
+			}
+			srv, token := newTestServerWithLSP(mock, tt.lspSvc)
+			rec := doRequest(t, srv.Handler(), http.MethodGet, "/api/sessions/main/lsp/references"+tt.queryStr, token, "")
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+
+			if tt.wantStatus == http.StatusOK {
+				var resp lspDefinitionResponse
+				if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+					t.Fatalf("failed to decode response: %v", err)
+				}
+
+				if len(resp.Locations) != tt.wantLocs {
+					t.Errorf("locations count = %d, want %d", len(resp.Locations), tt.wantLocs)
+				}
+
+				// 呼び出しパラメータの検証
+				if tt.wantRefsFile != "" {
+					lspMock := tt.lspSvc.(*mockLSPService)
+					if !lspMock.calledReferences {
+						t.Error("References was not called")
+					}
+					if lspMock.lastRefsFile != tt.wantRefsFile {
+						t.Errorf("References file = %q, want %q", lspMock.lastRefsFile, tt.wantRefsFile)
+					}
+					if lspMock.lastRefsLine != tt.wantRefsLine {
+						t.Errorf("References line = %d, want %d", lspMock.lastRefsLine, tt.wantRefsLine)
+					}
+					if lspMock.lastRefsCol != tt.wantRefsCol {
+						t.Errorf("References col = %d, want %d", lspMock.lastRefsCol, tt.wantRefsCol)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestLspReferences_LocationConversion(t *testing.T) {
+	// URI → 相対パス変換、line は 0-based → 1-based の検証
+	lspMock := &mockLSPService{
+		available: true,
+		references: []lsp.Location{
+			{
+				URI: "file:///project/internal/server/server.go",
+				Range: lsp.Range{
+					Start: lsp.Position{Line: 41, Character: 5},
+					End:   lsp.Position{Line: 41, Character: 11},
+				},
+			},
+			{
+				URI: "file:///project/main.go",
+				Range: lsp.Range{
+					Start: lsp.Position{Line: 0, Character: 0},
+					End:   lsp.Position{Line: 0, Character: 4},
+				},
+			},
+		},
+	}
+	mock := &configurableMock{
+		projectDir: "/project",
+	}
+	srv, token := newTestServerWithLSP(mock, lspMock)
+	rec := doRequest(t, srv.Handler(), http.MethodGet, "/api/sessions/main/lsp/references?file=server.go&line=10&col=5", token, "")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var resp lspDefinitionResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(resp.Locations) != 2 {
+		t.Fatalf("locations count = %d, want 2", len(resp.Locations))
+	}
+
+	// 1つ目: file:///project/internal/server/server.go → internal/server/server.go
+	loc := resp.Locations[0]
+	if loc.File != "internal/server/server.go" {
+		t.Errorf("loc[0].File = %q, want %q", loc.File, "internal/server/server.go")
+	}
+	// LSP 0-based line=41 → API 1-based line=42
+	if loc.Line != 42 {
+		t.Errorf("loc[0].Line = %d, want %d", loc.Line, 42)
+	}
+	// LSP 0-based character=5 → API 1-based column=6
+	if loc.Column != 6 {
+		t.Errorf("loc[0].Column = %d, want %d", loc.Column, 6)
+	}
+
+	// 2つ目: file:///project/main.go → main.go
+	loc = resp.Locations[1]
+	if loc.File != "main.go" {
+		t.Errorf("loc[1].File = %q, want %q", loc.File, "main.go")
+	}
+	// LSP 0-based line=0 → API 1-based line=1
+	if loc.Line != 1 {
+		t.Errorf("loc[1].Line = %d, want %d", loc.Line, 1)
+	}
+	// LSP 0-based character=0 → API 1-based column=1
+	if loc.Column != 1 {
+		t.Errorf("loc[1].Column = %d, want %d", loc.Column, 1)
 	}
 }
 

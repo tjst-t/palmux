@@ -2123,14 +2123,14 @@ html, body {
 /* LSP Symbol Links */
 .fp-symbol-link {
   cursor: pointer;
-  text-decoration: underline;
-  text-decoration-style: dotted;
-  text-underline-offset: 2px;
 }
 
 .fp-symbol-link:hover {
-  text-decoration-style: solid;
-  background-color: rgba(255, 255, 255, 0.1);
+  text-decoration: underline;
+  text-decoration-style: dashed;
+  text-decoration-color: #666;
+  text-underline-offset: 2px;
+  background-color: rgba(255, 255, 255, 0.08);
   border-radius: 2px;
 }
 
@@ -2258,4 +2258,94 @@ html, body {
   color: #666;
   font-size: 11px;
   flex-shrink: 0;
+}
+
+/* --- References Panel --- */
+
+.fp-references-panel {
+  background: #1a1a2e;
+  border-bottom: 1px solid #333;
+  max-height: 40vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.fp-references-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #16213e;
+  border-bottom: 1px solid #333;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.fp-references-title-text {
+  font-size: 13px;
+  color: #a0a0c0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fp-references-close {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 2px 6px;
+  flex-shrink: 0;
+}
+
+.fp-references-close:hover {
+  color: #fff;
+}
+
+.fp-references-list {
+  padding: 0;
+}
+
+.fp-references-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #222;
+  transition: background 0.15s;
+}
+
+.fp-references-item:hover {
+  background: #222244;
+}
+
+.fp-references-item:active {
+  background: #2a2a4a;
+}
+
+.fp-references-file {
+  flex: 1;
+  font-size: 13px;
+  color: #88aadd;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: monospace;
+}
+
+.fp-references-line {
+  color: #888;
+  font-size: 12px;
+  font-family: monospace;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+.fp-references-empty {
+  padding: 16px 12px;
+  text-align: center;
+  color: #666;
+  font-size: 13px;
 }

@@ -1,7 +1,7 @@
 // filebrowser.js - ファイルブラウザ UI
 // セッションの CWD をルートとしてディレクトリを閲覧する
 
-import { getSessionCwd, listFiles, searchFiles, getFileContent, getFileRawURL, saveFile, getLspStatus, getLspDefinition, getLspDocumentSymbols } from './api.js';
+import { getSessionCwd, listFiles, searchFiles, getFileContent, getFileRawURL, saveFile, getLspStatus, getLspDefinition, getLspReferences, getLspDocumentSymbols } from './api.js';
 import { FilePreview } from './file-preview.js';
 import { NavigationStack } from './navigation-stack.js';
 
@@ -660,6 +660,7 @@ export class FileBrowser {
       // LSP options
       getLspStatus: (s) => getLspStatus(s),
       getLspDefinition: (s, f, l, c) => getLspDefinition(s, f, l, c),
+      getLspReferences: (s, f, l, c) => getLspReferences(s, f, l, c),
       getLspDocumentSymbols: (s, f) => getLspDocumentSymbols(s, f),
       navStack: this._navStack,
       onNavigate: (file, line) => {

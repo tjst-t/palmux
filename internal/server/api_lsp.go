@@ -140,6 +140,74 @@ func (s *Server) handleLspDefinition() http.Handler {
 	})
 }
 
+// handleLspReferences は GET /api/sessions/{session}/lsp/references のハンドラ。
+// 指定ファイル・位置のシンボルの参照箇所を返す。
+// クエリパラメータ: file (必須), line (必須, 1-based), col (必須, 1-based)
+func (s *Server) handleLspReferences() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.lsp == nil {
+			writeError(w, http.StatusServiceUnavailable, "LSP not available")
+			return
+		}
+
+		session := r.PathValue("session")
+
+		rootDir, err := s.tmux.GetSessionProjectDir(session)
+		if err != nil {
+			if errors.Is(err, tmux.ErrSessionNotFound) {
+				writeError(w, http.StatusNotFound, "session not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		file := r.URL.Query().Get("file")
+		if file == "" {
+			writeError(w, http.StatusBadRequest, "file parameter is required")
+			return
+		}
+
+		lineStr := r.URL.Query().Get("line")
+		if lineStr == "" {
+			writeError(w, http.StatusBadRequest, "line parameter is required")
+			return
+		}
+		line, err := strconv.Atoi(lineStr)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "line must be a valid integer")
+			return
+		}
+
+		colStr := r.URL.Query().Get("col")
+		if colStr == "" {
+			writeError(w, http.StatusBadRequest, "col parameter is required")
+			return
+		}
+		col, err := strconv.Atoi(colStr)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "col must be a valid integer")
+			return
+		}
+
+		// API は 1-based、LSP は 0-based なので変換
+		lspLine := line - 1
+		lspCol := col - 1
+
+		locations, err := s.lsp.References(r.Context(), rootDir, file, lspLine, lspCol)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		resp := lspDefinitionResponse{
+			Locations: convertLocations(locations, rootDir),
+		}
+
+		writeJSON(w, http.StatusOK, resp)
+	})
+}
+
 // handleLspDocumentSymbols は GET /api/sessions/{session}/lsp/document-symbols のハンドラ。
 // 指定ファイルの全シンボルを返す。
 // クエリパラメータ: file (必須)

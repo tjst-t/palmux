@@ -289,6 +289,7 @@ export class FilePreview {
    * @param {function(string, string, string): Promise<Object>} [options.saveFile] - Function to save file content (session, path, content) => Promise
    * @param {function(string): Promise<Object>} [options.getLspStatus] - Function to get LSP status (session) => Promise
    * @param {function(string, string, number, number): Promise<Object>} [options.getLspDefinition] - Function to get definition (session, file, line, col) => Promise
+   * @param {function(string, string, number, number): Promise<Object>} [options.getLspReferences] - Function to get references (session, file, line, col) => Promise
    * @param {function(string, string): Promise<Object>} [options.getLspDocumentSymbols] - Function to get document symbols (session, file) => Promise
    * @param {import('./navigation-stack.js').NavigationStack} [options.navStack] - Shared navigation stack
    * @param {function(string, number): void} [options.onNavigate] - Callback for cross-file navigation (file, line) => void
@@ -337,6 +338,7 @@ export class FilePreview {
     this._onNavigate = options.onNavigate || null;
     this._getLspStatus = options.getLspStatus || null;
     this._getLspDefinition = options.getLspDefinition || null;
+    this._getLspReferences = options.getLspReferences || null;
     this._getLspDocumentSymbols = options.getLspDocumentSymbols || null;
     this._navStack = options.navStack || null;
     this._lspAvailable = false;
@@ -345,6 +347,7 @@ export class FilePreview {
     this._navForwardBtn = null;
     this._outlineBtn = null;
     this._outlinePanel = null;
+    this._referencesPanel = null;
 
     this._render();
     this._loadContent();
@@ -1399,55 +1402,47 @@ export class FilePreview {
    * Initialize LSP: check availability, fetch symbols, and apply links.
    */
   async _initLsp() {
-    if (!this._getLspStatus || !this._getLspDocumentSymbols) return;
+    if (!this._getLspStatus) return;
 
     try {
       const status = await this._getLspStatus(this._session);
       if (this._disposed || !status || !status.available) return;
       this._lspAvailable = true;
 
-      const result = await this._getLspDocumentSymbols(this._session, this._path);
-      if (this._disposed || !result || !result.symbols) return;
-      this._symbols = result.symbols;
-
-      // Add outline button to header
-      this._addOutlineButton();
-
       // Add navigation buttons if navStack provided
       if (this._navStack) {
         this._addNavigationButtons();
       }
 
-      // Apply symbol links to code
+      // Apply symbol links to all identifiers (independent of documentSymbols)
       this._applySymbolLinks();
+
+      // Fetch document symbols for outline panel (optional)
+      if (this._getLspDocumentSymbols) {
+        const result = await this._getLspDocumentSymbols(this._session, this._path);
+        if (this._disposed || !result || !result.symbols) return;
+        this._symbols = result.symbols;
+        this._addOutlineButton();
+      }
     } catch (err) {
       console.error('LSP init failed:', err);
     }
   }
 
   /**
-   * Make symbols clickable in the code table.
-   * Searches ALL lines for occurrences of known symbol names,
-   * not just the definition lines. This enables clicking on
-   * function calls to jump to their definitions.
+   * Make identifiers clickable in the code table.
+   * All identifier-like tokens (2+ chars) become clickable,
+   * except those inside comments, strings, keywords, etc.
+   * Clicking calls LSP definition; no-ops if no definition found.
    */
   _applySymbolLinks() {
-    if (!this._symbols.length || !this._contentEl) return;
+    if (!this._contentEl) return;
 
     const rows = this._contentEl.querySelectorAll('.fp-code-table tbody tr');
     if (!rows.length) return;
 
-    // Collect all symbol names (skip very short names to avoid false positives)
-    const symbolNames = new Set();
-    this._collectSymbolNames(this._symbols, symbolNames);
-    if (symbolNames.size === 0) return;
-
-    // Build regex matching any symbol name (longest first to avoid partial matches)
-    const sortedNames = Array.from(symbolNames).sort((a, b) => b.length - a.length);
-    const pattern = new RegExp('\\b(' + sortedNames.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')\\b');
-
-    // Get source lines for column calculation
-    const sourceLines = this._originalContent.split('\n');
+    // hljs classes to skip: non-navigable tokens
+    const SKIP_CLASSES = ['hljs-comment', 'hljs-string', 'hljs-number', 'hljs-keyword', 'hljs-literal', 'hljs-meta', 'hljs-doctag'];
 
     // Process each line
     for (let i = 0; i < rows.length; i++) {
@@ -1455,81 +1450,78 @@ export class FilePreview {
       if (!codeTd) continue;
 
       const lineNum = i + 1; // 1-based
-      const sourceLine = sourceLines[i] || '';
-
-      this._wrapSymbolsInLine(codeTd, pattern, lineNum, sourceLine);
+      this._wrapIdentifiersInLine(codeTd, lineNum, SKIP_CLASSES);
     }
   }
 
   /**
-   * Recursively collect symbol names from document symbols.
-   * Skips names shorter than 2 characters to avoid false positives.
-   * @param {Array} symbols
-   * @param {Set} names
-   */
-  _collectSymbolNames(symbols, names) {
-    for (const sym of symbols) {
-      if (sym.name && sym.name.length >= 2) {
-        names.add(sym.name);
-      }
-      if (sym.children) {
-        this._collectSymbolNames(sym.children, names);
-      }
-    }
-  }
-
-  /**
-   * Wrap all symbol name occurrences in a code line with clickable spans.
+   * Wrap all identifier occurrences in a code line with clickable spans.
+   * Handles multiple matches per text node. Skips text inside hljs spans
+   * for comments, strings, keywords, etc.
    * @param {HTMLElement} codeTd - The code cell element
-   * @param {RegExp} pattern - Regex matching any known symbol name
    * @param {number} lineNum - 1-based line number
-   * @param {string} sourceLine - Raw source text of this line
+   * @param {Array<string>} skipClasses - hljs class names to skip
    */
-  _wrapSymbolsInLine(codeTd, pattern, lineNum, sourceLine) {
+  _wrapIdentifiersInLine(codeTd, lineNum, skipClasses) {
+    // Collect text nodes with their character offset within the line
     const walker = document.createTreeWalker(codeTd, NodeFilter.SHOW_TEXT);
-    const textNodes = [];
+    const entries = [];
     let node;
+    let offsetAcc = 0;
     while ((node = walker.nextNode())) {
-      textNodes.push(node);
+      entries.push({ node, offset: offsetAcc });
+      offsetAcc += node.textContent.length;
     }
 
-    for (const textNode of textNodes) {
+    for (const { node: textNode, offset: nodeOffset } of entries) {
+      // Skip text inside comment/string/keyword/number spans
+      const parentEl = textNode.parentElement;
+      if (parentEl && skipClasses.some(cls => parentEl.classList.contains(cls))) {
+        continue;
+      }
+
       const text = textNode.textContent;
-      const match = pattern.exec(text);
-      if (!match) continue;
+      if (!text.trim()) continue;
 
-      const symName = match[1];
-      const idx = match.index;
+      // Find all identifier-like words (2+ chars, starts with letter or underscore)
+      const identPattern = /\b([A-Za-z_]\w+)\b/g;
+      const matches = [];
+      let m;
+      while ((m = identPattern.exec(text)) !== null) {
+        matches.push({ name: m[1], index: m.index, col: nodeOffset + m.index + 1 });
+      }
+      if (matches.length === 0) continue;
 
-      // Calculate the 1-based column from the source line
-      const col = sourceLine.indexOf(symName) + 1;
-
-      const before = text.substring(0, idx);
-      const after = text.substring(idx + symName.length);
+      // Build replacement fragment with all matches wrapped
       const parent = textNode.parentNode;
+      const fragment = document.createDocumentFragment();
+      let lastIdx = 0;
 
-      if (before) {
-        parent.insertBefore(document.createTextNode(before), textNode);
+      for (const match of matches) {
+        if (match.index > lastIdx) {
+          fragment.appendChild(document.createTextNode(text.substring(lastIdx, match.index)));
+        }
+
+        const link = document.createElement('span');
+        link.className = 'fp-symbol-link';
+        link.textContent = match.name;
+        link.title = match.name;
+        const col = match.col;
+        link.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this._handleSymbolClick(match.name, lineNum, col);
+        });
+        fragment.appendChild(link);
+
+        lastIdx = match.index + match.name.length;
       }
 
-      const link = document.createElement('span');
-      link.className = 'fp-symbol-link';
-      link.textContent = symName;
-      link.title = symName;
-      link.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this._handleSymbolClick(symName, lineNum, col > 0 ? col : 1);
-      });
-      parent.insertBefore(link, textNode);
-
-      if (after) {
-        parent.insertBefore(document.createTextNode(after), textNode);
+      if (lastIdx < text.length) {
+        fragment.appendChild(document.createTextNode(text.substring(lastIdx)));
       }
 
-      parent.removeChild(textNode);
-      // Reset regex lastIndex (since we modified the DOM)
-      pattern.lastIndex = 0;
+      parent.replaceChild(fragment, textNode);
     }
   }
 
@@ -1548,8 +1540,15 @@ export class FilePreview {
 
       const loc = result.locations[0];
 
-      // Skip if definition is the same position (clicking on the definition itself)
-      if (loc.file === this._path && loc.line === line) return;
+      // Skip if definition is outside the project (external library)
+      if (loc.file.startsWith('../') || loc.file.startsWith('/')) return;
+
+      // If definition is the same position (clicking on the definition itself),
+      // show references instead of jumping
+      if (loc.file === this._path && loc.line === line) {
+        this._showReferences(name, line, col);
+        return;
+      }
 
       // Push current position to nav stack
       if (this._navStack) {
@@ -1569,6 +1568,127 @@ export class FilePreview {
       this._updateNavigationButtons();
     } catch (err) {
       console.error('Definition jump failed:', err);
+    }
+  }
+
+  /**
+   * Show references panel for a symbol at the given position.
+   * Calls LSP references API and renders a list of reference locations.
+   * @param {string} name - Symbol name
+   * @param {number} line - 1-based line number
+   * @param {number} col - 1-based column number
+   */
+  async _showReferences(name, line, col) {
+    if (!this._getLspReferences) return;
+
+    try {
+      const result = await this._getLspReferences(this._session, this._path, line, col);
+      if (!result || !result.locations) return;
+
+      // Filter out the definition itself (same file, same line)
+      const refs = result.locations.filter(
+        loc => !(loc.file === this._path && loc.line === line)
+      );
+
+      this._renderReferencesPanel(name, refs);
+    } catch (err) {
+      console.error('References lookup failed:', err);
+    }
+  }
+
+  /**
+   * Render the references panel showing a list of reference locations.
+   * @param {string} name - Symbol name
+   * @param {Array<{file: string, line: number, column: number}>} locations - Reference locations
+   */
+  _renderReferencesPanel(name, locations) {
+    this._closeReferencesPanel();
+
+    const panel = document.createElement('div');
+    panel.className = 'fp-references-panel';
+
+    // Title bar
+    const titleBar = document.createElement('div');
+    titleBar.className = 'fp-references-title';
+
+    const titleText = document.createElement('span');
+    titleText.className = 'fp-references-title-text';
+    titleText.textContent = `"${name}" の参照 (${locations.length})`;
+    titleBar.appendChild(titleText);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'fp-references-close';
+    closeBtn.textContent = '\u2715'; // multiplication sign (close icon)
+    closeBtn.setAttribute('aria-label', 'Close references');
+    closeBtn.addEventListener('click', () => this._closeReferencesPanel());
+    titleBar.appendChild(closeBtn);
+
+    panel.appendChild(titleBar);
+
+    // Reference list
+    const list = document.createElement('div');
+    list.className = 'fp-references-list';
+
+    if (locations.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'fp-references-empty';
+      empty.textContent = '参照が見つかりませんでした';
+      list.appendChild(empty);
+    } else {
+      for (const loc of locations) {
+        const item = document.createElement('div');
+        item.className = 'fp-references-item';
+
+        const filePath = document.createElement('span');
+        filePath.className = 'fp-references-file';
+        filePath.textContent = loc.file;
+
+        const lineNum = document.createElement('span');
+        lineNum.className = 'fp-references-line';
+        lineNum.textContent = `:${loc.line}`;
+
+        item.appendChild(filePath);
+        item.appendChild(lineNum);
+
+        item.addEventListener('click', () => {
+          this._closeReferencesPanel();
+
+          // Push current position to nav stack
+          if (this._navStack) {
+            this._navStack.push({ file: this._path, line: loc.line, session: this._session });
+          }
+
+          if (loc.file === this._path) {
+            // Same file: scroll to line
+            this._scrollToLine(loc.line);
+          } else {
+            // Different file: navigate
+            if (this._onNavigate) {
+              this._onNavigate(loc.file, loc.line);
+            }
+          }
+
+          this._updateNavigationButtons();
+        });
+
+        list.appendChild(item);
+      }
+    }
+
+    panel.appendChild(list);
+    this._referencesPanel = panel;
+
+    // Insert before content area
+    this._wrapper.insertBefore(panel, this._contentEl);
+  }
+
+  /**
+   * Close and remove the references panel.
+   */
+  _closeReferencesPanel() {
+    if (this._referencesPanel) {
+      this._referencesPanel.remove();
+      this._referencesPanel = null;
     }
   }
 
@@ -1804,6 +1924,10 @@ export class FilePreview {
     if (this._outlinePanel) {
       this._outlinePanel.remove();
       this._outlinePanel = null;
+    }
+    if (this._referencesPanel) {
+      this._referencesPanel.remove();
+      this._referencesPanel = null;
     }
     this._symbols = [];
   }

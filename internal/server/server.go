@@ -132,6 +132,7 @@ func NewServer(opts Options) *Server {
 	mux.Handle("GET /api/sessions/{session}/git/branches", auth(s.handleGitBranches()))
 	mux.Handle("GET /api/sessions/{session}/lsp/status", auth(s.handleLspStatus()))
 	mux.Handle("GET /api/sessions/{session}/lsp/definition", auth(s.handleLspDefinition()))
+	mux.Handle("GET /api/sessions/{session}/lsp/references", auth(s.handleLspReferences()))
 	mux.Handle("GET /api/sessions/{session}/lsp/document-symbols", auth(s.handleLspDocumentSymbols()))
 	mux.Handle("POST /api/upload", auth(s.handleUploadImage()))
 	mux.Handle("POST /api/notifications", auth(s.handlePostNotification()))

@@ -50,6 +50,28 @@ func (s *Service) Definition(ctx context.Context, rootDir, file string, line, co
 	return srv.Definition(ctx, absPath, line, col)
 }
 
+// References は指定ファイル・位置のシンボルの参照箇所を返す。
+// file は rootDir からの相対パス、line/col は 0-based。
+func (s *Service) References(ctx context.Context, rootDir, file string, line, col int) ([]Location, error) {
+	absPath := filepath.Join(rootDir, file)
+	srv, err := s.manager.GetServerForFile(absPath, rootDir)
+	if err != nil {
+		return nil, err
+	}
+
+	// DidOpen でファイル内容を通知
+	content, err := os.ReadFile(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+	lang := LanguageForFile(file)
+	if err := srv.DidOpen(ctx, absPath, lang, string(content)); err != nil {
+		return nil, fmt.Errorf("didOpen: %w", err)
+	}
+
+	return srv.References(ctx, absPath, line, col)
+}
+
 // DocumentSymbols は指定ファイルの全シンボルを返す。
 // file は rootDir からの相対パス。
 func (s *Service) DocumentSymbols(ctx context.Context, rootDir, file string) ([]DocumentSymbol, error) {
