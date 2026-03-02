@@ -365,6 +365,11 @@ export class FileBrowser {
     // パンくずリスト
     this._wrapper.appendChild(this._createBreadcrumb());
 
+    // grep モードが有効な場合、フィルターバーを表示
+    if (this._grepMode) {
+      this._wrapper.appendChild(this._createGrepFilterBar());
+    }
+
     // ファイル一覧
     const list = document.createElement('div');
     list.className = 'fb-list';
@@ -391,7 +396,7 @@ export class FileBrowser {
     const nav = document.createElement('nav');
     nav.className = 'fb-breadcrumb';
 
-    // 検索モード中は「戻る」ボタンのみ表示
+    // 検索モード中
     if (this._searchMode) {
       const backBtn = document.createElement('button');
       backBtn.className = 'fb-breadcrumb-back';
@@ -400,10 +405,51 @@ export class FileBrowser {
       backBtn.addEventListener('click', () => this._exitSearchMode());
       nav.appendChild(backBtn);
 
-      const label = document.createElement('span');
-      label.className = 'fb-search-result-label';
-      label.textContent = `"${this._searchQuery}" の検索結果`;
-      nav.appendChild(label);
+      if (this._grepMode) {
+        // grep モード: 検索ボックス + モード切替を結果画面でも表示
+        const searchBox = document.createElement('div');
+        searchBox.className = 'fb-search-box';
+
+        const modeToggle = document.createElement('button');
+        modeToggle.className = 'fb-search-mode-toggle fb-search-mode-toggle--active';
+        modeToggle.textContent = 'Grep';
+        modeToggle.title = 'Full-text search mode';
+        modeToggle.setAttribute('aria-label', 'Toggle search mode');
+        modeToggle.addEventListener('click', () => {
+          this._grepMode = false;
+          this._exitSearchMode();
+        });
+        searchBox.appendChild(modeToggle);
+
+        const searchInput = document.createElement('input');
+        searchInput.type = 'search';
+        searchInput.className = 'fb-search-input';
+        searchInput.placeholder = 'Grep...';
+        searchInput.value = this._grepQuery;
+        searchInput.setAttribute('aria-label', 'Grep検索');
+        searchInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            const q = searchInput.value.trim();
+            if (q) {
+              this._grepQuery = q;
+              this._searchQuery = q;
+              this._handleGrepSearch(q);
+            }
+          }
+          if (e.key === 'Escape') {
+            this._exitSearchMode();
+          }
+        });
+        this._searchInputEl = searchInput;
+        searchBox.appendChild(searchInput);
+        nav.appendChild(searchBox);
+      } else {
+        const label = document.createElement('span');
+        label.className = 'fb-search-result-label';
+        label.textContent = `"${this._searchQuery}" の検索結果`;
+        nav.appendChild(label);
+      }
 
       return nav;
     }
@@ -560,6 +606,13 @@ export class FileBrowser {
     globInput.setAttribute('aria-label', 'Glob filter');
     globInput.addEventListener('input', () => {
       this._grepGlob = globInput.value;
+      // デバウンス付きで再検索
+      if (this._grepQuery) {
+        if (this._grepDebounceTimer) clearTimeout(this._grepDebounceTimer);
+        this._grepDebounceTimer = setTimeout(() => {
+          this._handleGrepSearch(this._grepQuery);
+        }, 400);
+      }
     });
     bar.appendChild(globInput);
 
@@ -572,6 +625,10 @@ export class FileBrowser {
     caseBtn.addEventListener('click', () => {
       this._grepCaseSensitive = !this._grepCaseSensitive;
       caseBtn.classList.toggle('fb-grep-filter-btn--active', this._grepCaseSensitive);
+      // 即座に再検索
+      if (this._grepQuery) {
+        this._handleGrepSearch(this._grepQuery);
+      }
     });
     bar.appendChild(caseBtn);
 
@@ -584,6 +641,10 @@ export class FileBrowser {
     regexBtn.addEventListener('click', () => {
       this._grepRegex = !this._grepRegex;
       regexBtn.classList.toggle('fb-grep-filter-btn--active', this._grepRegex);
+      // 即座に再検索
+      if (this._grepQuery) {
+        this._handleGrepSearch(this._grepQuery);
+      }
     });
     bar.appendChild(regexBtn);
 
