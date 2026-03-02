@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -599,6 +600,553 @@ func TestResponse_JSON(t *testing.T) {
 	}
 	if decoded.Results[0].Path != "file.go" {
 		t.Errorf("Path = %q, want %q", decoded.Results[0].Path, "file.go")
+	}
+}
+
+// --- GrepSearcher テスト ---
+
+func TestGrepSearcher_Search(t *testing.T) {
+	if _, err := exec.LookPath("grep"); err != nil {
+		t.Skip("grep not available")
+	}
+
+	root := setupTestDir(t)
+	s := &GrepSearcher{}
+
+	tests := []struct {
+		name         string
+		query        string
+		opts         Options
+		wantMinCount int
+		wantPaths    []string
+		wantNotPaths []string
+		wantEmpty    bool
+	}{
+		{
+			name:         "基本的な検索: Hello",
+			query:        "Hello",
+			opts:         Options{},
+			wantMinCount: 2,
+			wantPaths:    []string{"hello.go", "readme.md"},
+		},
+		{
+			name:         "大文字小文字を区別しない検索（デフォルト）",
+			query:        "hello",
+			opts:         Options{CaseSensitive: false},
+			wantMinCount: 2,
+			wantPaths:    []string{"hello.go", "readme.md"},
+		},
+		{
+			name:         "大文字小文字を区別する検索",
+			query:        "Hello",
+			opts:         Options{CaseSensitive: true},
+			wantMinCount: 1,
+			wantPaths:    []string{"hello.go"},
+		},
+		{
+			name:         "固定文字列検索（デフォルト: Regex=false）",
+			query:        "func",
+			opts:         Options{},
+			wantMinCount: 2,
+		},
+		{
+			name:         "正規表現検索",
+			query:        "func.*\\(\\)",
+			opts:         Options{Regex: true},
+			wantMinCount: 2,
+		},
+		{
+			name:         "Globフィルタ: .goファイルのみ",
+			query:        "Hello",
+			opts:         Options{Glob: "*.go"},
+			wantMinCount: 1,
+			wantPaths:    []string{"hello.go"},
+			wantNotPaths: []string{"readme.md"},
+		},
+		{
+			name:      "空クエリ: 結果なし",
+			query:     "",
+			opts:      Options{},
+			wantEmpty: true,
+		},
+		{
+			name:      "マッチなし",
+			query:     "zzz_nonexistent_pattern_zzz",
+			opts:      Options{},
+			wantEmpty: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, err := s.Search(context.Background(), tt.query, root, tt.opts)
+			if err != nil {
+				t.Fatalf("Search(%q) error: %v", tt.query, err)
+			}
+
+			if tt.wantEmpty {
+				if len(results) != 0 {
+					t.Errorf("expected empty results, got %d", len(results))
+				}
+				return
+			}
+
+			if len(results) < tt.wantMinCount {
+				t.Errorf("got %d results, want at least %d", len(results), tt.wantMinCount)
+			}
+
+			resultPaths := make(map[string]bool)
+			for _, r := range results {
+				resultPaths[r.Path] = true
+			}
+			for _, wantPath := range tt.wantPaths {
+				if !resultPaths[wantPath] {
+					t.Errorf("expected path %q in results, got paths: %v", wantPath, resultPathsList(results))
+				}
+			}
+			for _, notPath := range tt.wantNotPaths {
+				if resultPaths[notPath] {
+					t.Errorf("did not expect path %q in results", notPath)
+				}
+			}
+		})
+	}
+}
+
+func TestGrepSearcher_ContextCancellation(t *testing.T) {
+	if _, err := exec.LookPath("grep"); err != nil {
+		t.Skip("grep not available")
+	}
+
+	root := setupTestDir(t)
+	s := &GrepSearcher{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // 即座にキャンセル
+
+	results, err := s.Search(ctx, "Hello", root, Options{})
+	if err != nil {
+		if !strings.Contains(err.Error(), "context canceled") &&
+			!strings.Contains(err.Error(), "signal: killed") &&
+			!strings.Contains(err.Error(), "cancelled") {
+			t.Errorf("unexpected error: %v", err)
+		}
+		return
+	}
+	_ = results
+}
+
+func TestGrepSearcher_Name(t *testing.T) {
+	s := &GrepSearcher{}
+	if s.Name() != "grep" {
+		t.Errorf("Name() = %q, want %q", s.Name(), "grep")
+	}
+}
+
+func TestGrepSearcher_BinarySkipping(t *testing.T) {
+	if _, err := exec.LookPath("grep"); err != nil {
+		t.Skip("grep not available")
+	}
+
+	root := setupTestDir(t)
+	s := &GrepSearcher{}
+
+	// binary.bin にはnullバイトが含まれているのでスキップされるはず
+	// "binary.bin" がパスに含まれる結果がないこと
+	results, err := s.Search(context.Background(), "Hello", root, Options{})
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+
+	for _, r := range results {
+		if strings.Contains(r.Path, "binary.bin") {
+			t.Errorf("binary file should be skipped, but found result in %q", r.Path)
+		}
+	}
+}
+
+func TestGrepSearcher_ResultFields(t *testing.T) {
+	if _, err := exec.LookPath("grep"); err != nil {
+		t.Skip("grep not available")
+	}
+
+	root := setupTestDir(t)
+	s := &GrepSearcher{}
+
+	results, err := s.Search(context.Background(), "Hello", root, Options{CaseSensitive: true})
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+
+	if len(results) == 0 {
+		t.Fatal("expected at least one result")
+	}
+
+	var found bool
+	for _, r := range results {
+		if r.Path == "hello.go" && strings.Contains(r.LineText, "Hello") {
+			found = true
+
+			if r.LineNumber <= 0 {
+				t.Errorf("LineNumber should be positive, got %d", r.LineNumber)
+			}
+
+			if filepath.IsAbs(r.Path) {
+				t.Errorf("Path should be relative, got %q", r.Path)
+			}
+
+			// MatchStart/MatchEnd が設定されていること（固定文字列検索）
+			if r.MatchEnd <= r.MatchStart {
+				t.Errorf("invalid match range: start=%d, end=%d", r.MatchStart, r.MatchEnd)
+			}
+
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("expected to find Hello in hello.go, got results: %v", results)
+	}
+}
+
+// --- BuiltinSearcher テスト ---
+
+func TestBuiltinSearcher_Search(t *testing.T) {
+	root := setupTestDir(t)
+	s := &BuiltinSearcher{}
+
+	tests := []struct {
+		name         string
+		query        string
+		opts         Options
+		wantMinCount int
+		wantPaths    []string
+		wantNotPaths []string
+		wantEmpty    bool
+	}{
+		{
+			name:         "基本的な検索: Hello",
+			query:        "Hello",
+			opts:         Options{},
+			wantMinCount: 2,
+			wantPaths:    []string{"hello.go", "readme.md"},
+		},
+		{
+			name:         "大文字小文字を区別しない検索（デフォルト）",
+			query:        "hello",
+			opts:         Options{CaseSensitive: false},
+			wantMinCount: 2,
+			wantPaths:    []string{"hello.go", "readme.md"},
+		},
+		{
+			name:         "大文字小文字を区別する検索",
+			query:        "Hello",
+			opts:         Options{CaseSensitive: true},
+			wantMinCount: 1,
+			wantPaths:    []string{"hello.go"},
+		},
+		{
+			name:         "固定文字列検索（デフォルト: Regex=false）",
+			query:        "func",
+			opts:         Options{},
+			wantMinCount: 2,
+		},
+		{
+			name:         "正規表現検索",
+			query:        "func.*\\(\\)",
+			opts:         Options{Regex: true},
+			wantMinCount: 2,
+		},
+		{
+			name:      "空クエリ: 結果なし",
+			query:     "",
+			opts:      Options{},
+			wantEmpty: true,
+		},
+		{
+			name:      "マッチなし",
+			query:     "zzz_nonexistent_pattern_zzz",
+			opts:      Options{},
+			wantEmpty: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, err := s.Search(context.Background(), tt.query, root, tt.opts)
+			if err != nil {
+				t.Fatalf("Search(%q) error: %v", tt.query, err)
+			}
+
+			if tt.wantEmpty {
+				if len(results) != 0 {
+					t.Errorf("expected empty results, got %d", len(results))
+				}
+				return
+			}
+
+			if len(results) < tt.wantMinCount {
+				t.Errorf("got %d results, want at least %d", len(results), tt.wantMinCount)
+			}
+
+			resultPaths := make(map[string]bool)
+			for _, r := range results {
+				resultPaths[r.Path] = true
+			}
+			for _, wantPath := range tt.wantPaths {
+				if !resultPaths[wantPath] {
+					t.Errorf("expected path %q in results, got paths: %v", wantPath, resultPathsList(results))
+				}
+			}
+			for _, notPath := range tt.wantNotPaths {
+				if resultPaths[notPath] {
+					t.Errorf("did not expect path %q in results", notPath)
+				}
+			}
+		})
+	}
+}
+
+func TestBuiltinSearcher_SkipDirectories(t *testing.T) {
+	root := t.TempDir()
+
+	// .git, node_modules, vendor ディレクトリを作成
+	for _, dir := range []string{".git", "node_modules", "vendor", "src"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, dir, "target.txt"), []byte("search_target_text\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	s := &BuiltinSearcher{}
+	results, err := s.Search(context.Background(), "search_target_text", root, Options{})
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+
+	// src/target.txt のみがヒットし、.git, node_modules, vendor はスキップされること
+	resultPaths := make(map[string]bool)
+	for _, r := range results {
+		resultPaths[r.Path] = true
+	}
+
+	if !resultPaths[filepath.Join("src", "target.txt")] {
+		t.Errorf("expected src/target.txt in results, got: %v", resultPathsList(results))
+	}
+
+	for _, dir := range []string{".git", "node_modules", "vendor"} {
+		p := filepath.Join(dir, "target.txt")
+		if resultPaths[p] {
+			t.Errorf("expected %q to be skipped, but found in results", p)
+		}
+	}
+}
+
+func TestBuiltinSearcher_SkipBinaryFiles(t *testing.T) {
+	root := setupTestDir(t)
+	s := &BuiltinSearcher{}
+
+	results, err := s.Search(context.Background(), "Hello", root, Options{})
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+
+	for _, r := range results {
+		if strings.Contains(r.Path, "binary.bin") {
+			t.Errorf("binary file should be skipped, but found result in %q", r.Path)
+		}
+	}
+}
+
+func TestBuiltinSearcher_SkipLargeFiles(t *testing.T) {
+	root := t.TempDir()
+
+	// 1MB超のファイルを作成
+	largeContent := strings.Repeat("findme line\n", 100000) // ~1.2MB
+	if err := os.WriteFile(filepath.Join(root, "large.txt"), []byte(largeContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 通常サイズのファイル
+	if err := os.WriteFile(filepath.Join(root, "small.txt"), []byte("findme here\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &BuiltinSearcher{}
+	results, err := s.Search(context.Background(), "findme", root, Options{})
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+
+	resultPaths := make(map[string]bool)
+	for _, r := range results {
+		resultPaths[r.Path] = true
+	}
+
+	if !resultPaths["small.txt"] {
+		t.Error("expected small.txt in results")
+	}
+	if resultPaths["large.txt"] {
+		t.Error("expected large.txt to be skipped (>1MB)")
+	}
+}
+
+func TestBuiltinSearcher_ContextCancellation(t *testing.T) {
+	root := setupTestDir(t)
+	s := &BuiltinSearcher{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // 即座にキャンセル
+
+	results, err := s.Search(ctx, "Hello", root, Options{})
+	if err != nil {
+		if !strings.Contains(err.Error(), "context canceled") &&
+			!strings.Contains(err.Error(), "cancelled") {
+			t.Errorf("unexpected error: %v", err)
+		}
+		return
+	}
+	// キャンセルされたので結果は空のはず
+	_ = results
+}
+
+func TestBuiltinSearcher_Name(t *testing.T) {
+	s := &BuiltinSearcher{}
+	if s.Name() != "builtin" {
+		t.Errorf("Name() = %q, want %q", s.Name(), "builtin")
+	}
+}
+
+func TestBuiltinSearcher_MaxResults(t *testing.T) {
+	root := t.TempDir()
+
+	// 多くのマッチを含むファイルを作成
+	content := strings.Repeat("match_target line\n", 100)
+	for i := 0; i < 10; i++ {
+		fname := filepath.Join(root, strings.Repeat("f", i+1)+".txt")
+		if err := os.WriteFile(fname, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	s := &BuiltinSearcher{}
+	results, err := s.Search(context.Background(), "match_target", root, Options{MaxResults: 5})
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+
+	if len(results) != 5 {
+		t.Errorf("got %d results, want exactly 5", len(results))
+	}
+}
+
+func TestBuiltinSearcher_ResultFields(t *testing.T) {
+	root := setupTestDir(t)
+	s := &BuiltinSearcher{}
+
+	results, err := s.Search(context.Background(), "Hello", root, Options{CaseSensitive: true})
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+
+	if len(results) == 0 {
+		t.Fatal("expected at least one result")
+	}
+
+	var found bool
+	for _, r := range results {
+		if r.Path == "hello.go" && strings.Contains(r.LineText, "Hello") {
+			found = true
+
+			if r.LineNumber <= 0 {
+				t.Errorf("LineNumber should be positive, got %d", r.LineNumber)
+			}
+
+			if filepath.IsAbs(r.Path) {
+				t.Errorf("Path should be relative, got %q", r.Path)
+			}
+
+			if r.MatchEnd <= r.MatchStart {
+				t.Errorf("invalid match range: start=%d, end=%d", r.MatchStart, r.MatchEnd)
+			}
+
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("expected to find Hello in hello.go, got results: %v", results)
+	}
+}
+
+// --- クロスエンジンテスト ---
+
+func TestCrossEngine_SameResults(t *testing.T) {
+	root := setupTestDir(t)
+
+	// 利用可能なエンジンを集める
+	engines := []Searcher{&BuiltinSearcher{}}
+	if _, err := exec.LookPath("grep"); err == nil {
+		engines = append(engines, &GrepSearcher{})
+	}
+	if _, err := exec.LookPath("rg"); err == nil {
+		engines = append(engines, &RipgrepSearcher{})
+	}
+
+	if len(engines) < 2 {
+		t.Skip("need at least 2 engines for cross-engine test")
+	}
+
+	query := "Hello"
+	opts := Options{CaseSensitive: true}
+
+	// 各エンジンの検索結果からファイルパスのセットを収集
+	enginePaths := make(map[string]map[string]bool)
+	for _, eng := range engines {
+		results, err := eng.Search(context.Background(), query, root, opts)
+		if err != nil {
+			t.Fatalf("%s: Search error: %v", eng.Name(), err)
+		}
+
+		pathSet := make(map[string]bool)
+		for _, r := range results {
+			pathSet[r.Path] = true
+		}
+		enginePaths[eng.Name()] = pathSet
+	}
+
+	// すべてのエンジンが同じファイルセットを返すこと
+	var refName string
+	var refPaths map[string]bool
+	for name, paths := range enginePaths {
+		if refPaths == nil {
+			refName = name
+			refPaths = paths
+			continue
+		}
+
+		// refPaths と paths が同じセットであること
+		for p := range refPaths {
+			if !paths[p] {
+				t.Errorf("%s has path %q but %s does not", refName, p, name)
+			}
+		}
+		for p := range paths {
+			if !refPaths[p] {
+				t.Errorf("%s has path %q but %s does not", name, p, refName)
+			}
+		}
+	}
+}
+
+// --- NewSearcher 更新テスト ---
+
+func TestNewSearcher_ReturnsNonNil(t *testing.T) {
+	s := NewSearcher()
+	if s == nil {
+		t.Fatal("NewSearcher() returned nil — should always return a searcher (at minimum BuiltinSearcher)")
 	}
 }
 
