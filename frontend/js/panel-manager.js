@@ -16,6 +16,10 @@ export class PanelManager {
    * @param {function(Array): void} [options.onNotificationUpdate] - 通知更新
    * @param {function(string): void} [options.onConnectionStateChange] - 接続状態変更
    * @param {function(Panel): void} [options.onFocusChange] - フォーカス変更通知
+   * @param {function(string, string): void} [options.onFileBrowserNavigate] - ファイルブラウザ ディレクトリ移動時
+   * @param {function(string, string): void} [options.onFileBrowserPreview] - ファイルブラウザ プレビュー表示時
+   * @param {function(string, string): void} [options.onFileBrowserPreviewClose] - ファイルブラウザ プレビュー閉じた時
+   * @param {function(string, Object): void} [options.onGitBrowserNavigate] - Gitブラウザ 内部遷移時
    */
   constructor(options) {
     this._container = options.container;
@@ -25,6 +29,10 @@ export class PanelManager {
     this._onNotificationUpdateCb = options.onNotificationUpdate || null;
     this._onConnectionStateChangeCb = options.onConnectionStateChange || null;
     this._onFocusChangeCb = options.onFocusChange || null;
+    this._onFileBrowserNavigateCb = options.onFileBrowserNavigate || null;
+    this._onFileBrowserPreviewCb = options.onFileBrowserPreview || null;
+    this._onFileBrowserPreviewCloseCb = options.onFileBrowserPreviewClose || null;
+    this._onGitBrowserNavigateCb = options.onGitBrowserNavigate || null;
 
     /** @type {Panel} 左パネル（常に存在） */
     this._leftPanel = null;
@@ -94,6 +102,26 @@ export class PanelManager {
       onConnectionStateChange: (state) => {
         if (this._onConnectionStateChangeCb) {
           this._onConnectionStateChangeCb(state);
+        }
+      },
+      onFileBrowserNavigate: (session, path) => {
+        if (this._onFileBrowserNavigateCb) {
+          this._onFileBrowserNavigateCb(session, path);
+        }
+      },
+      onFileBrowserPreview: (session, filePath) => {
+        if (this._onFileBrowserPreviewCb) {
+          this._onFileBrowserPreviewCb(session, filePath);
+        }
+      },
+      onFileBrowserPreviewClose: (session, dirPath) => {
+        if (this._onFileBrowserPreviewCloseCb) {
+          this._onFileBrowserPreviewCloseCb(session, dirPath);
+        }
+      },
+      onGitBrowserNavigate: (session, gitState) => {
+        if (this._onGitBrowserNavigateCb) {
+          this._onGitBrowserNavigateCb(session, gitState);
         }
       },
     });

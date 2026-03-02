@@ -96,11 +96,13 @@ export class FileBrowser {
    * @param {Object} [options]
    * @param {function(string, string, Object): void} [options.onFileSelect] - ファイル選択時のコールバック (session, path, entry)
    * @param {function(string): void} [options.onNavigate] - ディレクトリ移動時のコールバック (path)
+   * @param {function(string, string): void} [options.onPreviewClose] - プレビュー閉じた時のコールバック (session, dirPath)
    */
   constructor(container, options = {}) {
     this._container = container;
     this._onFileSelect = options.onFileSelect || null;
     this._onNavigate = options.onNavigate || null;
+    this._onPreviewClose = options.onPreviewClose || null;
 
     /** @type {string|null} 現在のセッション名 */
     this._session = null;
@@ -122,6 +124,9 @@ export class FileBrowser {
 
     /** @type {import('./file-preview.js').FilePreview|null} プレビューインスタンス */
     this._preview = null;
+
+    /** @type {string|null} 現在プレビュー中のファイルパス */
+    this._previewPath = null;
 
     /** @type {number} フォントサイズ（px） */
     const savedSize = parseInt(localStorage.getItem('palmux-fb-font-size'), 10);
@@ -200,10 +205,28 @@ export class FileBrowser {
   }
 
   /**
+   * 現在プレビュー中のファイルパスを返す。
+   * プレビューしていない場合は null。
+   * @returns {string|null}
+   */
+  getPreviewFile() {
+    return this._previewPath;
+  }
+
+  /**
    * 指定パスに移動する（ブラウザ履歴へのプッシュなし）。
+   * プレビュー表示中の場合は閉じてからディレクトリを表示する。
    * @param {string} path - 移動先の相対パス
    */
   async navigateTo(path) {
+    // プレビュー表示中なら閉じてラッパーを再接続
+    if (this._preview) {
+      this._preview.dispose();
+      this._preview = null;
+      this._previewPath = null;
+      this._container.innerHTML = '';
+      this._container.appendChild(this._wrapper);
+    }
     await this._loadDirectory(path, { silent: true });
   }
 
@@ -994,6 +1017,9 @@ export class FileBrowser {
       this._preview = null;
     }
 
+    // プレビュー中のファイルパスを追跡
+    this._previewPath = path;
+
     // コンテナの中身をクリアしてプレビューに置き換え
     this._container.innerHTML = '';
 
@@ -1007,13 +1033,18 @@ export class FileBrowser {
           this._preview.dispose();
           this._preview = null;
         }
+        this._previewPath = null;
         this._container.innerHTML = '';
         this._container.appendChild(this._wrapper);
         if (!this._searchMode) {
-          // 通常のディレクトリ一覧を再読み込み
-          this._loadDirectory(this._currentPath);
+          // 通常のディレクトリ一覧を再読み込み（silent: true で二重 push を防止）
+          this._loadDirectory(this._currentPath, { silent: true });
         }
         // 検索モード中は _wrapper に検索結果が残っているのでそのまま表示
+        // プレビューを閉じたことを通知
+        if (this._onPreviewClose) {
+          this._onPreviewClose(this._session, this._currentPath);
+        }
       },
       getRawURL: (s, p) => getFileRawURL(s, p),
       fetchFile: (s, p) => getFileContent(s, p),
@@ -1117,6 +1148,7 @@ export class FileBrowser {
     this._rootPath = null;
     this._currentPath = '.';
     this._pathSegments = [];
+    this._previewPath = null;
     this._wrapper = null;
     this._searchMode = false;
     this._searchQuery = '';
