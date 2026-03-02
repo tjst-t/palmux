@@ -1,0 +1,94 @@
+/* context-menu.css - 共通コンテキストメニュースタイル */
+
+/* Overlay: 全画面、タップ受けて閉じる */
+.context-menu-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.context-menu-overlay--visible {
+  opacity: 1;
+}
+
+/* Menu container */
+.context-menu {
+  background: #1a1a2e;
+  border: 1px solid #2a2a4a;
+  border-radius: 12px;
+  min-width: 200px;
+  max-width: 280px;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+/* Title */
+.context-menu__title {
+  padding: 14px 16px;
+  font-size: 13px;
+  color: #8888aa;
+  border-bottom: 1px solid #2a2a4a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Menu item (button) */
+.context-menu__item {
+  display: block;
+  width: 100%;
+  padding: 14px 16px;
+  min-height: 44px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid rgba(42, 42, 74, 0.3);
+  color: #e0e0e0;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.context-menu__item:last-child {
+  border-bottom: none;
+}
+
+.context-menu__item:hover {
+  background: rgba(126, 200, 227, 0.1);
+}
+
+.context-menu__item:active {
+  background: rgba(126, 200, 227, 0.2);
+}
+
+/* Danger variant */
+.context-menu__item--danger {
+  color: #e57373;
+}
+
+.context-menu__item--danger:hover {
+  background: rgba(229, 115, 115, 0.1);
+}
+
+/* Disabled state */
+.context-menu__item:disabled {
+  color: #555;
+  cursor: not-allowed;
+}
+
+.context-menu__item:disabled:hover {
+  background: none;
+}

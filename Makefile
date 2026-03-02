@@ -12,6 +12,7 @@ frontend:
 	  --bundle --minify --outdir=build
 	cp frontend/index.html frontend/build/
 	cp frontend/css/style.css frontend/build/
+	cp frontend/css/context-menu.css frontend/build/
 	cp frontend/css/filebrowser.css frontend/build/
 	cp frontend/css/gitbrowser.css frontend/build/
 	cp frontend/css/split.css frontend/build/
