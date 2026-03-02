@@ -2,6 +2,7 @@ package git
 
 import (
 	"errors"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -9,6 +10,9 @@ import (
 
 // ErrNotGitRepo はディレクトリが Git リポジトリでないことを示すエラー。
 var ErrNotGitRepo = errors.New("not a git repository")
+
+// ErrInvalidPath は不正なパスが指定されたことを示すエラー。
+var ErrInvalidPath = errors.New("invalid path")
 
 // CommandRunner は git コマンドの実行を抽象化する。
 // テスト時にはモック実装を注入する。
@@ -157,4 +161,57 @@ func (g *Git) Branches(dir string) ([]Branch, error) {
 		return nil, err
 	}
 	return ParseBranches(string(out)), nil
+}
+
+// validatePaths はパスのバリデーションを行う。
+// 空の配列、空文字列の要素、".." を含むパスを拒否する。
+func validatePaths(paths []string) error {
+	if len(paths) == 0 {
+		return fmt.Errorf("paths must not be empty: %w", ErrInvalidPath)
+	}
+	for _, p := range paths {
+		if p == "" {
+			return fmt.Errorf("path must not be empty string: %w", ErrInvalidPath)
+		}
+		// ".." を含むパスはディレクトリトラバーサル防止のため拒否
+		for _, part := range strings.Split(p, "/") {
+			if part == ".." {
+				return fmt.Errorf("path %q contains '..': %w", p, ErrInvalidPath)
+			}
+		}
+	}
+	return nil
+}
+
+// DiscardChanges はファイル単位のリバート（git checkout -- <paths>）を実行する。
+func (g *Git) DiscardChanges(dir string, paths []string) error {
+	if err := validatePaths(paths); err != nil {
+		return err
+	}
+	args := []string{"checkout", "--"}
+	args = append(args, paths...)
+	_, err := g.Cmd.RunInDir(dir, args...)
+	return err
+}
+
+// Stage はファイルのステージ（git add <paths>）を実行する。
+func (g *Git) Stage(dir string, paths []string) error {
+	if err := validatePaths(paths); err != nil {
+		return err
+	}
+	args := []string{"add"}
+	args = append(args, paths...)
+	_, err := g.Cmd.RunInDir(dir, args...)
+	return err
+}
+
+// Unstage はファイルのアンステージ（git reset HEAD <paths>）を実行する。
+func (g *Git) Unstage(dir string, paths []string) error {
+	if err := validatePaths(paths); err != nil {
+		return err
+	}
+	args := []string{"reset", "HEAD"}
+	args = append(args, paths...)
+	_, err := g.Cmd.RunInDir(dir, args...)
+	return err
 }
