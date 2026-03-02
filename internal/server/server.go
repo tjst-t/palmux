@@ -9,6 +9,7 @@ import (
 
 	"github.com/tjst-t/palmux/internal/git"
 	"github.com/tjst-t/palmux/internal/grep"
+	"github.com/tjst-t/palmux/internal/lsp"
 	"github.com/tjst-t/palmux/internal/tmux"
 )
 
@@ -49,6 +50,7 @@ type Server struct {
 	tmux          TmuxManager
 	gitCmd        git.CommandRunner
 	searcher      grep.Searcher
+	lsp           lsp.LSPService
 	token         string
 	basePath      string
 	claudePath    string
@@ -62,6 +64,7 @@ type Options struct {
 	Tmux           TmuxManager
 	GitCmd         git.CommandRunner // git コマンドランナー（nil の場合 RealCommandRunner を使用）
 	Searcher       grep.Searcher    // 全文検索エンジン（nil の場合 grep.NewSearcher() を使用）
+	LSP            lsp.LSPService    // LSP サービス（nil の場合 LSP 機能は無効）
 	Token          string
 	BasePath       string
 	ClaudePath     string // Claude コマンドのパス（デフォルト: "claude"）
@@ -92,6 +95,7 @@ func NewServer(opts Options) *Server {
 		tmux:          opts.Tmux,
 		gitCmd:        gitCmd,
 		searcher:      searcher,
+		lsp:           opts.LSP,
 		token:         opts.Token,
 		basePath:      NormalizeBasePath(opts.BasePath),
 		claudePath:    claudePath,
@@ -142,6 +146,10 @@ func NewServer(opts Options) *Server {
 	mux.Handle("POST /api/sessions/{session}/git/unstage", auth(s.handleGitUnstage()))
 	mux.Handle("POST /api/sessions/{session}/git/stage-hunk", auth(s.handleGitStageHunk()))
 	mux.Handle("POST /api/sessions/{session}/git/unstage-hunk", auth(s.handleGitUnstageHunk()))
+	mux.Handle("GET /api/sessions/{session}/lsp/status", auth(s.handleLspStatus()))
+	mux.Handle("GET /api/sessions/{session}/lsp/definition", auth(s.handleLspDefinition()))
+	mux.Handle("GET /api/sessions/{session}/lsp/references", auth(s.handleLspReferences()))
+	mux.Handle("GET /api/sessions/{session}/lsp/document-symbols", auth(s.handleLspDocumentSymbols()))
 	mux.Handle("POST /api/upload", auth(s.handleUploadImage()))
 	mux.Handle("POST /api/notifications", auth(s.handlePostNotification()))
 	mux.Handle("DELETE /api/notifications", auth(s.handleDeleteNotification()))

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"flag"
@@ -12,7 +13,9 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
+	"github.com/tjst-t/palmux/internal/lsp"
 	"github.com/tjst-t/palmux/internal/server"
 	"github.com/tjst-t/palmux/internal/tmux"
 )
@@ -87,10 +90,25 @@ func main() {
 		log.Printf("Cleaned up %d stale grouped session(s)", cleaned)
 	}
 
+	// LSP サービスを初期化（言語サーバーを自動検出）
+	lspConfigs := lsp.DetectServers()
+	var lspService lsp.LSPService
+	if len(lspConfigs) > 0 {
+		lspService = lsp.NewService(lspConfigs)
+		names := make([]string, len(lspConfigs))
+		for i, c := range lspConfigs {
+			names[i] = c.Command
+		}
+		log.Printf("LSP: detected %d language server(s): %v", len(lspConfigs), names)
+	} else {
+		log.Printf("LSP: no language servers detected")
+	}
+
 	// サーバーを生成
 	normalizedBasePath := server.NormalizeBasePath(*basePath)
 	srv := server.NewServer(server.Options{
 		Tmux:           mgr,
+		LSP:            lspService,
 		Token:          authToken,
 		BasePath:       normalizedBasePath,
 		ClaudePath:     *claudePath,
@@ -104,16 +122,23 @@ func main() {
 	// Hook スクリプト用の env ファイルを書き出す（ポート番号ごとに分離）
 	envPath := writeEnvFile(*port, authToken, normalizedBasePath)
 
-	// シグナルハンドラ: 終了時に env ファイルを削除
-	if envPath != "" {
-		go func() {
-			sigCh := make(chan os.Signal, 1)
-			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-			<-sigCh
+	// シグナルハンドラ: 終了時に env ファイルを削除し LSP サーバーを停止
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		<-sigCh
+		if lspService != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := lspService.Shutdown(ctx); err != nil {
+				log.Printf("LSP shutdown error: %v", err)
+			}
+		}
+		if envPath != "" {
 			os.Remove(envPath)
-			os.Exit(0)
-		}()
-	}
+		}
+		os.Exit(0)
+	}()
 
 	if *tlsCert != "" {
 		// TLS 証明書ファイルの存在チェック

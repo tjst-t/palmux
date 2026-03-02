@@ -212,6 +212,40 @@ Drawer のセッション名横にある📁ボタン、またはヘッダーの
 - **読み取り専用** — ファイルの閲覧のみ（編集・削除は不可）
 - **セキュリティ** — パストラバーサル防止、シンボリックリンクのルート外アクセス拒否
 
+## コード解析（LSP 連携）
+
+ファイルブラウザでコードファイルを開くと、LSP（Language Server Protocol）を利用したコード解析機能が使える。
+
+- **シンボルリンク** — 関数名・型名がクリック可能になり、定義元へジャンプ
+- **ナビゲーション履歴** — ブラウザのような戻る/進むボタンでジャンプ履歴を移動
+- **アウトライン** — ファイル内のシンボル一覧を表示し、タップで該当行にスクロール
+
+### 対応言語と言語サーバー
+
+Palmux はシステムにインストールされた言語サーバーを自動検出する。使いたい言語のサーバーを事前にインストールしておくこと。
+
+| 言語 | 言語サーバー | インストール |
+|---|---|---|
+| Go | `gopls` | `go install golang.org/x/tools/gopls@latest` |
+| TypeScript / JavaScript | `typescript-language-server` | `npm i -g typescript-language-server typescript` |
+| Python | `pyright-langserver` | `npm i -g pyright` |
+| Rust | `rust-analyzer` | `rustup component add rust-analyzer` |
+| C / C++ | `clangd` | `apt install clangd` / `brew install llvm` |
+| Java | `jdtls` | [Eclipse JDT LS](https://github.com/eclipse-jdtls/eclipse.jdt.ls) |
+| Ruby | `solargraph` | `gem install solargraph` |
+| PHP | `phpactor` | [Phpactor](https://phpactor.readthedocs.io/) |
+| Swift | `sourcekit-lsp` | Xcode に同梱 |
+| Kotlin | `kotlin-language-server` | [kotlin-language-server](https://github.com/fwcd/kotlin-language-server) |
+| C# | `OmniSharp` | [OmniSharp](https://github.com/OmniSharp/omnisharp-roslyn) |
+| Dart | `dart language-server` | Dart SDK に同梱 |
+| Lua | `lua-language-server` | [lua-language-server](https://github.com/LuaLS/lua-language-server) |
+| Zig | `zls` | [ZLS](https://github.com/zigtools/zls) |
+| Elixir | `elixir-ls` | [ElixirLS](https://github.com/elixir-lsp/elixir-ls) |
+| Haskell | `haskell-language-server` | `ghcup install hls` |
+| Bash | `bash-language-server` | `npm i -g bash-language-server` |
+
+言語サーバーがインストールされていない場合、その言語のコード解析機能は無効になる（エラーにはならない）。
+
 ## 開発
 
 ```bash

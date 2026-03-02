@@ -1,8 +1,9 @@
 // filebrowser.js - ファイルブラウザ UI
 // セッションの CWD をルートとしてディレクトリを閲覧する
 
-import { getSessionCwd, listFiles, searchFiles, grepFiles, getFileContent, getFileRawURL, saveFile } from './api.js';
+import { getSessionCwd, listFiles, searchFiles, grepFiles, getFileContent, getFileRawURL, saveFile, getLspStatus, getLspDefinition, getLspReferences, getLspDocumentSymbols } from './api.js';
 import { FilePreview } from './file-preview.js';
+import { NavigationStack } from './navigation-stack.js';
 
 /**
  * ファイル拡張子からアイコンを決定する。
@@ -128,6 +129,9 @@ export class FileBrowser {
 
     /** @type {boolean} dispose済みフラグ */
     this._disposed = false;
+
+    /** @type {import('./navigation-stack.js').NavigationStack} ナビゲーション履歴 */
+    this._navStack = new NavigationStack();
 
     /** @type {boolean} 検索モードフラグ */
     this._searchMode = false;
@@ -1023,7 +1027,29 @@ export class FileBrowser {
           });
         }
       },
+      // LSP options
+      getLspStatus: (s) => getLspStatus(s),
+      getLspDefinition: (s, f, l, c) => getLspDefinition(s, f, l, c),
+      getLspReferences: (s, f, l, c) => getLspReferences(s, f, l, c),
+      getLspDocumentSymbols: (s, f) => getLspDocumentSymbols(s, f),
+      navStack: this._navStack,
+      onNavigate: (file, line) => {
+        // Navigate to a different file from a definition jump
+        const parts = file.split('/');
+        const name = parts[parts.length - 1];
+        const ext = name.includes('.') ? name.substring(name.lastIndexOf('.')) : '';
+        this.showPreview(session, file, { name, extension: ext, size: 0 }, { lineNumber: line });
+      },
     });
+
+    // If scrollToLine was provided, scroll after content loads
+    if (scrollToLine) {
+      setTimeout(() => {
+        if (this._preview) {
+          this._preview.scrollToLine(scrollToLine);
+        }
+      }, 500);
+    }
   }
 
   /**

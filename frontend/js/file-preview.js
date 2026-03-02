@@ -287,6 +287,12 @@ export class FilePreview {
    * @param {function(string, string): string} [options.getRawURL] - Function to get raw file URL (session, path) => url
    * @param {function(string, string): Promise<Object>} [options.fetchFile] - Function to fetch file content (session, path) => Promise
    * @param {function(string, string, string): Promise<Object>} [options.saveFile] - Function to save file content (session, path, content) => Promise
+   * @param {function(string): Promise<Object>} [options.getLspStatus] - Function to get LSP status (session) => Promise
+   * @param {function(string, string, number, number): Promise<Object>} [options.getLspDefinition] - Function to get definition (session, file, line, col) => Promise
+   * @param {function(string, string, number, number): Promise<Object>} [options.getLspReferences] - Function to get references (session, file, line, col) => Promise
+   * @param {function(string, string): Promise<Object>} [options.getLspDocumentSymbols] - Function to get document symbols (session, file) => Promise
+   * @param {import('./navigation-stack.js').NavigationStack} [options.navStack] - Shared navigation stack
+   * @param {function(string, number): void} [options.onNavigate] - Callback for cross-file navigation (file, line) => void
    */
   constructor(container, options) {
     this._container = container;
@@ -328,6 +334,21 @@ export class FilePreview {
     this._searchQuery = '';
     /** @type {number} 最後にマッチした末尾位置（検索ボックスフォーカス中の連続検索用） */
     this._searchMatchEnd = 0;
+
+    // LSP integration
+    this._onNavigate = options.onNavigate || null;
+    this._getLspStatus = options.getLspStatus || null;
+    this._getLspDefinition = options.getLspDefinition || null;
+    this._getLspReferences = options.getLspReferences || null;
+    this._getLspDocumentSymbols = options.getLspDocumentSymbols || null;
+    this._navStack = options.navStack || null;
+    this._lspAvailable = false;
+    this._symbols = [];
+    this._navBackBtn = null;
+    this._navForwardBtn = null;
+    this._outlineBtn = null;
+    this._outlinePanel = null;
+    this._referencesPanel = null;
 
     this._render();
     this._loadContent();
@@ -1010,6 +1031,11 @@ export class FilePreview {
           if (this._isEditable) {
             this._addEditToggle();
           }
+
+          // Initialize LSP for code and plaintext files
+          if (previewType === 'code' || previewType === 'plaintext') {
+            this._initLsp();
+          }
           break;
         }
         default: {
@@ -1377,6 +1403,507 @@ export class FilePreview {
     return notice;
   }
 
+  // --- LSP Integration Methods ---
+
+  /**
+   * Initialize LSP: check availability, fetch symbols, and apply links.
+   */
+  async _initLsp() {
+    if (!this._getLspStatus) return;
+
+    try {
+      const status = await this._getLspStatus(this._session);
+      if (this._disposed || !status || !status.available) return;
+      this._lspAvailable = true;
+
+      // Add navigation buttons if navStack provided
+      if (this._navStack) {
+        this._addNavigationButtons();
+      }
+
+      // Apply symbol links to all identifiers (independent of documentSymbols)
+      this._applySymbolLinks();
+
+      // Fetch document symbols for outline panel (optional)
+      if (this._getLspDocumentSymbols) {
+        const result = await this._getLspDocumentSymbols(this._session, this._path);
+        if (this._disposed || !result || !result.symbols) return;
+        this._symbols = result.symbols;
+        this._addOutlineButton();
+      }
+    } catch (err) {
+      console.error('LSP init failed:', err);
+    }
+  }
+
+  /**
+   * Make identifiers clickable in the code table.
+   * All identifier-like tokens (2+ chars) become clickable,
+   * except those inside comments, strings, keywords, etc.
+   * Clicking calls LSP definition; no-ops if no definition found.
+   */
+  _applySymbolLinks() {
+    if (!this._contentEl) return;
+
+    const rows = this._contentEl.querySelectorAll('.fp-code-table tbody tr');
+    if (!rows.length) return;
+
+    // hljs classes to skip: non-navigable tokens
+    const SKIP_CLASSES = ['hljs-comment', 'hljs-string', 'hljs-number', 'hljs-keyword', 'hljs-literal', 'hljs-meta', 'hljs-doctag'];
+
+    // Process each line
+    for (let i = 0; i < rows.length; i++) {
+      const codeTd = rows[i].querySelector('.fp-code-line');
+      if (!codeTd) continue;
+
+      const lineNum = i + 1; // 1-based
+      this._wrapIdentifiersInLine(codeTd, lineNum, SKIP_CLASSES);
+    }
+  }
+
+  /**
+   * Wrap all identifier occurrences in a code line with clickable spans.
+   * Handles multiple matches per text node. Skips text inside hljs spans
+   * for comments, strings, keywords, etc.
+   * @param {HTMLElement} codeTd - The code cell element
+   * @param {number} lineNum - 1-based line number
+   * @param {Array<string>} skipClasses - hljs class names to skip
+   */
+  _wrapIdentifiersInLine(codeTd, lineNum, skipClasses) {
+    // Collect text nodes with their character offset within the line
+    const walker = document.createTreeWalker(codeTd, NodeFilter.SHOW_TEXT);
+    const entries = [];
+    let node;
+    let offsetAcc = 0;
+    while ((node = walker.nextNode())) {
+      entries.push({ node, offset: offsetAcc });
+      offsetAcc += node.textContent.length;
+    }
+
+    for (const { node: textNode, offset: nodeOffset } of entries) {
+      // Skip text inside comment/string/keyword/number spans
+      const parentEl = textNode.parentElement;
+      if (parentEl && skipClasses.some(cls => parentEl.classList.contains(cls))) {
+        continue;
+      }
+
+      const text = textNode.textContent;
+      if (!text.trim()) continue;
+
+      // Find all identifier-like words (2+ chars, starts with letter or underscore)
+      const identPattern = /\b([A-Za-z_]\w+)\b/g;
+      const matches = [];
+      let m;
+      while ((m = identPattern.exec(text)) !== null) {
+        matches.push({ name: m[1], index: m.index, col: nodeOffset + m.index + 1 });
+      }
+      if (matches.length === 0) continue;
+
+      // Build replacement fragment with all matches wrapped
+      const parent = textNode.parentNode;
+      const fragment = document.createDocumentFragment();
+      let lastIdx = 0;
+
+      for (const match of matches) {
+        if (match.index > lastIdx) {
+          fragment.appendChild(document.createTextNode(text.substring(lastIdx, match.index)));
+        }
+
+        const link = document.createElement('span');
+        link.className = 'fp-symbol-link';
+        link.textContent = match.name;
+        link.title = match.name;
+        const col = match.col;
+        link.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this._handleSymbolClick(match.name, lineNum, col);
+        });
+        fragment.appendChild(link);
+
+        lastIdx = match.index + match.name.length;
+      }
+
+      if (lastIdx < text.length) {
+        fragment.appendChild(document.createTextNode(text.substring(lastIdx)));
+      }
+
+      parent.replaceChild(fragment, textNode);
+    }
+  }
+
+  /**
+   * Handle a symbol click: call LSP definition with the actual click position.
+   * @param {string} name - Symbol name
+   * @param {number} line - 1-based line number of the click
+   * @param {number} col - 1-based column number of the click
+   */
+  async _handleSymbolClick(name, line, col) {
+    if (!this._getLspDefinition) return;
+
+    try {
+      const result = await this._getLspDefinition(this._session, this._path, line, col);
+      if (!result || !result.locations || result.locations.length === 0) return;
+
+      const loc = result.locations[0];
+
+      // Skip if definition is outside the project (external library)
+      if (loc.file.startsWith('../') || loc.file.startsWith('/')) return;
+
+      // If definition is the same position (clicking on the definition itself),
+      // show references instead of jumping
+      if (loc.file === this._path && loc.line === line) {
+        this._showReferences(name, line, col);
+        return;
+      }
+
+      // Push current position to nav stack
+      if (this._navStack) {
+        this._navStack.push({ file: this._path, line: line, session: this._session });
+      }
+
+      if (loc.file === this._path) {
+        // Same file: scroll to the definition line
+        this._scrollToLine(loc.line);
+      } else {
+        // Different file: navigate
+        if (this._onNavigate) {
+          this._onNavigate(loc.file, loc.line);
+        }
+      }
+
+      this._updateNavigationButtons();
+    } catch (err) {
+      console.error('Definition jump failed:', err);
+    }
+  }
+
+  /**
+   * Show references panel for a symbol at the given position.
+   * Calls LSP references API and renders a list of reference locations.
+   * @param {string} name - Symbol name
+   * @param {number} line - 1-based line number
+   * @param {number} col - 1-based column number
+   */
+  async _showReferences(name, line, col) {
+    if (!this._getLspReferences) return;
+
+    try {
+      const result = await this._getLspReferences(this._session, this._path, line, col);
+      if (!result || !result.locations) return;
+
+      // Filter out the definition itself (same file, same line)
+      const refs = result.locations.filter(
+        loc => !(loc.file === this._path && loc.line === line)
+      );
+
+      this._renderReferencesPanel(name, refs);
+    } catch (err) {
+      console.error('References lookup failed:', err);
+    }
+  }
+
+  /**
+   * Render the references panel showing a list of reference locations.
+   * @param {string} name - Symbol name
+   * @param {Array<{file: string, line: number, column: number}>} locations - Reference locations
+   */
+  _renderReferencesPanel(name, locations) {
+    this._closeReferencesPanel();
+
+    const panel = document.createElement('div');
+    panel.className = 'fp-references-panel';
+
+    // Title bar
+    const titleBar = document.createElement('div');
+    titleBar.className = 'fp-references-title';
+
+    const titleText = document.createElement('span');
+    titleText.className = 'fp-references-title-text';
+    titleText.textContent = `"${name}" の参照 (${locations.length})`;
+    titleBar.appendChild(titleText);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'fp-references-close';
+    closeBtn.textContent = '\u2715'; // multiplication sign (close icon)
+    closeBtn.setAttribute('aria-label', 'Close references');
+    closeBtn.addEventListener('click', () => this._closeReferencesPanel());
+    titleBar.appendChild(closeBtn);
+
+    panel.appendChild(titleBar);
+
+    // Reference list
+    const list = document.createElement('div');
+    list.className = 'fp-references-list';
+
+    if (locations.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'fp-references-empty';
+      empty.textContent = '参照が見つかりませんでした';
+      list.appendChild(empty);
+    } else {
+      for (const loc of locations) {
+        const item = document.createElement('div');
+        item.className = 'fp-references-item';
+
+        const filePath = document.createElement('span');
+        filePath.className = 'fp-references-file';
+        filePath.textContent = loc.file;
+
+        const lineNum = document.createElement('span');
+        lineNum.className = 'fp-references-line';
+        lineNum.textContent = `:${loc.line}`;
+
+        item.appendChild(filePath);
+        item.appendChild(lineNum);
+
+        item.addEventListener('click', () => {
+          this._closeReferencesPanel();
+
+          // Push current position to nav stack
+          if (this._navStack) {
+            this._navStack.push({ file: this._path, line: loc.line, session: this._session });
+          }
+
+          if (loc.file === this._path) {
+            // Same file: scroll to line
+            this._scrollToLine(loc.line);
+          } else {
+            // Different file: navigate
+            if (this._onNavigate) {
+              this._onNavigate(loc.file, loc.line);
+            }
+          }
+
+          this._updateNavigationButtons();
+        });
+
+        list.appendChild(item);
+      }
+    }
+
+    panel.appendChild(list);
+    this._referencesPanel = panel;
+
+    // Insert before content area
+    this._wrapper.insertBefore(panel, this._contentEl);
+  }
+
+  /**
+   * Close and remove the references panel.
+   */
+  _closeReferencesPanel() {
+    if (this._referencesPanel) {
+      this._referencesPanel.remove();
+      this._referencesPanel = null;
+    }
+  }
+
+  /**
+   * Scroll to and highlight a specific line number.
+   * @param {number} lineNum - 1-based line number
+   */
+  _scrollToLine(lineNum) {
+    const rows = this._contentEl.querySelectorAll('.fp-code-table tbody tr');
+    const row = rows[lineNum - 1]; // 1-based to 0-based
+    if (!row) return;
+
+    // Remove previous highlights
+    this._contentEl.querySelectorAll('.fp-code-highlight').forEach(el =>
+      el.classList.remove('fp-code-highlight')
+    );
+    row.classList.add('fp-code-highlight');
+
+    // Scroll into view
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  /**
+   * Public method to scroll to a line (used by FileBrowser after navigation).
+   * @param {number} lineNum - 1-based line number
+   */
+  scrollToLine(lineNum) {
+    this._scrollToLine(lineNum);
+  }
+
+  /**
+   * Add navigation (back/forward) buttons to the header.
+   */
+  _addNavigationButtons() {
+    const navContainer = document.createElement('div');
+    navContainer.className = 'fp-nav-buttons';
+
+    const backBtn = document.createElement('button');
+    backBtn.className = 'fp-nav-btn';
+    backBtn.textContent = '\u2190'; // left arrow
+    backBtn.title = 'Go back';
+    backBtn.disabled = !this._navStack.canGoBack();
+    backBtn.addEventListener('click', () => this._navigateBack());
+    this._navBackBtn = backBtn;
+
+    const forwardBtn = document.createElement('button');
+    forwardBtn.className = 'fp-nav-btn';
+    forwardBtn.textContent = '\u2192'; // right arrow
+    forwardBtn.title = 'Go forward';
+    forwardBtn.disabled = !this._navStack.canGoForward();
+    forwardBtn.addEventListener('click', () => this._navigateForward());
+    this._navForwardBtn = forwardBtn;
+
+    navContainer.appendChild(backBtn);
+    navContainer.appendChild(forwardBtn);
+
+    // Insert after back button in header
+    const backBtnEl = this._headerEl.querySelector('.fp-back-btn');
+    if (backBtnEl && backBtnEl.nextSibling) {
+      this._headerEl.insertBefore(navContainer, backBtnEl.nextSibling);
+    } else {
+      this._headerEl.appendChild(navContainer);
+    }
+  }
+
+  /**
+   * Navigate back in the navigation stack.
+   */
+  _navigateBack() {
+    if (!this._navStack || !this._navStack.canGoBack()) return;
+    const loc = this._navStack.back();
+    if (!loc) return;
+
+    if (loc.file === this._path) {
+      this._scrollToLine(loc.line);
+    } else if (this._onNavigate) {
+      this._onNavigate(loc.file, loc.line);
+    }
+    this._updateNavigationButtons();
+  }
+
+  /**
+   * Navigate forward in the navigation stack.
+   */
+  _navigateForward() {
+    if (!this._navStack || !this._navStack.canGoForward()) return;
+    const loc = this._navStack.forward();
+    if (!loc) return;
+
+    if (loc.file === this._path) {
+      this._scrollToLine(loc.line);
+    } else if (this._onNavigate) {
+      this._onNavigate(loc.file, loc.line);
+    }
+    this._updateNavigationButtons();
+  }
+
+  /**
+   * Update the disabled state of navigation buttons.
+   */
+  _updateNavigationButtons() {
+    if (this._navBackBtn) {
+      this._navBackBtn.disabled = !this._navStack || !this._navStack.canGoBack();
+    }
+    if (this._navForwardBtn) {
+      this._navForwardBtn.disabled = !this._navStack || !this._navStack.canGoForward();
+    }
+  }
+
+  /**
+   * Add the outline toggle button to the header.
+   */
+  _addOutlineButton() {
+    if (!this._symbols.length) return;
+
+    const btn = document.createElement('button');
+    btn.className = 'fp-outline-btn';
+    btn.textContent = '\u2261'; // triple horizontal bar
+    btn.title = 'Show outline';
+    btn.addEventListener('click', () => this._toggleOutline());
+    this._outlineBtn = btn;
+    this._headerEl.appendChild(btn);
+  }
+
+  /**
+   * Toggle the outline panel visibility.
+   */
+  _toggleOutline() {
+    if (this._outlinePanel) {
+      this._outlinePanel.remove();
+      this._outlinePanel = null;
+      return;
+    }
+
+    const panel = document.createElement('div');
+    panel.className = 'fp-outline-panel';
+
+    const title = document.createElement('div');
+    title.className = 'fp-outline-title';
+    title.textContent = 'Outline';
+    panel.appendChild(title);
+
+    const list = document.createElement('ul');
+    list.className = 'fp-outline-list';
+
+    this._renderOutlineItems(list, this._symbols, 0);
+
+    panel.appendChild(list);
+    this._outlinePanel = panel;
+
+    // Insert after header, before content
+    this._wrapper.insertBefore(panel, this._contentEl);
+  }
+
+  /**
+   * Render outline items recursively.
+   * @param {HTMLElement} list
+   * @param {Array} symbols
+   * @param {number} depth
+   */
+  _renderOutlineItems(list, symbols, depth) {
+    for (const sym of symbols) {
+      const li = document.createElement('li');
+      li.className = 'fp-outline-item';
+      li.style.paddingLeft = `${depth * 12 + 8}px`;
+
+      const kindIcon = this._getSymbolIcon(sym.kind);
+
+      const btn = document.createElement('button');
+      btn.className = 'fp-outline-item-btn';
+      btn.innerHTML = `<span class="fp-outline-icon">${kindIcon}</span><span class="fp-outline-name">${escapeHTML(sym.name)}</span><span class="fp-outline-kind">${sym.kind}</span>`;
+      btn.addEventListener('click', () => {
+        this._scrollToLine(sym.line);
+        // Close outline on mobile
+        if (window.innerWidth < 768 && this._outlinePanel) {
+          this._outlinePanel.remove();
+          this._outlinePanel = null;
+        }
+      });
+
+      li.appendChild(btn);
+      list.appendChild(li);
+
+      if (sym.children && sym.children.length > 0) {
+        this._renderOutlineItems(list, sym.children, depth + 1);
+      }
+    }
+  }
+
+  /**
+   * Get a short icon character for a symbol kind.
+   * @param {string} kind
+   * @returns {string}
+   */
+  _getSymbolIcon(kind) {
+    switch (kind) {
+      case 'function': case 'method': return 'f';
+      case 'class': case 'struct': return 'S';
+      case 'interface': return 'I';
+      case 'variable': case 'field': return 'v';
+      case 'constant': return 'c';
+      case 'package': case 'module': return 'P';
+      case 'enum': return 'E';
+      case 'property': return 'p';
+      default: return '\u00B7'; // middle dot
+    }
+  }
+
   /**
    * Scroll to a specific line and optionally highlight match text.
    * @param {number} lineNumber - Line number to scroll to
@@ -1422,5 +1949,18 @@ export class FilePreview {
     this._redoBtnEl = null;
     this._searchInputEl = null;
     this._replaceInputEl = null;
+    // LSP cleanup
+    this._navBackBtn = null;
+    this._navForwardBtn = null;
+    this._outlineBtn = null;
+    if (this._outlinePanel) {
+      this._outlinePanel.remove();
+      this._outlinePanel = null;
+    }
+    if (this._referencesPanel) {
+      this._referencesPanel.remove();
+      this._referencesPanel = null;
+    }
+    this._symbols = [];
   }
 }
