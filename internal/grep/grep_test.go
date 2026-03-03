@@ -47,6 +47,10 @@ func setupTestDir(t *testing.T) string {
 // --- RipgrepSearcher テスト ---
 
 func TestRipgrepSearcher_Search(t *testing.T) {
+	if _, err := exec.LookPath("rg"); err != nil {
+		t.Skip("rg not available")
+	}
+
 	root := setupTestDir(t)
 	s := &RipgrepSearcher{}
 
@@ -175,6 +179,10 @@ func TestRipgrepSearcher_Search(t *testing.T) {
 }
 
 func TestRipgrepSearcher_MaxResults(t *testing.T) {
+	if _, err := exec.LookPath("rg"); err != nil {
+		t.Skip("rg not available")
+	}
+
 	// 多くのファイルを含むテストディレクトリを作成
 	root := t.TempDir()
 	for i := 0; i < 20; i++ {
@@ -212,6 +220,10 @@ func TestRipgrepSearcher_MaxResults(t *testing.T) {
 }
 
 func TestRipgrepSearcher_ContextCancellation(t *testing.T) {
+	if _, err := exec.LookPath("rg"); err != nil {
+		t.Skip("rg not available")
+	}
+
 	root := setupTestDir(t)
 	s := &RipgrepSearcher{}
 
@@ -233,6 +245,10 @@ func TestRipgrepSearcher_ContextCancellation(t *testing.T) {
 }
 
 func TestRipgrepSearcher_ResultFields(t *testing.T) {
+	if _, err := exec.LookPath("rg"); err != nil {
+		t.Skip("rg not available")
+	}
+
 	root := setupTestDir(t)
 	s := &RipgrepSearcher{}
 
@@ -280,6 +296,10 @@ func TestRipgrepSearcher_ResultFields(t *testing.T) {
 }
 
 func TestRipgrepSearcher_RelativePaths(t *testing.T) {
+	if _, err := exec.LookPath("rg"); err != nil {
+		t.Skip("rg not available")
+	}
+
 	root := setupTestDir(t)
 	s := &RipgrepSearcher{}
 
@@ -307,6 +327,10 @@ func TestRipgrepSearcher_Name(t *testing.T) {
 }
 
 func TestRipgrepSearcher_Timeout(t *testing.T) {
+	if _, err := exec.LookPath("rg"); err != nil {
+		t.Skip("rg not available")
+	}
+
 	root := setupTestDir(t)
 	s := &RipgrepSearcher{}
 
@@ -334,9 +358,16 @@ func TestNewSearcher(t *testing.T) {
 		t.Fatal("NewSearcher() returned nil")
 	}
 
-	// このシステムには rg がインストールされているので ripgrep が選ばれるはず
-	if s.Name() != "ripgrep" {
-		t.Errorf("NewSearcher().Name() = %q, want %q (rg is available on this system)", s.Name(), "ripgrep")
+	// rg が利用可能なら ripgrep、なければ grep or builtin
+	if _, err := exec.LookPath("rg"); err == nil {
+		if s.Name() != "ripgrep" {
+			t.Errorf("NewSearcher().Name() = %q, want %q (rg is available on this system)", s.Name(), "ripgrep")
+		}
+	} else {
+		// rg がない環境では grep か builtin が選ばれる
+		if s.Name() != "grep" && s.Name() != "builtin" {
+			t.Errorf("NewSearcher().Name() = %q, want grep or builtin (rg is not available)", s.Name())
+		}
 	}
 }
 
