@@ -3,7 +3,7 @@
 // Drawer による セッション/ウィンドウ切り替え
 // PanelManager による分割画面サポート
 
-import { listSessions, listWindows, listNotifications, deleteNotification, getSessionMode, createWindow, deleteWindow, renameWindow, restartClaudeWindow } from './api.js';
+import { listSessions, listWindows, listNotifications, deleteNotification, getSessionMode, createWindow, deleteWindow, renameWindow, restartClaudeWindow, getPortmanLeases } from './api.js';
 import { Drawer } from './drawer.js';
 import { PanelManager } from './panel-manager.js';
 import { Panel } from './panel.js';
@@ -177,6 +177,13 @@ function _switchToSessionListView() {
   const splitToggleBtnEl = document.getElementById('split-toggle-btn');
   if (splitToggleBtnEl) {
     splitToggleBtnEl.classList.add('hidden');
+  }
+
+  // Portman ボタンを非表示
+  const portmanBtnEl = document.getElementById('portman-btn');
+  if (portmanBtnEl) {
+    portmanBtnEl.classList.add('hidden');
+    portmanBtnEl._portmanLeases = null;
   }
 
   // drawer ボタンを非表示（セッション一覧では不要）
@@ -375,6 +382,80 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
 
   // Drawer パネルターゲットを更新
   _updateDrawerPanelTarget();
+
+  // Portman URL ボタンを更新
+  _refreshPortmanButton(sessionName);
+}
+
+/**
+ * Portman URL ボタンの表示/非表示を更新する。
+ * セッションの portman リースを取得し、URL があればボタンを表示する。
+ * @param {string} sessionName - セッション名
+ */
+async function _refreshPortmanButton(sessionName) {
+  const btn = document.getElementById('portman-btn');
+  if (!btn) return;
+
+  // 一旦非表示
+  btn.classList.add('hidden');
+  btn._portmanLeases = null;
+
+  try {
+    const leases = await getPortmanLeases(sessionName);
+    if (!leases || leases.length === 0) return;
+
+    btn._portmanLeases = leases;
+    btn.classList.remove('hidden');
+  } catch {
+    // エラー時は非表示のまま
+  }
+}
+
+/**
+ * 複数の portman URL を選択するコンテキストメニューを表示する。
+ * @param {Array<{name: string, url: string}>} leases - portman リース一覧
+ */
+function _showPortmanURLMenu(leases) {
+  const existing = document.querySelector('.context-menu-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'context-menu-overlay';
+
+  const menu = document.createElement('div');
+  menu.className = 'context-menu';
+
+  const title = document.createElement('div');
+  title.className = 'context-menu__title';
+  title.textContent = 'Open URL';
+  menu.appendChild(title);
+
+  const closeMenu = () => {
+    overlay.classList.remove('context-menu-overlay--visible');
+    setTimeout(() => overlay.remove(), 200);
+  };
+
+  for (const lease of leases) {
+    const btn = document.createElement('button');
+    btn.className = 'context-menu__item';
+    btn.textContent = lease.name;
+    btn.addEventListener('click', () => {
+      closeMenu();
+      window.open(lease.url, '_blank');
+    });
+    menu.appendChild(btn);
+  }
+
+  overlay.appendChild(menu);
+  document.body.appendChild(overlay);
+
+  requestAnimationFrame(() => {
+    overlay.classList.add('context-menu-overlay--visible');
+  });
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) closeMenu();
+  });
 }
 
 /**
@@ -1138,6 +1219,23 @@ document.addEventListener('DOMContentLoaded', () => {
     fontIncreaseBtn.addEventListener('click', () => {
       if (panelManager) {
         panelManager.getFocusedPanel().increaseFontSize();
+      }
+    });
+  }
+
+  // Portman ボタンのクリックイベント
+  const portmanBtn = document.getElementById('portman-btn');
+  if (portmanBtn) {
+    portmanBtn.addEventListener('click', () => {
+      const leases = portmanBtn._portmanLeases;
+      if (!leases || leases.length === 0) return;
+
+      if (leases.length === 1) {
+        // 1件の場合は直接開く
+        window.open(leases[0].url, '_blank');
+      } else {
+        // 複数件の場合はドロップダウン表示
+        _showPortmanURLMenu(leases);
       }
     });
   }

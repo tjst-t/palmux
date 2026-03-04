@@ -10,6 +10,7 @@ import (
 	"github.com/tjst-t/palmux/internal/git"
 	"github.com/tjst-t/palmux/internal/grep"
 	"github.com/tjst-t/palmux/internal/lsp"
+	"github.com/tjst-t/palmux/internal/portman"
 	"github.com/tjst-t/palmux/internal/tmux"
 )
 
@@ -51,6 +52,7 @@ type Server struct {
 	gitCmd        git.CommandRunner
 	searcher      grep.Searcher
 	lsp           lsp.LSPService
+	portman       portman.Runner
 	token         string
 	basePath      string
 	claudePath    string
@@ -65,6 +67,7 @@ type Options struct {
 	GitCmd         git.CommandRunner // git コマンドランナー（nil の場合 RealCommandRunner を使用）
 	Searcher       grep.Searcher    // 全文検索エンジン（nil の場合 grep.NewSearcher() を使用）
 	LSP            lsp.LSPService    // LSP サービス（nil の場合 LSP 機能は無効）
+	Portman        portman.Runner    // portman ランナー（nil の場合 RealRunner を使用）
 	Token          string
 	BasePath       string
 	ClaudePath     string // Claude コマンドのパス（デフォルト: "claude"）
@@ -91,11 +94,17 @@ func NewServer(opts Options) *Server {
 		claudePath = "claude"
 	}
 
+	portmanRunner := opts.Portman
+	if portmanRunner == nil {
+		portmanRunner = &portman.RealRunner{}
+	}
+
 	s := &Server{
 		tmux:          opts.Tmux,
 		gitCmd:        gitCmd,
 		searcher:      searcher,
 		lsp:           opts.LSP,
+		portman:       portmanRunner,
 		token:         opts.Token,
 		basePath:      NormalizeBasePath(opts.BasePath),
 		claudePath:    claudePath,
@@ -118,6 +127,7 @@ func NewServer(opts Options) *Server {
 	mux.Handle("PATCH /api/sessions/{session}/windows/{index}", auth(s.handleRenameWindow()))
 	mux.Handle("GET /api/sessions/{session}/windows/{index}/attach", auth(s.handleAttach()))
 	mux.Handle("GET /api/sessions/{session}/cwd", auth(s.handleGetCwd()))
+	mux.Handle("GET /api/sessions/{session}/portman-urls", auth(s.handleGetPortmanURLs()))
 	mux.Handle("GET /api/sessions/{session}/commands", auth(s.handleGetCommands()))
 	mux.Handle("GET /api/sessions/{session}/files", auth(s.handleGetFiles()))
 	mux.Handle("GET /api/sessions/{session}/files/search", auth(s.handleSearchFiles()))

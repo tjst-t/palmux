@@ -320,6 +320,17 @@ export async function restartClaudeWindow(session, command) {
   });
 }
 
+// --- Portman API ---
+
+/**
+ * セッションの portman リース一覧を取得する。
+ * @param {string} session - セッション名
+ * @returns {Promise<Array<{name: string, url: string, status: string, port: number}>>}
+ */
+export async function getPortmanLeases(session) {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/portman-urls`);
+}
+
 // --- Git API ---
 
 /**
