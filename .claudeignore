@@ -1,0 +1,31 @@
+# Dependencies
+frontend/node_modules/
+
+# Build artifacts
+frontend/build/
+
+# Auto-generated lock/sum files
+frontend/package-lock.json
+go.sum
+
+# Binary files
+palmux
+palmux-linux-amd64
+palmux-linux-arm64
+
+# Icons (binary images)
+frontend/icons/
+
+# Test coverage
+coverage.out
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

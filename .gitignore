@@ -6,7 +6,7 @@ palmux
 palmux-linux-amd64
 palmux-linux-arm64
 
-# Node modules (if frontend dependencies are installed locally)
+# Node modules
 node_modules/
 
 # OS files
@@ -22,3 +22,14 @@ Thumbs.db
 
 # Test coverage
 coverage.out
+
+# Logs
+*.log
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Temporary files
+tmp/
