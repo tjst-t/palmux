@@ -862,6 +862,74 @@ func TestGit_UnstageHunk(t *testing.T) {
 	}
 }
 
+func TestGit_RemoteURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		output  string
+		err     error
+		want    string
+		wantErr bool
+	}{
+		{
+			name:   "正常系: SSH形式のURL",
+			output: "git@github.com:owner/repo.git\n",
+			want:   "git@github.com:owner/repo.git",
+		},
+		{
+			name:   "正常系: HTTPS形式のURL",
+			output: "https://github.com/owner/repo.git\n",
+			want:   "https://github.com/owner/repo.git",
+		},
+		{
+			name:   "正常系: 末尾改行なし",
+			output: "git@github.com:owner/repo.git",
+			want:   "git@github.com:owner/repo.git",
+		},
+		{
+			name:    "異常系: git リポジトリでない",
+			err:     ErrNotGitRepo,
+			wantErr: true,
+		},
+		{
+			name:    "異常系: リモートなし",
+			err:     errors.New("No such remote 'origin'"),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockCommandRunner{
+				output: []byte(tt.output),
+				err:    tt.err,
+			}
+			g := &Git{Cmd: mock}
+
+			got, err := g.RemoteURL("/test/dir")
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if got != tt.want {
+				t.Errorf("RemoteURL = %q, want %q", got, tt.want)
+			}
+
+			if mock.calledDir != "/test/dir" {
+				t.Errorf("dir = %q, want %q", mock.calledDir, "/test/dir")
+			}
+			if !containsAll(mock.calledArgs, "remote", "get-url", "origin") {
+				t.Errorf("args = %v, want to contain remote get-url origin", mock.calledArgs)
+			}
+		})
+	}
+}
+
 func TestGit_StructuredDiff(t *testing.T) {
 	diffOutput := "diff --git a/main.go b/main.go\nindex 1234567..abcdefg 100644\n--- a/main.go\n+++ b/main.go\n@@ -10,7 +10,8 @@ func main() {\n \tfmt.Println(\"hello\")\n-\tfmt.Println(\"old\")\n+\tfmt.Println(\"new\")\n+\tfmt.Println(\"added\")\n \tfmt.Println(\"world\")\n"
 

@@ -264,6 +264,15 @@ func (g *Git) UnstageHunk(dir, patch string) error {
 	return err
 }
 
+// RemoteURL は git remote get-url origin を実行し、リモートURLを返す。
+func (g *Git) RemoteURL(dir string) (string, error) {
+	out, err := g.Cmd.RunInDir(dir, "remote", "get-url", "origin")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // StructuredDiff は構造化された差分を返す。
 // 内部で Diff() を呼び出し、結果を ParseStructuredDiff() でパースして返す。
 func (g *Git) StructuredDiff(dir, commit, path string) ([]StructuredDiff, error) {

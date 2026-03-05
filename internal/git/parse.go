@@ -423,3 +423,27 @@ func parseDiffGitHeader(line string) string {
 	}
 	return ""
 }
+
+// sshGitHubRe は SSH 形式の GitHub URL にマッチする正規表現。
+var sshGitHubRe = regexp.MustCompile(`^git@github\.com:([^/]+/[^/]+?)(?:\.git)?$`)
+
+// ParseGitHubURL は git remote URL を GitHub の HTTPS URL に変換する。
+// SSH 形式（git@github.com:owner/repo.git）と HTTPS 形式（https://github.com/owner/repo.git）に対応。
+// GitHub 以外のリモートの場合は空文字を返す。
+func ParseGitHubURL(remoteURL string) string {
+	remoteURL = strings.TrimSpace(remoteURL)
+
+	// SSH 形式: git@github.com:owner/repo.git
+	if m := sshGitHubRe.FindStringSubmatch(remoteURL); m != nil {
+		return "https://github.com/" + m[1]
+	}
+
+	// HTTPS 形式: https://github.com/owner/repo.git
+	if strings.HasPrefix(remoteURL, "https://github.com/") || strings.HasPrefix(remoteURL, "http://github.com/") {
+		u := remoteURL
+		u = strings.TrimSuffix(u, ".git")
+		return u
+	}
+
+	return ""
+}

@@ -3,7 +3,7 @@
 // Drawer による セッション/ウィンドウ切り替え
 // PanelManager による分割画面サポート
 
-import { listSessions, listWindows, listNotifications, deleteNotification, getSessionMode, createWindow, deleteWindow, renameWindow, restartClaudeWindow, getPortmanLeases } from './api.js';
+import { listSessions, listWindows, listNotifications, deleteNotification, getSessionMode, createWindow, deleteWindow, renameWindow, restartClaudeWindow, getPortmanLeases, getGitHubURL } from './api.js';
 import { Drawer } from './drawer.js';
 import { PanelManager } from './panel-manager.js';
 import { Panel } from './panel.js';
@@ -184,6 +184,13 @@ function _switchToSessionListView() {
   if (portmanBtnEl) {
     portmanBtnEl.classList.add('hidden');
     portmanBtnEl._portmanLeases = null;
+  }
+
+  // GitHub ボタンを非表示
+  const githubBtnEl = document.getElementById('github-btn');
+  if (githubBtnEl) {
+    githubBtnEl.classList.add('hidden');
+    githubBtnEl._githubURL = null;
   }
 
   // drawer ボタンを非表示（セッション一覧では不要）
@@ -385,6 +392,9 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
 
   // Portman URL ボタンを更新
   _refreshPortmanButton(sessionName);
+
+  // GitHub ボタンを更新
+  _refreshGitHubButton(sessionName);
 }
 
 /**
@@ -405,6 +415,30 @@ async function _refreshPortmanButton(sessionName) {
     if (!leases || leases.length === 0) return;
 
     btn._portmanLeases = leases;
+    btn.classList.remove('hidden');
+  } catch {
+    // エラー時は非表示のまま
+  }
+}
+
+/**
+ * GitHub ボタンの表示/非表示を更新する。
+ * セッションの GitHub URL を取得し、URL があればボタンを表示する。
+ * @param {string} sessionName - セッション名
+ */
+async function _refreshGitHubButton(sessionName) {
+  const btn = document.getElementById('github-btn');
+  if (!btn) return;
+
+  // 一旦非表示
+  btn.classList.add('hidden');
+  btn._githubURL = null;
+
+  try {
+    const result = await getGitHubURL(sessionName);
+    if (!result || !result.url) return;
+
+    btn._githubURL = result.url;
     btn.classList.remove('hidden');
   } catch {
     // エラー時は非表示のまま
@@ -1237,6 +1271,16 @@ document.addEventListener('DOMContentLoaded', () => {
         // 複数件の場合はドロップダウン表示
         _showPortmanURLMenu(leases);
       }
+    });
+  }
+
+  // GitHub ボタンのクリックイベント
+  const githubBtn = document.getElementById('github-btn');
+  if (githubBtn) {
+    githubBtn.addEventListener('click', () => {
+      const url = githubBtn._githubURL;
+      if (!url) return;
+      window.open(url + '/issues', '_blank');
     });
   }
 

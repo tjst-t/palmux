@@ -706,6 +706,74 @@ func TestParseStructuredDiff_HunkHeaderParsing(t *testing.T) {
 	}
 }
 
+func TestParseGitHubURL(t *testing.T) {
+	tests := []struct {
+		name      string
+		remoteURL string
+		want      string
+	}{
+		{
+			name:      "SSH形式: .git付き",
+			remoteURL: "git@github.com:owner/repo.git",
+			want:      "https://github.com/owner/repo",
+		},
+		{
+			name:      "SSH形式: .gitなし",
+			remoteURL: "git@github.com:owner/repo",
+			want:      "https://github.com/owner/repo",
+		},
+		{
+			name:      "HTTPS形式: .git付き",
+			remoteURL: "https://github.com/owner/repo.git",
+			want:      "https://github.com/owner/repo",
+		},
+		{
+			name:      "HTTPS形式: .gitなし",
+			remoteURL: "https://github.com/owner/repo",
+			want:      "https://github.com/owner/repo",
+		},
+		{
+			name:      "HTTP形式",
+			remoteURL: "http://github.com/owner/repo.git",
+			want:      "http://github.com/owner/repo",
+		},
+		{
+			name:      "GitLab SSH → 空文字",
+			remoteURL: "git@gitlab.com:owner/repo.git",
+			want:      "",
+		},
+		{
+			name:      "GitLab HTTPS → 空文字",
+			remoteURL: "https://gitlab.com/owner/repo.git",
+			want:      "",
+		},
+		{
+			name:      "Bitbucket → 空文字",
+			remoteURL: "git@bitbucket.org:owner/repo.git",
+			want:      "",
+		},
+		{
+			name:      "空文字 → 空文字",
+			remoteURL: "",
+			want:      "",
+		},
+		{
+			name:      "末尾に改行がある場合",
+			remoteURL: "git@github.com:owner/repo.git\n",
+			want:      "https://github.com/owner/repo",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseGitHubURL(tt.remoteURL)
+			if got != tt.want {
+				t.Errorf("ParseGitHubURL(%q) = %q, want %q", tt.remoteURL, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseBranches_Details(t *testing.T) {
 	input := readTestdata(t, "branches_output.txt")
 	branches := ParseBranches(input)

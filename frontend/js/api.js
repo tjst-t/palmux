@@ -331,6 +331,17 @@ export async function getPortmanLeases(session) {
   return fetchAPI(`api/sessions/${encodeURIComponent(session)}/portman-urls`);
 }
 
+// --- GitHub API ---
+
+/**
+ * セッションの GitHub URL を取得する。
+ * @param {string} session - セッション名
+ * @returns {Promise<{url: string}>}
+ */
+export async function getGitHubURL(session) {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/github-url`);
+}
+
 // --- Git API ---
 
 /**
