@@ -17,6 +17,12 @@ function getFileIcon(entry) {
 
   const ext = (entry.extension || '').toLowerCase();
 
+  // drawio ダイアグラムファイル
+  const drawioExts = ['.drawio', '.dio'];
+  if (drawioExts.includes(ext)) {
+    return '\uD83D\uDDD2'; // spiral notepad (diagram)
+  }
+
   // 画像ファイル
   const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.webp', '.ico'];
   if (imageExts.includes(ext)) {

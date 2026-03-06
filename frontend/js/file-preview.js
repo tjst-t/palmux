@@ -69,11 +69,13 @@ const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico'];
 
 const PDF_EXTS = ['.pdf'];
 
+const DRAWIO_EXTS = ['.drawio', '.dio'];
+
 /**
  * Determine the file preview type from extension and filename.
  * @param {string} ext - File extension (e.g., '.go')
  * @param {string} name - File name (e.g., 'Makefile')
- * @returns {string} 'markdown' | 'code' | 'plaintext' | 'image' | 'pdf' | 'unknown'
+ * @returns {string} 'markdown' | 'code' | 'plaintext' | 'image' | 'pdf' | 'drawio' | 'unknown'
  */
 export function getPreviewType(ext, name) {
   const lowerExt = (ext || '').toLowerCase();
@@ -85,6 +87,7 @@ export function getPreviewType(ext, name) {
   if (PLAINTEXT_NAMES.includes(name)) return 'plaintext';
   if (IMAGE_EXTS.includes(lowerExt)) return 'image';
   if (PDF_EXTS.includes(lowerExt)) return 'pdf';
+  if (DRAWIO_EXTS.includes(lowerExt)) return 'drawio';
 
   return 'unknown';
 }
@@ -334,6 +337,14 @@ export class FilePreview {
     this._searchQuery = '';
     /** @type {number} 最後にマッチした末尾位置（検索ボックスフォーカス中の連続検索用） */
     this._searchMatchEnd = 0;
+
+    // Drawio state
+    this._drawioIframe = null;
+    this._drawioXml = '';
+    this._drawioMessageHandler = null;
+    this._drawioEditBtn = null;
+    this._drawioMode = null; // 'viewer' | 'editor'
+    this._drawioEditable = false;
 
     // LSP integration
     this._onNavigate = options.onNavigate || null;
@@ -841,6 +852,8 @@ export class FilePreview {
       this._renderMarkdown(this._originalContent, this._isTruncated);
     } else if (this._previewType === 'html') {
       this._renderHTML();
+    } else if (this._previewType === 'drawio') {
+      this._renderDrawio(this._drawioXml);
     } else if (this._previewType === 'code') {
       this._renderCode(this._originalContent, ext, this._isTruncated);
     } else {
@@ -987,6 +1000,23 @@ export class FilePreview {
         case 'pdf':
           this._renderPDF();
           break;
+        case 'drawio': {
+          // Fetch XML content
+          const drawioData = await this._fetchFileContent();
+          if (this._disposed) return;
+          if (!drawioData) {
+            this._renderError('Failed to load drawio file');
+            return;
+          }
+          this._drawioXml = drawioData.content || '';
+          this._isEditable = false; // text edit toggle disabled for drawio
+          this._drawioEditable = !!this._saveFile;
+          this._renderDrawio(this._drawioXml);
+          if (this._drawioEditable) {
+            this._addDrawioEditButton();
+          }
+          break;
+        }
         case 'html': {
           // Fetch content for edit mode, then render via iframe
           if (this._fetchFile) {
@@ -1238,6 +1268,199 @@ export class FilePreview {
   /**
    * Render image preview using the raw API URL.
    */
+  /**
+   * Render drawio diagram in read-only viewer mode via viewer.min.js.
+   * Uses an iframe with srcdoc to isolate the viewer library.
+   * @param {string} xmlContent - drawio XML content
+   */
+  _renderDrawio(xmlContent) {
+    this._contentEl.innerHTML = '';
+    // Use flex layout so drawio container fills the full height
+    this._contentEl.classList.add('fp-content--drawio');
+
+    const container = document.createElement('div');
+    container.className = 'fp-drawio';
+
+    // Loading overlay
+    const loading = document.createElement('div');
+    loading.className = 'fp-drawio-loading';
+    loading.textContent = 'Loading diagram...';
+    container.appendChild(loading);
+
+    // Remove old message handler if any
+    if (this._drawioMessageHandler) {
+      window.removeEventListener('message', this._drawioMessageHandler);
+      this._drawioMessageHandler = null;
+    }
+
+    const iframe = document.createElement('iframe');
+    iframe.className = 'fp-drawio-iframe';
+    iframe.setAttribute('frameborder', '0');
+    iframe.setAttribute('title', 'Drawio diagram');
+    iframe.sandbox = 'allow-scripts allow-same-origin';
+
+    // Escape XML for embedding in HTML attribute
+    const escapedXml = xmlContent
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+    const mxGraphConfig = JSON.stringify({
+      highlight: '#4fc3f7',
+      nav: true,
+      resize: true,
+      toolbar: 'zoom layers lightbox',
+      xml: xmlContent,
+    });
+
+    // Escape the JSON for safe HTML attribute embedding
+    const escapedConfig = mxGraphConfig
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;');
+
+    iframe.srcdoc = `<!DOCTYPE html>
+<html style="height:100%;margin:0;">
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { height: 100%; margin: 0; padding: 0; background: #fff; overflow: hidden; }
+  .geDiagramContainer { overflow: auto !important; }
+  .mxgraph { width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div class="mxgraph" data-mxgraph="${escapedConfig}"></div>
+<script src="https://viewer.diagrams.net/js/viewer-static.min.js"><\/script>
+</body>
+</html>`;
+
+    iframe.addEventListener('load', () => {
+      loading.style.display = 'none';
+    });
+
+    this._drawioIframe = iframe;
+    this._drawioMode = 'viewer';
+
+    container.appendChild(iframe);
+    this._contentEl.appendChild(container);
+  }
+
+  /**
+   * Add an Edit button to the header for drawio files.
+   */
+  _addDrawioEditButton() {
+    const btn = document.createElement('button');
+    btn.className = 'fp-drawio-edit-btn';
+    btn.textContent = 'Edit';
+    btn.setAttribute('aria-label', 'Edit diagram');
+    btn.addEventListener('click', () => this._enterDrawioEditMode());
+    this._drawioEditBtn = btn;
+    this._headerEl.appendChild(btn);
+  }
+
+  /**
+   * Switch from viewer to editor mode for drawio.
+   * Uses embed.diagrams.net with postMessage API for full graphical editing.
+   */
+  _enterDrawioEditMode() {
+    if (this._drawioMode === 'editor') return;
+    this._drawioMode = 'editor';
+
+    // Remove old handler
+    if (this._drawioMessageHandler) {
+      window.removeEventListener('message', this._drawioMessageHandler);
+    }
+
+    this._contentEl.innerHTML = '';
+    this._contentEl.classList.add('fp-content--drawio');
+
+    const container = document.createElement('div');
+    container.className = 'fp-drawio';
+
+    const loading = document.createElement('div');
+    loading.className = 'fp-drawio-loading';
+    loading.textContent = 'Loading editor...';
+    container.appendChild(loading);
+
+    const iframe = document.createElement('iframe');
+    iframe.className = 'fp-drawio-iframe';
+    iframe.setAttribute('frameborder', '0');
+    iframe.setAttribute('title', 'Drawio editor');
+
+    this._drawioIframe = iframe;
+
+    this._drawioMessageHandler = (evt) => {
+      if (this._disposed) return;
+      if (!iframe.contentWindow || evt.source !== iframe.contentWindow) return;
+
+      let msg;
+      try {
+        msg = JSON.parse(evt.data);
+      } catch (_) {
+        return;
+      }
+
+      if (msg.event === 'init') {
+        iframe.contentWindow.postMessage(JSON.stringify({
+          action: 'load',
+          xml: this._drawioXml,
+        }), '*');
+        loading.style.display = 'none';
+      } else if (msg.event === 'load') {
+        loading.style.display = 'none';
+      } else if (msg.event === 'save') {
+        this._handleDrawioSave(msg.xml);
+      } else if (msg.event === 'exit') {
+        this._exitDrawioEditMode();
+      }
+    };
+    window.addEventListener('message', this._drawioMessageHandler);
+
+    iframe.src = 'https://embed.diagrams.net/?embed=1&proto=json&spin=1';
+    container.appendChild(iframe);
+    this._contentEl.appendChild(container);
+
+    // Hide edit button while in editor
+    if (this._drawioEditBtn) {
+      this._drawioEditBtn.style.display = 'none';
+    }
+  }
+
+  /**
+   * Handle save event from drawio editor.
+   * @param {string} xml - Updated XML content
+   */
+  async _handleDrawioSave(xml) {
+    if (!this._saveFile) return;
+    try {
+      await this._saveFile(this._session, this._path, xml);
+      this._drawioXml = xml;
+    } catch (err) {
+      console.error('Failed to save drawio file:', err);
+    }
+  }
+
+  /**
+   * Exit drawio editor and return to viewer mode.
+   */
+  _exitDrawioEditMode() {
+    if (this._drawioMode !== 'editor') return;
+
+    // Clean up editor
+    if (this._drawioMessageHandler) {
+      window.removeEventListener('message', this._drawioMessageHandler);
+    }
+
+    // Re-render as viewer with current XML
+    this._renderDrawio(this._drawioXml);
+
+    // Show edit button again
+    if (this._drawioEditBtn) {
+      this._drawioEditBtn.style.display = '';
+    }
+  }
+
   _renderImage() {
     this._contentEl.innerHTML = '';
 
@@ -1935,6 +2158,16 @@ export class FilePreview {
   dispose() {
     this._disposed = true;
     this._history.dispose();
+    // Drawio cleanup
+    if (this._drawioMessageHandler) {
+      window.removeEventListener('message', this._drawioMessageHandler);
+      this._drawioMessageHandler = null;
+    }
+    this._drawioIframe = null;
+    this._drawioXml = '';
+    this._drawioEditBtn = null;
+    this._drawioMode = null;
+    this._drawioEditable = false;
     this._container.innerHTML = '';
     this._wrapper = null;
     this._contentEl = null;
