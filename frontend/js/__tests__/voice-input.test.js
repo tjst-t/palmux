@@ -292,6 +292,18 @@ describe('VoiceInput', () => {
       voice.destroy();
     });
 
+    it('keeps error class after onend fires following an error', () => {
+      const voice = new VoiceInput(container, { onResult: vi.fn() });
+      voice.start();
+      voice._recognition._fireError('not-allowed');
+      voice._recognition._fireEnd();
+      const btn = container.querySelector('.voice-mic-btn');
+      expect(btn.classList.contains('voice-mic-btn--error')).toBe(true);
+      expect(btn.classList.contains('voice-mic-btn--listening')).toBe(false);
+      expect(voice.state).toBe('idle');
+      voice.destroy();
+    });
+
     it('does not treat no-speech as an error', () => {
       const onError = vi.fn();
       const voice = new VoiceInput(container, { onResult: vi.fn(), onError });

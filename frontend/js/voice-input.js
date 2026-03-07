@@ -32,6 +32,7 @@ export class VoiceInput {
     this._onInterim = options.onInterim || null;
     this._onError = options.onError || null;
     this._state = 'idle';
+    this._hasError = false;
     this._errorTimer = null;
 
     // SpeechRecognition インスタンス生成
@@ -64,6 +65,7 @@ export class VoiceInput {
       // no-speech はエラーとして扱わない（タイムアウトで自然終了）
       if (event.error === 'no-speech') return;
 
+      this._hasError = true;
       this._setErrorState();
       if (this._onError) {
         this._onError(event.error);
@@ -71,7 +73,16 @@ export class VoiceInput {
     };
 
     this._recognition.onend = () => {
-      this._setState('idle');
+      // エラー発生時は --error 表示を維持し、タイマーに任せる
+      if (this._hasError) {
+        this._hasError = false;
+        this._state = 'idle';
+        if (this._btn) {
+          this._btn.classList.remove('voice-mic-btn--listening');
+        }
+      } else {
+        this._setState('idle');
+      }
     };
   }
 
