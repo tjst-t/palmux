@@ -45,8 +45,14 @@ export class IMEInput {
     this._sendBtn.className = 'ime-send-btn';
     this._sendBtn.textContent = '\u9001\u4FE1';
 
+    // 中間結果表示用のプレビュー要素（IME バーの上に配置）
+    this._previewEl = document.createElement('div');
+    this._previewEl.className = 'voice-interim-text';
+    this._previewEl.style.display = 'none';
+
     this._el.appendChild(this._input);
     this._el.appendChild(this._sendBtn);
+    this._container.appendChild(this._previewEl);
     this._container.appendChild(this._el);
 
     this._setupEvents();
@@ -188,9 +194,41 @@ export class IMEInput {
   }
 
   /**
+   * テキストを入力フィールドに追加する（音声入力結果の挿入用）。
+   * @param {string} text
+   */
+  insertText(text) {
+    this._input.value += text;
+    this._input.focus();
+  }
+
+  /**
+   * 中間結果テキストをプレビュー表示する。空文字で非表示。
+   * @param {string} text
+   */
+  setPreviewText(text) {
+    if (text) {
+      this._previewEl.textContent = text;
+      this._previewEl.style.display = '';
+    } else {
+      this._previewEl.textContent = '';
+      this._previewEl.style.display = 'none';
+    }
+  }
+
+  /**
+   * IME バー要素を返す（マイクボタン挿入用）。
+   * @returns {HTMLElement}
+   */
+  getBarElement() {
+    return this._el;
+  }
+
+  /**
    * リソースを解放する。
    */
   destroy() {
+    this._previewEl.remove();
     this._el.remove();
   }
 }

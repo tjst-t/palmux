@@ -8,6 +8,7 @@ import { PalmuxTerminal } from './terminal.js';
 import { Toolbar } from './toolbar.js';
 import { IMEInput } from './ime-input.js';
 import { TouchHandler } from './touch.js';
+import { VoiceInput } from './voice-input.js';
 import { ConnectionManager } from './connection.js';
 import { FileBrowser } from './filebrowser.js';
 import { GitBrowser } from './gitbrowser.js';
@@ -24,6 +25,7 @@ import { GitBrowser } from './gitbrowser.js';
  * @property {TouchHandler|null} touchHandler
  * @property {ConnectionManager|null} connectionManager
  * @property {HTMLElement|null} reconnectOverlayEl
+ * @property {VoiceInput|null} voiceInput
  * @property {FileBrowser|null} fileBrowser
  * @property {GitBrowser|null} gitBrowser
  */
@@ -286,6 +288,19 @@ export class Panel {
       },
     });
 
+    // VoiceInput（Web Speech API 対応ブラウザのみ）
+    let voiceInput = null;
+    if (VoiceInput.isSupported()) {
+      voiceInput = new VoiceInput(imeInput.getBarElement(), {
+        onResult: (text) => {
+          imeInput.insertText(text);
+          imeInput.setPreviewText('');
+        },
+        onInterim: (text) => imeInput.setPreviewText(text),
+        lang: 'ja-JP',
+      });
+    }
+
     // Toolbar
     const toolbar = new Toolbar(toolbarContainerEl, {
       onSendKey: (key) => terminal.sendInput(key),
@@ -377,6 +392,7 @@ export class Panel {
       touchHandler,
       connectionManager,
       reconnectOverlayEl,
+      voiceInput,
       fileBrowser: null,
       gitBrowser: null,
     };
@@ -429,6 +445,7 @@ export class Panel {
       touchHandler: null,
       connectionManager: null,
       reconnectOverlayEl: null,
+      voiceInput: null,
       fileBrowser: browser,
       gitBrowser: null,
     };
@@ -471,6 +488,7 @@ export class Panel {
       touchHandler: null,
       connectionManager: null,
       reconnectOverlayEl: null,
+      voiceInput: null,
       fileBrowser: null,
       gitBrowser: browser,
     };
@@ -577,6 +595,7 @@ export class Panel {
    */
   _destroyTabState(tabState) {
     if (tabState.type === 'terminal') {
+      if (tabState.voiceInput) tabState.voiceInput.destroy();
       if (tabState.touchHandler) tabState.touchHandler.destroy();
       if (tabState.imeInput) tabState.imeInput.destroy();
       if (tabState.toolbar) tabState.toolbar.dispose();
