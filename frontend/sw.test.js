@@ -136,9 +136,8 @@ describe('Service Worker', () => {
       expect(cache).toBeDefined();
 
       // 静的アセットがキャッシュされている
-      expect(cache._store.has('./app.js')).toBe(true);
-      expect(cache._store.has('./style.css')).toBe(true);
-      expect(cache._store.has('./xterm.css')).toBe(true);
+      expect(cache._store.has('./assets/index.js')).toBe(true);
+      expect(cache._store.has('./assets/index.css')).toBe(true);
       expect(cache._store.has('./manifest.json')).toBe(true);
 
       // index.html はプリキャッシュに含まれない

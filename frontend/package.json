@@ -1,10 +1,12 @@
 {
   "name": "frontend",
   "version": "1.0.0",
+  "type": "module",
   "description": "",
-  "main": "index.js",
   "scripts": {
-    "build": "esbuild js/app.js --bundle --minify --outdir=build && cp index.html build/ && cp css/style.css build/ && cp node_modules/@xterm/xterm/css/xterm.css build/",
+    "build": "vite build",
+    "dev": "vite",
+    "preview": "vite preview",
     "test": "vitest run"
   },
   "keywords": [],
@@ -21,8 +23,10 @@
     "marked": "^17.0.2"
   },
   "devDependencies": {
-    "esbuild": "^0.27.3",
+    "@sveltejs/vite-plugin-svelte": "^6.2.4",
     "happy-dom": "^20.6.2",
+    "svelte": "^5.53.7",
+    "vite": "^7.3.1",
     "vitest": "^4.0.18"
   }
 }

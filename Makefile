@@ -8,21 +8,7 @@ all: build-linux
 
 frontend:
 	cd frontend && npm install --silent
-	cd frontend && npx esbuild js/app.js \
-	  --bundle --minify --outdir=build
-	cp frontend/index.html frontend/build/
-	cp frontend/css/style.css frontend/build/
-	cp frontend/css/context-menu.css frontend/build/
-	cp frontend/css/filebrowser.css frontend/build/
-	cp frontend/css/gitbrowser.css frontend/build/
-	cp frontend/css/split.css frontend/build/
-	cp frontend/css/tab.css frontend/build/
-	cp frontend/node_modules/highlight.js/styles/github-dark.css frontend/build/hljs-theme.css
-	cp frontend/node_modules/@xterm/xterm/css/xterm.css frontend/build/
-	cp frontend/manifest.json frontend/build/
-	cp frontend/sw.js frontend/build/
-	mkdir -p frontend/build/icons
-	cp -r frontend/icons/* frontend/build/icons/
+	cd frontend && npx vite build
 
 build: frontend
 	CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o palmux .

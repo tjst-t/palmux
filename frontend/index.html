@@ -12,17 +12,9 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Palmux">
   <title>Palmux</title>
-  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
-  <link rel="manifest" href="manifest.json">
-  <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="stylesheet" href="xterm.css">
-  <link rel="stylesheet" href="style.css">
-  <link rel="stylesheet" href="context-menu.css">
-  <link rel="stylesheet" href="filebrowser.css">
-  <link rel="stylesheet" href="gitbrowser.css">
-  <link rel="stylesheet" href="hljs-theme.css">
-  <link rel="stylesheet" href="split.css">
-  <link rel="stylesheet" href="tab.css">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
 </head>
 <body>
   <!-- Drawer Overlay -->
@@ -97,18 +89,6 @@
     </div>
   </div>
 
-  <script src="app.js"></script>
-  <script>
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js');
-    }
-    // バージョン表示
-    const versionMeta = document.querySelector('meta[name="app-version"]');
-    const versionEl = document.getElementById('drawer-footer-version');
-    if (versionMeta && versionEl) {
-      const v = versionMeta.getAttribute('content');
-      if (v) versionEl.textContent = v;
-    }
-  </script>
+  <script type="module" src="./src/main.js"></script>
 </body>
 </html>
