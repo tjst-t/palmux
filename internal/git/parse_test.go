@@ -762,6 +762,21 @@ func TestParseGitHubURL(t *testing.T) {
 			remoteURL: "git@github.com:owner/repo.git\n",
 			want:      "https://github.com/owner/repo",
 		},
+		{
+			name:      "ssh:// 形式: .git付き",
+			remoteURL: "ssh://git@github.com/owner/repo.git",
+			want:      "https://github.com/owner/repo",
+		},
+		{
+			name:      "ssh:// 形式: .gitなし",
+			remoteURL: "ssh://git@github.com/owner/repo",
+			want:      "https://github.com/owner/repo",
+		},
+		{
+			name:      "ssh:// 形式: GitLab → 空文字",
+			remoteURL: "ssh://git@gitlab.com/owner/repo.git",
+			want:      "",
+		},
 	}
 
 	for _, tt := range tests {
