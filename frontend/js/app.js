@@ -4,11 +4,11 @@
 // PanelManager による分割画面サポート
 
 import { listSessions, listWindows, listNotifications, deleteNotification, getSessionMode, createWindow, deleteWindow, renameWindow, restartClaudeWindow, getPortmanLeases, getGitHubURL } from './api.js';
-import { Drawer } from './drawer.js';
+import { DrawerAdapter as Drawer } from '../src/lib/DrawerAdapter.js';
 import { PanelManager } from './panel-manager.js';
 import { Panel } from './panel.js';
 import { Router } from './router.js';
-import { TabBar } from './tab-bar.js';
+import { TabBarAdapter as TabBar } from '../src/lib/TabBarAdapter.js';
 
 /** @type {Drawer|null} */
 let drawer = null;
