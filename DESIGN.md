@@ -78,8 +78,8 @@ Palmux は、スマートフォンから快適に tmux セッション/ウィン
 | Component | Technology |
 |---|---|
 | ターミナルエミュレータ | @xterm/xterm + @xterm/addon-fit + @xterm/addon-web-links |
-| UI | Vanilla HTML/CSS/JS (フレームワーク不使用) |
-| ビルドツール | esbuild (xterm.js のバンドルのみ) |
+| UI | Svelte 5 + HTML/CSS/JS |
+| ビルドツール | Vite + @sveltejs/vite-plugin-svelte |
 
 ---
 
@@ -489,7 +489,11 @@ palmux/
 │   ├── manifest.json       # PWA マニフェスト
 │   ├── sw.js               # Service Worker
 │   ├── icons/              # PWA アイコン (192x192, 512x512)
-│   └── build/              # esbuild 出力 (gitignore)
+│   ├── src/                # Svelte コンポーネント・ストア
+│   │   ├── lib/            # Svelte コンポーネント (.svelte) + Adapter (.js)
+│   │   ├── stores/         # Svelte stores (.svelte.js)
+│   │   └── main.js         # Vite エントリポイント
+│   └── build/              # Vite 出力 (gitignore)
 ├── embed.go                # //go:embed frontend/build/*
 ├── Makefile
 └── README.md
@@ -506,17 +510,8 @@ GO ?= $(shell which go 2>/dev/null || echo /usr/local/go/bin/go)
 .PHONY: build frontend build-linux build-arm test clean
 
 frontend:
-	cd frontend && npx esbuild js/app.js \
-	  --bundle --minify --outdir=build
-	cp frontend/index.html frontend/build/
-	cp frontend/css/style.css frontend/build/
-	cp frontend/css/filebrowser.css frontend/build/
-	cp frontend/node_modules/highlight.js/styles/github-dark.css frontend/build/hljs-theme.css
-	cp frontend/node_modules/@xterm/xterm/css/xterm.css frontend/build/
-	cp frontend/manifest.json frontend/build/
-	cp frontend/sw.js frontend/build/
-	mkdir -p frontend/build/icons
-	cp -r frontend/icons/* frontend/build/icons/
+	cd frontend && npm install --silent
+	cd frontend && npx vite build
 
 build: frontend
 	CGO_ENABLED=0 $(GO) build -o palmux .
@@ -531,7 +526,7 @@ test:
 	$(GO) test ./...
 ```
 
-> **Note:** xterm.js は `--external` を使わずバンドルに含める（`embed.FS` でシングルバイナリにするため）。
+> **Note:** Vite がすべての依存を単一バンドルに含める（`embed.FS` でシングルバイナリにするため）。
 
 ### 起動
 

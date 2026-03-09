@@ -52,9 +52,11 @@ palmux/
 │   │   └── ws.go            # WebSocket pty ブリッジ
 │   └── tmux/                # tmux Manager、Executor、パーサー
 ├── frontend/
-│   ├── index.html / css/ / js/
+│   ├── index.html / css/ / js/  # 旧 Vanilla JS（段階的移行中）
+│   ├── src/lib/             # Svelte コンポーネント + Adapter
+│   ├── src/stores/          # Svelte stores
 │   ├── manifest.json / sw.js / icons/
-│   └── build/               # esbuild 出力 (gitignore)
+│   └── build/               # Vite 出力 (gitignore)
 └── Makefile
 ```
 
