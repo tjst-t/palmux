@@ -14,7 +14,7 @@
   import { TouchHandler } from '../../js/touch.js';
   import { VoiceInputAdapter as VoiceInput } from './VoiceInputAdapter.js';
   import { ConnectionManager } from '../../js/connection.js';
-  import { FileBrowser } from '../../js/filebrowser.js';
+  import { FileBrowserAdapter as FileBrowser } from './FileBrowserAdapter.js';
   import { GitBrowser } from '../../js/gitbrowser.js';
 
   /**
