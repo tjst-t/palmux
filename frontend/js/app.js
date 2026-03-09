@@ -5,8 +5,8 @@
 
 import { listSessions, listWindows, listNotifications, deleteNotification, getSessionMode, createWindow, deleteWindow, renameWindow, restartClaudeWindow, getPortmanLeases, getGitHubURL } from './api.js';
 import { DrawerAdapter as Drawer } from '../src/lib/DrawerAdapter.js';
-import { PanelManager } from './panel-manager.js';
-import { Panel } from './panel.js';
+import { PanelManagerAdapter as PanelManager } from '../src/lib/PanelManagerAdapter.js';
+import { PanelAdapter as Panel } from '../src/lib/PanelAdapter.js';
 import { Router } from './router.js';
 import { TabBarAdapter as TabBar } from '../src/lib/TabBarAdapter.js';
 
