@@ -15,7 +15,7 @@
   import { VoiceInputAdapter as VoiceInput } from './VoiceInputAdapter.js';
   import { ConnectionManager } from '../../js/connection.js';
   import { FileBrowserAdapter as FileBrowser } from './FileBrowserAdapter.js';
-  import { GitBrowser } from '../../js/gitbrowser.js';
+  import { GitBrowserAdapter as GitBrowser } from './GitBrowserAdapter.js';
 
   /**
    * @typedef {object} TabState
