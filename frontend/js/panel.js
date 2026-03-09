@@ -5,10 +5,10 @@
 
 import { getWebSocketURL, getCommands, listNotifications, deleteNotification } from './api.js';
 import { PalmuxTerminal } from './terminal.js';
-import { Toolbar } from './toolbar.js';
-import { IMEInput } from './ime-input.js';
+import { ToolbarAdapter as Toolbar } from '../src/lib/ToolbarAdapter.js';
+import { IMEInputAdapter as IMEInput } from '../src/lib/IMEInputAdapter.js';
 import { TouchHandler } from './touch.js';
-import { VoiceInput } from './voice-input.js';
+import { VoiceInputAdapter as VoiceInput } from '../src/lib/VoiceInputAdapter.js';
 import { ConnectionManager } from './connection.js';
 import { FileBrowser } from './filebrowser.js';
 import { GitBrowser } from './gitbrowser.js';
