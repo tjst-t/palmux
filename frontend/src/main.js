@@ -9,6 +9,12 @@ import '../css/gitbrowser.css';
 import '../css/split.css';
 import '../css/tab.css';
 
+// Initialize Svelte stores (available via bridge for Vanilla JS)
+import { stores } from './lib/bridge.js';
+
+// Expose stores globally for Vanilla JS access during migration
+window.__palmuxStores = stores;
+
 // Import existing Vanilla JS app (runs on import)
 import '../js/app.js';
 
