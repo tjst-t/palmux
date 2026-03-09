@@ -50,6 +50,8 @@ export class PanelManager {
     this._resizeHandler = null;
     /** @type {function|null} キーボードショートカットハンドラ */
     this._keyHandler = null;
+    /** @type {function|null} visibilitychange ハンドラ */
+    this._visibilityHandler = null;
 
     this._init();
   }
@@ -71,6 +73,16 @@ export class PanelManager {
     // Keyboard shortcut: Ctrl+Shift+Left/Right for focus switch
     this._keyHandler = (e) => this._handleKeyboardShortcut(e);
     document.addEventListener('keydown', this._keyHandler);
+
+    // ブラウザタブ復帰時にフォーカスパネルのターミナルにフォーカスを復帰する
+    this._visibilityHandler = () => {
+      if (document.visibilityState !== 'visible') return;
+      const terminal = this._focusedPanel?.getTerminal();
+      if (terminal) {
+        terminal.focus();
+      }
+    };
+    document.addEventListener('visibilitychange', this._visibilityHandler);
 
     // Restore split mode from localStorage
     if (this._loadSplitMode() && window.innerWidth >= 900) {
@@ -515,6 +527,10 @@ export class PanelManager {
     if (this._keyHandler) {
       document.removeEventListener('keydown', this._keyHandler);
       this._keyHandler = null;
+    }
+    if (this._visibilityHandler) {
+      document.removeEventListener('visibilitychange', this._visibilityHandler);
+      this._visibilityHandler = null;
     }
     if (this._leftPanel) {
       this._leftPanel.cleanup();

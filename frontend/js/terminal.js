@@ -40,6 +40,8 @@ export class PalmuxTerminal {
     this._boundPasteHandler = null;
     /** @type {boolean} fit() の実行を許可するかどうか（非表示時に無効化） */
     this._fitEnabled = true;
+    /** @type {function|null} 再接続バッファフラッシュ後のコールバック */
+    this._onReconnectFlush = null;
   }
 
   /**
@@ -393,9 +395,11 @@ export class PalmuxTerminal {
       // write() のコールバックでレンダリング完了を待ってから表示する
       this._term.write(data, () => {
         this._container.style.visibility = '';
+        this._onReconnectFlush?.();
       });
     } else {
       this._container.style.visibility = '';
+      this._onReconnectFlush?.();
     }
   }
 
@@ -588,6 +592,15 @@ export class PalmuxTerminal {
    */
   setOnNotificationUpdate(callback) {
     this._onNotificationUpdate = callback;
+  }
+
+  /**
+   * 再接続バッファフラッシュ後のコールバックを設定する。
+   * WebSocket 再接続時のバッファ一括書き込み完了後に呼ばれる。
+   * @param {function|null} callback
+   */
+  setOnReconnectFlush(callback) {
+    this._onReconnectFlush = callback;
   }
 
   /**

@@ -378,6 +378,13 @@ export class Panel {
     });
     connectionManager.connect();
 
+    // 再接続バッファフラッシュ後にフォーカスを復帰する
+    terminal.setOnReconnectFlush(() => {
+      if (this._focused && this._activeTabKey === tabKey) {
+        terminal.focus();
+      }
+    });
+
     // グローバルキーハンドラは無効で作成（_showTab で有効化）
     terminal.setGlobalKeyHandlerEnabled(false);
 
