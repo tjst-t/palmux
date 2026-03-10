@@ -556,17 +556,19 @@ async function handleProjectHeaderClick(projectName, project) {
       branchPickerProject = null;
     }
   } else {
-    expandedProjects = new Set([projectName]);
-
-    // Load worktree cache if needed
+    // Load worktree cache before expanding so branch names are
+    // available at first render (avoids flicker from repo→branch name).
     if (!projectWorktrees.has(projectName) && listProjectWorktreesFn) {
-      listProjectWorktreesFn(projectName).then(wts => {
+      try {
+        const wts = await listProjectWorktreesFn(projectName);
         if (wts && wts.length > 0) {
           projectWorktrees = new Map([...projectWorktrees, [projectName, wts]]);
           groupSessionsByProject(sessions, lastRepos || []);
         }
-      }).catch(() => {});
+      } catch { /* ignore */ }
     }
+
+    expandedProjects = new Set([projectName]);
 
     // Auto-connect to default session
     const { repo: currentRepo } = currentSession ? parseSessionName(currentSession) : { repo: '' };
@@ -1128,8 +1130,8 @@ export function setCurrent(session, windowIndex, opts = {}) {
 
   if (opts.sessionChanged) {
     const { repo } = parseSessionName(session);
-    expandedProjects = new Set([repo]);
-    // Reload data
+    // Reload data and fetch worktrees before expanding to avoid
+    // branch name flicker (repo name → actual branch name).
     const fetches = [listSessionsFn(), listGhqReposFn()];
     if (listProjectWorktreesFn && !projectWorktrees.has(repo)) {
       fetches.push(listProjectWorktreesFn(repo).catch(() => null));
@@ -1140,6 +1142,7 @@ export function setCurrent(session, windowIndex, opts = {}) {
         projectWorktrees = new Map([...projectWorktrees, [repo, worktrees]]);
       }
       groupSessionsByProject(sessions, repos || []);
+      expandedProjects = new Set([repo]);
     }).catch(() => {});
   }
 }
