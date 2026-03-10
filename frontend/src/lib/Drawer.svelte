@@ -101,6 +101,13 @@ let lastRepos = $state([]);
 /** @type {number|null} */
 let refreshTimer = $state(null);
 
+/** App version from meta tag */
+let appVersion = $state('');
+{
+  const meta = document.querySelector('meta[name="app-version"]');
+  if (meta) appVersion = meta.getAttribute('content') || '';
+}
+
 // -- Modal state --
 /** @type {{type: string, message: string, path?: string, session?: Object, projectName?: string, branchSession?: Object}|null} */
 let modal = $state(null);
@@ -331,8 +338,7 @@ function startRefreshPolling() {
       }
       const [newSessions, repos, worktrees] = await Promise.all(fetches);
       if (expandedProject && worktrees && worktrees.length > 0) {
-        projectWorktrees.set(expandedProject, worktrees);
-        projectWorktrees = projectWorktrees; // trigger reactivity
+        projectWorktrees = new Map([...projectWorktrees, [expandedProject, worktrees]]);
       }
       const oldNames = new Set(sessions.map(s => s.name));
       const newNames = new Set((newSessions || []).map(s => s.name));
@@ -372,11 +378,11 @@ function showToast(message) {
 
 async function doOpen() {
   visible = true;
-  expandedProjects.clear();
   if (currentSession) {
     const { repo } = parseSessionName(currentSession);
-    expandedProjects.add(repo);
-    expandedProjects = expandedProjects; // trigger reactivity
+    expandedProjects = new Set([repo]);
+  } else {
+    expandedProjects = new Set();
   }
 
   loading = true;
@@ -394,8 +400,7 @@ async function doOpen() {
     const [newSessions, repos, worktrees] = await Promise.all(fetches);
     sessions = newSessions || [];
     if (expandedProject && worktrees && worktrees.length > 0) {
-      projectWorktrees.set(expandedProject, worktrees);
-      projectWorktrees = projectWorktrees;
+      projectWorktrees = new Map([...projectWorktrees, [expandedProject, worktrees]]);
     }
     groupSessionsByProject(sessions, repos || []);
     loading = false;
@@ -544,24 +549,20 @@ async function handleProjectHeaderClick(projectName, project) {
   if (wasLongPress()) { longPressTriggered = false; return; }
 
   if (expandedProjects.has(projectName)) {
-    expandedProjects.delete(projectName);
-    expandedProjects = expandedProjects;
+    expandedProjects = new Set();
     // Reset branch picker if it was for this project
     if (branchPickerProject === projectName) {
       branchPickerMode = 'none';
       branchPickerProject = null;
     }
   } else {
-    expandedProjects.clear();
-    expandedProjects.add(projectName);
-    expandedProjects = expandedProjects;
+    expandedProjects = new Set([projectName]);
 
     // Load worktree cache if needed
     if (!projectWorktrees.has(projectName) && listProjectWorktreesFn) {
       listProjectWorktreesFn(projectName).then(wts => {
         if (wts && wts.length > 0) {
-          projectWorktrees.set(projectName, wts);
-          projectWorktrees = projectWorktrees;
+          projectWorktrees = new Map([...projectWorktrees, [projectName, wts]]);
           groupSessionsByProject(sessions, lastRepos || []);
         }
       }).catch(() => {});
@@ -606,12 +607,13 @@ function handleOtherSessionClick(session) {
 // ---------------------------------------------------------------------------
 
 function toggleOtherSessions() {
-  if (expandedProjects.has('__other__')) {
-    expandedProjects.delete('__other__');
+  const next = new Set(expandedProjects);
+  if (next.has('__other__')) {
+    next.delete('__other__');
   } else {
-    expandedProjects.add('__other__');
+    next.add('__other__');
   }
-  expandedProjects = expandedProjects;
+  expandedProjects = next;
 }
 
 // ---------------------------------------------------------------------------
@@ -657,18 +659,21 @@ async function handleModalDelete() {
   modalDeleting = true;
   modalDeleteText = 'Deleting...';
 
+  // Save references before closeModal() sets modal to null (after 200ms timeout)
+  const { type, session: modalSession, repo: modalRepo } = modal;
+
   try {
-    if (modal.type === 'delete-session') {
-      if (deleteSessionFn) await deleteSessionFn(modal.session.name);
+    if (type === 'delete-session') {
+      if (deleteSessionFn) await deleteSessionFn(modalSession.name);
       closeModal();
       await reloadSessions();
-      if (modal.session.name === currentSession) {
+      if (modalSession.name === currentSession) {
         await transitionToRecentSession();
       } else if (onDeleteSession) {
         onDeleteSession();
       }
-    } else if (modal.type === 'delete-repo') {
-      if (deleteGhqRepoFn) await deleteGhqRepoFn(modal.repo.full_path);
+    } else if (type === 'delete-repo') {
+      if (deleteGhqRepoFn) await deleteGhqRepoFn(modalRepo.full_path);
       closeModal();
       // Refresh project picker
       await refreshProjectPicker();
@@ -682,13 +687,14 @@ async function handleModalDelete() {
 async function handleBranchRemove() {
   if (!modal || !modal.branchSession) return;
   modalDeleting = true;
+  const { projectName, branchSession } = modal;
   try {
     if (deleteProjectWorktreesFn) {
-      await deleteProjectWorktreesFn(modal.projectName, modal.branchSession.branch, true);
+      await deleteProjectWorktreesFn(projectName, branchSession.branch, true);
     }
     closeModal();
     await reloadSessions();
-    if (modal.branchSession.name === currentSession) {
+    if (branchSession.name === currentSession) {
       await transitionToRecentSession();
     }
   } catch (err) {
@@ -701,13 +707,14 @@ async function handleBranchDeleteWithCheck() {
   if (!modal || !modal.branchSession) return;
   modalDeleting = true;
   modalDeleteText = 'Checking...';
+  const { projectName, branchSession } = modal;
   try {
     let force = false;
     if (isProjectBranchMergedFn) {
-      const { merged } = await isProjectBranchMergedFn(modal.projectName, modal.branchSession.branch);
+      const { merged } = await isProjectBranchMergedFn(projectName, branchSession.branch);
       if (!merged) {
         const confirmed = window.confirm(
-          `Branch "${modal.branchSession.branch}" has unmerged commits. Delete anyway?`
+          `Branch "${branchSession.branch}" has unmerged commits. Delete anyway?`
         );
         if (!confirmed) {
           modalDeleting = false;
@@ -720,14 +727,14 @@ async function handleBranchDeleteWithCheck() {
 
     modalDeleteText = 'Deleting...';
     if (deleteProjectWorktreesFn) {
-      await deleteProjectWorktreesFn(modal.projectName, modal.branchSession.branch, true);
+      await deleteProjectWorktreesFn(projectName, branchSession.branch, true);
     }
     if (deleteProjectBranchFn) {
-      await deleteProjectBranchFn(modal.projectName, modal.branchSession.branch, force);
+      await deleteProjectBranchFn(projectName, branchSession.branch, force);
     }
     closeModal();
     await reloadSessions();
-    if (modal.branchSession.name === currentSession) {
+    if (branchSession.name === currentSession) {
       await transitionToRecentSession();
     }
   } catch (err) {
@@ -948,8 +955,7 @@ async function openBranchPicker(projectName) {
     ]);
 
     if (worktrees && worktrees.length > 0) {
-      projectWorktrees.set(projectName, worktrees);
-      projectWorktrees = projectWorktrees;
+      projectWorktrees = new Map([...projectWorktrees, [projectName, worktrees]]);
     }
 
     const existingBranches = new Set(worktrees.filter(w => w.has_session).map(w => w.branch));
@@ -1122,9 +1128,7 @@ export function setCurrent(session, windowIndex, opts = {}) {
 
   if (opts.sessionChanged) {
     const { repo } = parseSessionName(session);
-    expandedProjects.clear();
-    expandedProjects.add(repo);
-    expandedProjects = expandedProjects;
+    expandedProjects = new Set([repo]);
     // Reload data
     const fetches = [listSessionsFn(), listGhqReposFn()];
     if (listProjectWorktreesFn && !projectWorktrees.has(repo)) {
@@ -1133,8 +1137,7 @@ export function setCurrent(session, windowIndex, opts = {}) {
     Promise.all(fetches).then(([newSessions, repos, worktrees]) => {
       sessions = newSessions || [];
       if (worktrees && worktrees.length > 0) {
-        projectWorktrees.set(repo, worktrees);
-        projectWorktrees = projectWorktrees;
+        projectWorktrees = new Map([...projectWorktrees, [repo, worktrees]]);
       }
       groupSessionsByProject(sessions, repos || []);
     }).catch(() => {});
@@ -1244,27 +1247,30 @@ function getBranchPickerWorktreeBranches() {
   ontouchstart={onTouchStart}
   ontouchend={onTouchEnd}
 >
-  <!-- Sort toggle -->
-  <div class="drawer-sort-toggle">
-    <span
-      class="drawer-sort-label"
-      class:drawer-sort-label--active={sortOrder === 'activity'}
-      data-sort="activity"
-    >Activity</span>
-    <label class="drawer-sort-switch">
-      <input
-        type="checkbox"
-        class="drawer-sort-checkbox"
-        checked={sortOrder === 'name'}
-        onchange={() => { sortOrder = sortOrder === 'activity' ? 'name' : 'activity'; }}
-      />
-      <span class="drawer-sort-slider"></span>
+  <!-- Header -->
+  <div class="drawer-header">
+    <span class="drawer-header-title">Projects</span>
+    <label class="drawer-sort-toggle" aria-label="Sort order">
+      <span
+        class="drawer-sort-label"
+        class:drawer-sort-label--active={sortOrder === 'activity'}
+        data-sort="activity"
+      >Recent</span>
+      <div class="drawer-sort-switch">
+        <input
+          type="checkbox"
+          class="drawer-sort-checkbox"
+          checked={sortOrder === 'name'}
+          onchange={() => { sortOrder = sortOrder === 'activity' ? 'name' : 'activity'; }}
+        />
+        <span class="drawer-sort-slider"></span>
+      </div>
+      <span
+        class="drawer-sort-label"
+        class:drawer-sort-label--active={sortOrder === 'name'}
+        data-sort="name"
+      >A-Z</span>
     </label>
-    <span
-      class="drawer-sort-label"
-      class:drawer-sort-label--active={sortOrder === 'name'}
-      data-sort="name"
-    >Name</span>
 
     <!-- Pin button -->
     <button
@@ -1273,9 +1279,9 @@ function getBranchPickerWorktreeBranches() {
       aria-label={pinned ? 'Unpin drawer' : 'Pin drawer'}
       onclick={(e) => { e.stopPropagation(); doTogglePin(); }}
     >
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M10 1L6 5L2 6L10 14L11 10L15 6Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-        <line x1="2" y1="14" x2="6" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <svg class="drawer-pin-icon" width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <circle cx="7" cy="4.5" r="2.5" stroke="currentColor" stroke-width="1.4"/>
+        <line x1="7" y1="7" x2="7" y2="13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
       </svg>
     </button>
   </div>
@@ -1632,6 +1638,12 @@ function getBranchPickerWorktreeBranches() {
     {/if}
   </div>
 
+  <!-- Footer -->
+  <div class="drawer-footer">
+    <span class="drawer-footer-name">palmux</span>
+    <span class="drawer-footer-version">{appVersion}</span>
+  </div>
+
   <!-- Resize handle (visible when pinned) -->
   {#if pinned}
     <div
@@ -1688,3 +1700,1163 @@ function getBranchPickerWorktreeBranches() {
     class:drawer-toast--visible={toastVisible}
   >{toastMessage}</div>
 {/if}
+
+<style>
+  /* Drawer Overlay */
+  .drawer-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 100;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+  }
+
+  .drawer-overlay--visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Drawer Panel */
+  .drawer {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 280px;
+    max-width: 80vw;
+    height: 100%;
+    background: #16213e;
+    z-index: 101;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .drawer--open {
+    transform: translateX(0);
+  }
+
+  .drawer-header {
+    display: flex;
+    align-items: center;
+    padding: 14px 16px;
+    border-bottom: 1px solid #2a2a4a;
+    flex-shrink: 0;
+  }
+
+  .drawer-header-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #e0e0e0;
+  }
+
+  /* Drawer Sort Toggle */
+  .drawer-sort-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .drawer-sort-label {
+    font-size: 11px;
+    color: #666;
+    transition: color 0.2s;
+  }
+
+  .drawer-sort-label--active {
+    color: #7ec8e3;
+  }
+
+  .drawer-sort-switch {
+    position: relative;
+    width: 32px;
+    height: 18px;
+  }
+
+  .drawer-sort-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+  }
+
+  .drawer-sort-slider {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #2a2a4a;
+    border-radius: 9px;
+    transition: background 0.2s;
+  }
+
+  .drawer-sort-slider::before {
+    content: '';
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    left: 2px;
+    bottom: 2px;
+    background: #7ec8e3;
+    border-radius: 50%;
+    transition: transform 0.2s;
+  }
+
+  .drawer-sort-switch input:checked + .drawer-sort-slider::before {
+    transform: translateX(14px);
+  }
+
+  .drawer-content {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Drawer Session Header */
+  .drawer-session-header {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    min-height: 44px;
+    cursor: pointer;
+    transition: background 0.15s;
+    border-bottom: 1px solid rgba(42, 42, 74, 0.5);
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .drawer-session-header:hover {
+    background: rgba(126, 200, 227, 0.08);
+  }
+
+  .drawer-session-header:active {
+    background: rgba(126, 200, 227, 0.15);
+  }
+
+  .drawer-session-header--current {
+    background: rgba(126, 200, 227, 0.05);
+  }
+
+  .drawer-session-arrow {
+    width: 20px;
+    font-size: 12px;
+    color: #8888aa;
+    flex-shrink: 0;
+  }
+
+  .drawer-session-name {
+    font-size: 15px;
+    font-weight: 500;
+    color: #e0e0e0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Drawer Window Items */
+  .drawer-windows {
+    background: rgba(0, 0, 0, 0.15);
+  }
+
+  .drawer-window-item {
+    display: flex;
+    align-items: center;
+    padding: 10px 16px 10px 36px;
+    min-height: 44px;
+    cursor: pointer;
+    transition: background 0.15s;
+    border-bottom: 1px solid rgba(42, 42, 74, 0.3);
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .drawer-window-item:hover {
+    background: rgba(126, 200, 227, 0.08);
+  }
+
+  .drawer-window-item:active {
+    background: rgba(126, 200, 227, 0.15);
+  }
+
+  .drawer-window-item--current {
+    background: rgba(126, 200, 227, 0.1);
+  }
+
+  .drawer-window-name {
+    flex: 1;
+    font-size: 14px;
+    color: #e0e0e0;
+    font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .drawer-window-index {
+    font-size: 14px;
+    color: #e0e0e0;
+    font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
+    flex-shrink: 0;
+  }
+
+  .drawer-window-rename-input {
+    flex: 1;
+    min-width: 0;
+    font-size: 14px;
+    font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
+    color: #e0e0e0;
+    background: rgba(126, 200, 227, 0.15);
+    border: 1px solid #7ec8e3;
+    border-radius: 4px;
+    padding: 2px 6px;
+    outline: none;
+  }
+
+  .drawer-window-rename-input:focus {
+    border-color: #4caf50;
+    box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+  }
+
+  .drawer-window-active {
+    color: #4caf50;
+    font-size: 10px;
+    flex-shrink: 0;
+    width: 18px;
+    text-align: center;
+  }
+
+  /* Notification Badge (window level) */
+  .drawer-window-badge {
+    display: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #ffb300;
+    flex-shrink: 0;
+    margin-right: 4px;
+  }
+
+  .drawer-window-badge--active {
+    display: inline-block;
+    animation: notification-pulse 2s infinite;
+  }
+
+  /* Notification Badge (session level) */
+  .drawer-session-badge {
+    display: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #ffb300;
+    flex-shrink: 0;
+    margin-left: auto;
+    margin-right: 4px;
+  }
+
+  .drawer-session-badge--active {
+    display: inline-block;
+  }
+
+  @keyframes notification-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* Drawer Virtual Items (Files / Git) */
+  .drawer-virtual-item {
+    display: flex;
+    align-items: center;
+    padding: 10px 16px 10px 36px;
+    min-height: 44px;
+    cursor: pointer;
+    transition: background 0.15s;
+    border-bottom: 1px solid rgba(42, 42, 74, 0.3);
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .drawer-virtual-item:hover {
+    background: rgba(126, 200, 227, 0.08);
+  }
+
+  .drawer-virtual-item:active {
+    background: rgba(126, 200, 227, 0.15);
+  }
+
+  .drawer-virtual-item--current {
+    background: rgba(126, 200, 227, 0.1);
+  }
+
+  .drawer-virtual-item-icon {
+    width: 14px;
+    height: 14px;
+    margin-right: 8px;
+    color: #7ec8e3;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+  }
+
+  .drawer-virtual-item-icon :global(svg) {
+    display: block;
+  }
+
+  .drawer-virtual-item-name {
+    font-size: 14px;
+    color: #e0e0e0;
+    font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
+  }
+
+  /* Drawer Window Terminal Icon */
+  .drawer-window-icon {
+    width: 14px;
+    height: 14px;
+    margin-right: 6px;
+    color: #7ec8e3;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+  }
+
+  .drawer-window-icon :global(svg) {
+    display: block;
+  }
+
+  .drawer-window-icon--claude {
+    color: #D97757;
+  }
+
+  /* Drawer New Window Button */
+  .drawer-new-window-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 16px 8px 36px;
+    min-height: 40px;
+    color: #7ec8e3;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+    border-bottom: 1px solid rgba(42, 42, 74, 0.3);
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .drawer-new-window-btn:hover {
+    background: rgba(126, 200, 227, 0.08);
+  }
+
+  .drawer-new-window-btn:active {
+    background: rgba(126, 200, 227, 0.15);
+  }
+
+  .drawer-new-window-btn--disabled {
+    opacity: 0.5;
+    pointer-events: none;
+  }
+
+  /* Drawer Loading / Empty / Error */
+  .drawer-loading,
+  .drawer-empty,
+  .drawer-error {
+    padding: 24px 16px;
+    text-align: center;
+    font-size: 14px;
+    color: #8888aa;
+  }
+
+  .drawer-error {
+    color: #e57373;
+  }
+
+  .drawer-window-loading {
+    padding: 10px 16px 10px 36px;
+    font-size: 13px;
+    color: #8888aa;
+  }
+
+  /* Drawer New Session Button */
+  .drawer-new-session {
+    padding: 4px 0;
+    border-top: 1px solid rgba(126, 200, 227, 0.08);
+  }
+
+  .drawer-new-session-btn {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding: 10px 16px;
+    min-height: 40px;
+    background: none;
+    border: none;
+    border-radius: 0;
+    color: rgba(126, 200, 227, 0.7);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    letter-spacing: 0.01em;
+  }
+
+  .drawer-new-session-btn:hover {
+    background: rgba(126, 200, 227, 0.06);
+    color: #7ec8e3;
+  }
+
+  .drawer-new-session-btn:active {
+    background: rgba(126, 200, 227, 0.12);
+    color: #7ec8e3;
+  }
+
+  /* Drawer New Session Input Form */
+  .drawer-new-session-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .drawer-new-session-input {
+    width: 100%;
+    padding: 8px 12px;
+    min-height: 40px;
+    background: #1a1a2e;
+    border: 1px solid #2a2a4a;
+    border-radius: 6px;
+    color: #e0e0e0;
+    font-size: 16px;
+    outline: none;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  .drawer-new-session-input::placeholder {
+    color: #6a6a8a;
+  }
+
+  .drawer-new-session-input:focus {
+    border-color: #7ec8e3;
+  }
+
+  .drawer-new-session-input:disabled {
+    opacity: 0.5;
+  }
+
+  .drawer-new-session-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+
+  .drawer-new-session-create {
+    padding: 8px 16px;
+    min-height: 40px;
+    background: #7ec8e3;
+    color: #0f0f23;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .drawer-new-session-create:hover {
+    background: #6ab8d3;
+  }
+
+  .drawer-new-session-create:active {
+    background: #5aa8c3;
+  }
+
+  .drawer-new-session-cancel {
+    padding: 8px 16px;
+    min-height: 40px;
+    background: none;
+    color: #8888aa;
+    border: 1px solid #2a2a4a;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .drawer-new-session-cancel:hover {
+    background: rgba(136, 136, 170, 0.1);
+    color: #e0e0e0;
+  }
+
+  /* Drawer Inline Error */
+  .drawer-inline-error {
+    font-size: 13px;
+    color: #e57373;
+    padding: 4px 0;
+  }
+
+  /* Picker Shared Styles */
+  .drawer-project-picker {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .drawer-project-picker-loading {
+    padding: 10px 16px;
+    font-size: 12px;
+    color: #6a6a8a;
+  }
+
+  .drawer-project-picker-filter {
+    width: calc(100% - 32px);
+    padding: 7px 10px 7px 28px;
+    min-height: 34px;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(126, 200, 227, 0.12);
+    border-radius: 6px;
+    color: #e0e0e0;
+    font-size: 16px;
+    outline: none;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    margin: 6px 16px 4px 16px;
+    transition: border-color 0.2s, background 0.2s;
+    background-image: url("data:image/svg+xml,%3Csvg width='14' height='14' viewBox='0 0 14 14' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='6' cy='6' r='4.5' stroke='%236a6a8a' stroke-width='1.3'/%3E%3Cline x1='9.5' y1='9.5' x2='12.5' y2='12.5' stroke='%236a6a8a' stroke-width='1.3' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: 8px center;
+    background-size: 14px 14px;
+  }
+
+  .drawer-project-picker-filter::placeholder {
+    color: #555577;
+  }
+
+  .drawer-project-picker-filter:focus {
+    border-color: rgba(126, 200, 227, 0.35);
+    background-color: rgba(0, 0, 0, 0.3);
+  }
+
+  .drawer-project-picker-list {
+    max-height: 240px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 2px 0;
+  }
+
+  .drawer-project-picker-item {
+    display: flex;
+    align-items: center;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: background 0.15s;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    border-left: 2px solid transparent;
+  }
+
+  .drawer-project-picker-item:hover {
+    background: rgba(126, 200, 227, 0.06);
+    border-left-color: rgba(126, 200, 227, 0.3);
+  }
+
+  .drawer-project-picker-item:active {
+    background: rgba(126, 200, 227, 0.12);
+    border-left-color: rgba(126, 200, 227, 0.5);
+  }
+
+  .drawer-project-picker-item--creating {
+    opacity: 0.5;
+    pointer-events: none;
+    font-size: 12px;
+    color: #6a6a8a;
+  }
+
+  .drawer-project-picker-item-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: #d0d0e0;
+  }
+
+  .drawer-project-picker-item-path {
+    font-size: 10px;
+    color: #555577;
+    margin-top: 1px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .drawer-project-picker-empty {
+    padding: 12px 16px;
+    text-align: center;
+    font-size: 12px;
+    color: #555577;
+  }
+
+  /* Picker action links */
+  .drawer-picker-actions {
+    padding: 4px 0 2px;
+    border-top: 1px solid rgba(126, 200, 227, 0.06);
+    margin-top: 2px;
+  }
+
+  .drawer-project-picker-clone,
+  .drawer-project-picker-custom {
+    display: flex;
+    align-items: center;
+    padding: 8px 16px;
+    margin: 0;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    border: none;
+    border-radius: 0;
+    color: rgba(126, 200, 227, 0.55);
+    font-size: 12px;
+    font-style: normal;
+    text-align: left;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .drawer-project-picker-clone:hover,
+  .drawer-project-picker-custom:hover {
+    background: rgba(126, 200, 227, 0.06);
+    color: rgba(126, 200, 227, 0.85);
+  }
+
+  .drawer-project-picker-clone:active,
+  .drawer-project-picker-custom:active {
+    background: rgba(126, 200, 227, 0.1);
+  }
+
+  .drawer-project-picker-clone-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #d0d0e0;
+    padding: 8px 16px 4px;
+  }
+
+  .drawer-project-picker-clone-actions {
+    display: flex;
+    gap: 8px;
+    padding: 4px 16px 6px;
+  }
+
+  .drawer-project-picker-clone-actions button {
+    flex: 1;
+  }
+
+  .drawer-project-picker-clone-status {
+    font-size: 12px;
+    color: #7ab896;
+    padding: 4px 16px;
+  }
+
+  .drawer-delete-modal-path {
+    font-size: 11px;
+    color: #8888aa;
+    word-break: break-all;
+    padding: 4px 0 8px;
+    font-family: monospace;
+  }
+
+  /* Cancel button in pickers */
+  .drawer-project-picker-cancel {
+    margin: 0;
+    width: 100%;
+    padding: 8px 16px;
+    border: none;
+    border-radius: 0;
+    text-align: left;
+    font-size: 12px;
+    font-style: normal;
+    min-height: unset;
+    color: rgba(136, 136, 170, 0.6);
+    background: none;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .drawer-project-picker-cancel:hover {
+    background: rgba(136, 136, 170, 0.06);
+    color: rgba(136, 136, 170, 0.9);
+  }
+
+  /* Project/Branch structure */
+  .drawer-branch-item {
+    display: flex;
+    align-items: center;
+    padding: 6px 12px 6px 28px;
+    cursor: pointer;
+    color: #ccc;
+    font-size: 13px;
+    gap: 6px;
+    transition: background-color 0.15s;
+  }
+
+  .drawer-branch-item:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+
+  .drawer-branch-item:active {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
+
+  .drawer-branch-item--current {
+    color: #fff;
+  }
+
+  /* Open Branch trigger */
+  .drawer-open-branch-btn {
+    display: flex;
+    align-items: center;
+    padding: 7px 12px 7px 28px;
+    cursor: pointer;
+    color: rgba(126, 200, 227, 0.5);
+    font-size: 12px;
+    transition: color 0.15s, background-color 0.15s;
+  }
+
+  .drawer-open-branch-btn:hover {
+    color: rgba(126, 200, 227, 0.8);
+    background-color: rgba(126, 200, 227, 0.06);
+  }
+
+  /* Branch Picker (nested inside project) */
+  .drawer-branch-picker {
+    padding: 2px 0 0;
+  }
+
+  .drawer-branch-picker .drawer-project-picker-filter {
+    width: calc(100% - 44px);
+    margin: 4px 16px 4px 28px;
+  }
+
+  .drawer-branch-picker .drawer-project-picker-list {
+    max-height: 200px;
+  }
+
+  .drawer-branch-picker .drawer-project-picker-item {
+    padding: 7px 16px 7px 28px;
+  }
+
+  .drawer-branch-picker .drawer-project-picker-item-name {
+    font-size: 13px;
+    font-weight: 400;
+    color: #c0c0d0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .drawer-branch-picker .drawer-project-picker-empty {
+    padding: 10px 16px 10px 28px;
+  }
+
+  .drawer-branch-picker .drawer-project-picker-clone,
+  .drawer-branch-picker .drawer-project-picker-custom {
+    padding: 7px 16px 7px 28px;
+  }
+
+  .drawer-branch-picker .drawer-project-picker-cancel {
+    padding: 7px 16px 7px 28px;
+  }
+
+  .drawer-branch-picker .drawer-project-picker-clone-title {
+    padding: 8px 16px 4px 28px;
+  }
+
+  .drawer-branch-picker .drawer-project-picker-clone-actions {
+    padding: 4px 16px 6px 28px;
+  }
+
+  .drawer-branch-remote-tag {
+    display: inline-block;
+    padding: 1px 6px;
+    font-size: 9px;
+    font-weight: 500;
+    color: rgba(136, 136, 170, 0.8);
+    background: rgba(136, 136, 170, 0.12);
+    border-radius: 3px;
+    vertical-align: middle;
+    font-style: normal;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .drawer-other-sessions {
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    margin-top: 4px;
+    padding-top: 4px;
+  }
+
+  .drawer-other-sessions-header {
+    color: #888;
+  }
+
+  /* Delete Confirmation Modal */
+  .drawer-delete-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+
+  .drawer-delete-modal-overlay--visible {
+    opacity: 1;
+  }
+
+  .drawer-delete-modal {
+    background: #1a1a2e;
+    border: 1px solid #2a2a4a;
+    border-radius: 12px;
+    padding: 24px;
+    max-width: 300px;
+    width: calc(100% - 48px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  }
+
+  .drawer-delete-modal-message {
+    font-size: 15px;
+    color: #e0e0e0;
+    text-align: center;
+    margin-bottom: 20px;
+    line-height: 1.5;
+    word-break: break-word;
+  }
+
+  .drawer-delete-modal-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+  }
+
+  .drawer-delete-modal-cancel {
+    flex: 1;
+    padding: 10px 16px;
+    min-height: 44px;
+    background: none;
+    color: #8888aa;
+    border: 1px solid #2a2a4a;
+    border-radius: 8px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .drawer-delete-modal-cancel:hover {
+    background: rgba(136, 136, 170, 0.1);
+    color: #e0e0e0;
+  }
+
+  .drawer-delete-modal-delete {
+    flex: 1;
+    padding: 10px 16px;
+    min-height: 44px;
+    background: #e57373;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .drawer-delete-modal-delete:hover {
+    background: #d32f2f;
+  }
+
+  .drawer-delete-modal-delete:active {
+    background: #c62828;
+  }
+
+  .drawer-delete-modal-delete:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  /* Toast notification */
+  .drawer-toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 14px;
+    z-index: 300;
+    transition: transform 0.3s ease;
+    max-width: calc(100% - 32px);
+    text-align: center;
+    word-break: break-word;
+  }
+
+  .drawer-toast--visible {
+    transform: translateX(-50%) translateY(0);
+  }
+
+  .drawer-toast--error {
+    background: #d32f2f;
+    color: #fff;
+    box-shadow: 0 4px 16px rgba(211, 47, 47, 0.3);
+  }
+
+  .drawer-toast--info {
+    background: #1976d2;
+    color: #fff;
+    box-shadow: 0 4px 16px rgba(25, 118, 210, 0.3);
+  }
+
+  .drawer-toast--success {
+    background: #388e3c;
+    color: #fff;
+    box-shadow: 0 4px 16px rgba(56, 142, 60, 0.3);
+  }
+
+  /* Drawer Pin Button */
+  .drawer-pin-btn {
+    display: none;
+  }
+
+  @media (min-width: 601px) {
+    .drawer-pin-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      margin-left: 4px;
+      background: none;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      color: #8888aa;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+
+    .drawer-pin-btn:hover {
+      background: rgba(126, 200, 227, 0.1);
+      color: #7ec8e3;
+    }
+
+    .drawer-pin-btn:active {
+      background: rgba(126, 200, 227, 0.2);
+    }
+
+    :global(.drawer-pin-icon) {
+      transition: transform 0.2s ease;
+      transform: rotate(45deg);
+    }
+
+    .drawer-pin-btn--active {
+      color: #7ec8e3;
+      border-color: rgba(126, 200, 227, 0.3);
+      background: rgba(126, 200, 227, 0.1);
+    }
+
+    .drawer-pin-btn--active :global(.drawer-pin-icon) {
+      transform: rotate(0deg);
+    }
+
+    .drawer-pin-btn--active :global(.drawer-pin-icon circle) {
+      fill: currentColor;
+    }
+
+    /* Pinned Drawer */
+    .drawer.drawer--pinned {
+      transform: translateX(0);
+      width: var(--drawer-pinned-width, 280px);
+      max-width: none;
+      border-right: 1px solid #2a2a4a;
+    }
+
+    /* Drawer Resize Handle */
+    .drawer-resize-handle {
+      position: absolute;
+      top: 0;
+      right: -4px;
+      width: 8px;
+      height: 100%;
+      cursor: col-resize;
+      z-index: 10;
+      display: none;
+    }
+
+    .drawer--pinned .drawer-resize-handle {
+      display: block;
+    }
+
+    .drawer-resize-handle:hover,
+    .drawer-resize-handle--active {
+      background: rgba(126, 200, 227, 0.3);
+    }
+
+    /* App layout shift when drawer is pinned */
+    :global(#app) {
+      transition: margin-left 0.3s ease;
+    }
+
+    :global(body.drawer-pinned #app) {
+      margin-left: var(--drawer-pinned-width, 280px);
+    }
+  }
+
+  /* Drawer Footer */
+  .drawer-footer {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px 16px;
+    border-top: 1px solid rgba(42, 42, 74, 0.6);
+  }
+
+  .drawer-footer-name {
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(126, 200, 227, 0.5);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .drawer-footer-version {
+    font-size: 11px;
+    color: rgba(136, 136, 170, 0.5);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Mobile adjustments */
+  @media (max-width: 600px) {
+    .drawer {
+      width: 260px;
+    }
+
+    .drawer-session-header {
+      padding: 10px 14px;
+    }
+
+    .drawer-virtual-item {
+      padding: 8px 14px 8px 32px;
+    }
+
+    .drawer-virtual-item-name {
+      font-size: 13px;
+    }
+
+    .drawer-window-item {
+      padding: 8px 14px 8px 32px;
+    }
+
+    .drawer-new-window-btn {
+      padding: 6px 14px 6px 32px;
+      font-size: 12px;
+    }
+
+    .drawer-session-name {
+      font-size: 14px;
+    }
+
+    .drawer-window-name {
+      font-size: 13px;
+    }
+
+    .drawer-new-session-btn {
+      padding: 8px 14px;
+      font-size: 12px;
+    }
+
+    .drawer-project-picker-filter {
+      margin: 4px 14px;
+      width: calc(100% - 28px);
+    }
+
+    .drawer-project-picker-list {
+      max-height: 200px;
+    }
+
+    .drawer-project-picker-item {
+      padding: 7px 14px;
+    }
+
+    .drawer-project-picker-item-name {
+      font-size: 12px;
+    }
+
+    .drawer-project-picker-item-path {
+      font-size: 9px;
+    }
+
+    .drawer-branch-picker .drawer-project-picker-filter {
+      margin-left: 24px;
+      width: calc(100% - 38px);
+    }
+
+    .drawer-branch-picker .drawer-project-picker-item {
+      padding: 6px 14px 6px 24px;
+    }
+
+    .drawer-branch-picker .drawer-project-picker-empty {
+      padding: 8px 14px 8px 24px;
+    }
+
+    .drawer-branch-picker .drawer-project-picker-clone,
+    .drawer-branch-picker .drawer-project-picker-custom {
+      padding: 6px 14px 6px 24px;
+    }
+
+    .drawer-branch-picker .drawer-project-picker-cancel {
+      padding: 6px 14px 6px 24px;
+    }
+
+    .drawer-branch-item {
+      padding: 6px 14px 6px 24px;
+    }
+
+    .drawer-open-branch-btn {
+      padding: 6px 14px 6px 24px;
+    }
+
+    .drawer-delete-modal {
+      padding: 20px;
+      max-width: 260px;
+    }
+
+    .drawer-delete-modal-message {
+      font-size: 14px;
+    }
+  }
+</style>

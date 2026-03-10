@@ -6,7 +6,7 @@
    * タブキャッシュにより、同一セッション内の複数ウィンドウ・Files・Git を高速に切り替える。
    */
 
-  import { onDestroy } from 'svelte';
+  import { onDestroy, flushSync } from 'svelte';
   import { getWebSocketURL, getCommands, listNotifications, deleteNotification } from '../../js/api.js';
   import { PalmuxTerminal } from '../../js/terminal.js';
   import { ToolbarAdapter as Toolbar } from './ToolbarAdapter.js';
@@ -14,23 +14,24 @@
   import { TouchHandler } from '../../js/touch.js';
   import { VoiceInputAdapter as VoiceInput } from './VoiceInputAdapter.js';
   import { ConnectionManager } from '../../js/connection.js';
-  import { FileBrowserAdapter as FileBrowser } from './FileBrowserAdapter.js';
-  import { GitBrowserAdapter as GitBrowser } from './GitBrowserAdapter.js';
+  import { FileBrowser } from '../../js/filebrowser.js';
+  import { GitBrowser } from '../../js/gitbrowser.js';
 
   /**
    * @typedef {object} TabState
+   * @property {string} key
    * @property {'terminal'|'files'|'git'} type
    * @property {number|null} windowIndex
-   * @property {HTMLElement} rootEl
    * @property {PalmuxTerminal|null} terminal
    * @property {Toolbar|null} toolbar
    * @property {IMEInput|null} imeInput
    * @property {TouchHandler|null} touchHandler
    * @property {ConnectionManager|null} connectionManager
-   * @property {HTMLElement|null} reconnectOverlayEl
    * @property {VoiceInput|null} voiceInput
    * @property {FileBrowser|null} fileBrowser
    * @property {GitBrowser|null} gitBrowser
+   * @property {boolean} reconnecting
+   * @property {HTMLElement|null} rootEl - reference to the root DOM element (set by action)
    */
 
   let {
@@ -65,33 +66,16 @@
   /** @type {ConnectionManager|null} */
   let _connectionManager = null;
 
-  /** @type {Map<string, TabState>} */
-  const _tabCache = new Map();
+  /** @type {TabState[]} */
+  let tabs = $state([]);
   /** @type {string|null} */
-  let _activeTabKey = null;
+  let activeTabKey = $state(null);
   let _focused = false;
 
   /** @type {HTMLElement} */
   let _el = $state(null);
   let _headerEl = $state(null);
   let _headerTitleEl = $state(null);
-  let _contentEl = $state(null);
-
-  function initPanel(el) {
-    _el = el;
-  }
-
-  function initHeader(el) {
-    _headerEl = el;
-  }
-
-  function initHeaderTitle(el) {
-    _headerTitleEl = el;
-  }
-
-  function initContent(el) {
-    _contentEl = el;
-  }
 
   function handleMouseDown() {
     if (onFocusRequest) onFocusRequest(panelAPI);
@@ -101,16 +85,27 @@
     if (onFocusRequest) onFocusRequest(panelAPI);
   }
 
+  // ───────── タブ検索ヘルパー ─────────
+
+  function _findTab(key) {
+    return tabs.find(t => t.key === key) ?? null;
+  }
+
+  function _findTabIndex(key) {
+    return tabs.findIndex(t => t.key === key);
+  }
+
   // ───────── タブキャッシュ ─────────
 
   function switchToTab(tabKey) {
-    if (_activeTabKey === tabKey) return;
+    if (activeTabKey === tabKey) return;
 
-    if (_activeTabKey && _tabCache.has(_activeTabKey)) {
-      _hideTab(_tabCache.get(_activeTabKey));
+    if (activeTabKey) {
+      const prevTab = _findTab(activeTabKey);
+      if (prevTab) _hideTab(prevTab);
     }
 
-    if (!_tabCache.has(tabKey)) {
+    if (!_findTab(tabKey)) {
       const colonIdx = tabKey.indexOf(':');
       const type = colonIdx >= 0 ? tabKey.substring(0, colonIdx) : tabKey;
       const indexStr = colonIdx >= 0 ? tabKey.substring(colonIdx + 1) : null;
@@ -128,9 +123,8 @@
       }
     }
 
-    const tabState = _tabCache.get(tabKey);
-    _showTab(tabState);
-    _activeTabKey = tabKey;
+    const tabState = _findTab(tabKey);
+    activeTabKey = tabKey;
     _saveLastTab();
 
     if (tabState.type === 'terminal') {
@@ -141,6 +135,11 @@
       _connectionManager = tabState.connectionManager;
       windowIndex = tabState.windowIndex;
       viewMode = 'terminal';
+      // _showTab logic is handled by the action when terminal becomes visible
+      // For already-initialized terminals, trigger show logic
+      if (tabState.terminal) {
+        _showTabLogic(tabState);
+      }
     } else if (tabState.type === 'files') {
       viewMode = 'filebrowser';
     } else if (tabState.type === 'git') {
@@ -151,38 +150,117 @@
   function _createTerminalTab(windowIdx) {
     const tabKey = `terminal:${windowIdx}`;
 
-    const rootEl = document.createElement('div');
-    rootEl.className = 'panel-terminal-view hidden';
+    /** @type {TabState} */
+    const tabState = {
+      key: tabKey,
+      type: 'terminal',
+      windowIndex: windowIdx,
+      terminal: null,
+      toolbar: null,
+      imeInput: null,
+      touchHandler: null,
+      connectionManager: null,
+      voiceInput: null,
+      fileBrowser: null,
+      gitBrowser: null,
+      reconnecting: false,
+      rootEl: null,
+    };
 
-    const terminalWrapperEl = document.createElement('div');
-    terminalWrapperEl.className = 'panel-terminal-wrapper';
+    tabs.push(tabState);
+  }
 
-    const terminalContainerEl = document.createElement('div');
-    terminalContainerEl.className = 'panel-terminal-container';
+  function _createFilesTab(initialPath = null) {
+    /** @type {TabState} */
+    const tabState = {
+      key: 'files',
+      type: 'files',
+      windowIndex: null,
+      terminal: null,
+      toolbar: null,
+      imeInput: null,
+      touchHandler: null,
+      connectionManager: null,
+      voiceInput: null,
+      fileBrowser: null,
+      gitBrowser: null,
+      reconnecting: false,
+      rootEl: null,
+      _initialPath: initialPath,
+    };
 
-    const reconnectOverlayEl = document.createElement('div');
-    reconnectOverlayEl.className = 'panel-reconnect-overlay hidden';
-    const reconnectText = document.createElement('span');
-    reconnectText.className = 'reconnect-overlay-text';
-    reconnectText.textContent = 'Reconnecting...';
-    reconnectOverlayEl.appendChild(reconnectText);
+    tabs.push(tabState);
+  }
 
-    terminalWrapperEl.appendChild(terminalContainerEl);
-    terminalWrapperEl.appendChild(reconnectOverlayEl);
+  function _createGitTab() {
+    /** @type {TabState} */
+    const tabState = {
+      key: 'git',
+      type: 'git',
+      windowIndex: null,
+      terminal: null,
+      toolbar: null,
+      imeInput: null,
+      touchHandler: null,
+      connectionManager: null,
+      voiceInput: null,
+      fileBrowser: null,
+      gitBrowser: null,
+      reconnecting: false,
+      rootEl: null,
+    };
 
-    const imeContainerEl = document.createElement('div');
-    const toolbarContainerEl = document.createElement('div');
+    tabs.push(tabState);
+  }
 
-    rootEl.appendChild(terminalWrapperEl);
-    rootEl.appendChild(imeContainerEl);
-    rootEl.appendChild(toolbarContainerEl);
+  function _hideTab(tabState) {
+    if (tabState.type === 'terminal') {
+      _saveToolbarState();
+    }
+    if (tabState.type === 'terminal' && tabState.terminal) {
+      tabState.terminal.setFitEnabled(false);
+      tabState.terminal.setGlobalKeyHandlerEnabled(false);
+    }
+  }
 
-    _contentEl.appendChild(rootEl);
+  /** Apply show logic for a terminal tab (fit, focus, enable) */
+  function _showTabLogic(tabState) {
+    if (tabState.type === 'terminal' && tabState.terminal) {
+      tabState.terminal.setFitEnabled(true);
+      tabState.terminal.setGlobalKeyHandlerEnabled(_focused);
+      requestAnimationFrame(() => {
+        tabState.terminal.fit();
+        if (_focused) tabState.terminal.focus();
+      });
+    }
+  }
 
-    const terminal = new PalmuxTerminal(terminalContainerEl);
+  function _destroyTabState(tabState) {
+    if (tabState.type === 'terminal') {
+      if (tabState.voiceInput) tabState.voiceInput.dispose();
+      if (tabState.touchHandler) tabState.touchHandler.destroy();
+      if (tabState.imeInput) tabState.imeInput.dispose();
+      if (tabState.toolbar) tabState.toolbar.dispose();
+      if (tabState.connectionManager) tabState.connectionManager.disconnect();
+      if (tabState.terminal) tabState.terminal.disconnect();
+    } else if (tabState.type === 'files') {
+      if (tabState.fileBrowser) tabState.fileBrowser.dispose();
+    } else if (tabState.type === 'git') {
+      if (tabState.gitBrowser) tabState.gitBrowser.dispose();
+    }
+  }
+
+  // ───────── Svelte use:action directives ─────────
+
+  function initTerminal(node, tab) {
+    tab.rootEl = node.closest('.panel-terminal-view');
+    const tabKey = tab.key;
+    const windowIdx = tab.windowIndex;
+
+    const terminal = new PalmuxTerminal(node);
 
     terminal.setOnClientStatus((sess, win) => {
-      if (_activeTabKey !== tabKey) return;
+      if (activeTabKey !== tabKey) return;
       const sessionChanged = sess !== session;
       const windowChanged = win !== windowIndex;
       if (!sessionChanged && !windowChanged) return;
@@ -196,7 +274,30 @@
       if (onNotificationUpdate) onNotificationUpdate(notifications);
     });
 
-    const imeInput = new IMEInput(imeContainerEl, {
+    tab.terminal = terminal;
+
+    // If this tab is the active one, set module-level refs and show
+    if (activeTabKey === tabKey) {
+      _terminal = terminal;
+      _showTabLogic(tab);
+    }
+
+    terminal.setGlobalKeyHandlerEnabled(false);
+
+    return {
+      destroy() {
+        // Cleanup is handled by _destroyTabState
+      }
+    };
+  }
+
+  function initIME(node, tab) {
+    const terminal = tab.terminal;
+    if (!terminal) return;
+
+    const tabKey = tab.key;
+
+    const imeInput = new IMEInput(node, {
       onSend: (text) => terminal.sendInput(text),
       onToggle: (visible) => {
         terminal.setIMEMode(visible);
@@ -216,21 +317,53 @@
       });
     }
 
-    const toolbar = new Toolbar(toolbarContainerEl, {
+    tab.imeInput = imeInput;
+    tab.voiceInput = voiceInput;
+
+    if (activeTabKey === tabKey) {
+      _imeInput = imeInput;
+    }
+
+    // Apply keyboard mode state
+    if (globalUIState.keyboardMode !== 'none') {
+      terminal.setKeyboardMode(globalUIState.keyboardMode);
+      if (globalUIState.keyboardMode === 'ime') {
+        imeInput.show();
+      }
+    }
+
+    return {
+      destroy() {
+        // Cleanup is handled by _destroyTabState
+      }
+    };
+  }
+
+  function initToolbar(node, tab) {
+    const terminal = tab.terminal;
+    const imeInput = tab.imeInput;
+    if (!terminal) return;
+
+    const tabKey = tab.key;
+    const windowIdx = tab.windowIndex;
+
+    const toolbar = new Toolbar(node, {
       onSendKey: (key) => terminal.sendInput(key),
       onFetchCommands: (sess) => getCommands(sess),
       onKeyboardMode: (mode) => {
         terminal.setKeyboardMode(mode);
-        if (mode === 'ime') {
-          imeInput.show();
-        } else {
-          imeInput.hide();
+        if (imeInput) {
+          if (mode === 'ime') {
+            imeInput.show();
+          } else {
+            imeInput.hide();
+          }
         }
         requestAnimationFrame(() => terminal.fit());
       },
     });
     terminal.setToolbar(toolbar);
-    imeInput.setToolbar(toolbar);
+    if (imeInput) imeInput.setToolbar(toolbar);
     toolbar.setCurrentSession(session);
     toolbar.restoreState(globalUIState);
 
@@ -243,30 +376,34 @@
       }
     }
 
-    if (globalUIState.keyboardMode !== 'none') {
-      terminal.setKeyboardMode(globalUIState.keyboardMode);
-      if (globalUIState.keyboardMode === 'ime') {
-        imeInput.show();
+    tab.toolbar = toolbar;
+
+    // Init touch handler (needs terminal container, use the terminal container node)
+    const terminalContainerEl = tab.rootEl?.querySelector('.panel-terminal-container');
+    if (terminalContainerEl) {
+      const touchHandler = new TouchHandler(terminalContainerEl, {
+        terminal,
+        onPinchZoom: (delta) => {
+          if (delta > 0) terminal.increaseFontSize();
+          else terminal.decreaseFontSize();
+        },
+      });
+      tab.touchHandler = touchHandler;
+      if (activeTabKey === tabKey) {
+        _touchHandler = touchHandler;
       }
     }
 
-    const touchHandler = new TouchHandler(terminalContainerEl, {
-      terminal,
-      onPinchZoom: (delta) => {
-        if (delta > 0) terminal.increaseFontSize();
-        else terminal.decreaseFontSize();
-      },
-    });
-
+    // Init connection manager
     const connectionManager = new ConnectionManager({
       getWSUrl: () => getWebSocketURL(session, windowIdx),
       onStateChange: (state) => {
         if (state === 'connected') {
-          reconnectOverlayEl.classList.add('hidden');
+          tab.reconnecting = false;
         } else if (state === 'connecting') {
-          reconnectOverlayEl.classList.remove('hidden');
+          tab.reconnecting = true;
         } else {
-          reconnectOverlayEl.classList.add('hidden');
+          tab.reconnecting = false;
         }
         if (state === 'connected') {
           deleteNotification(session, windowIdx)
@@ -278,7 +415,7 @@
             })
             .catch(() => {});
         }
-        if (_activeTabKey === tabKey && onConnectionStateChange) {
+        if (activeTabKey === tabKey && onConnectionStateChange) {
           onConnectionStateChange(state);
         }
       },
@@ -286,39 +423,35 @@
     });
     connectionManager.connect();
 
+    tab.connectionManager = connectionManager;
+
     terminal.setOnReconnectFlush(() => {
-      if (_focused && _activeTabKey === tabKey) {
+      if (_focused && activeTabKey === tabKey) {
         terminal.focus();
       }
     });
 
-    terminal.setGlobalKeyHandlerEnabled(false);
+    if (activeTabKey === tabKey) {
+      _toolbar = toolbar;
+      _connectionManager = connectionManager;
+      // Now that everything is initialized, show the tab
+      _showTabLogic(tab);
+    }
 
-    /** @type {TabState} */
-    const tabState = {
-      type: 'terminal',
-      windowIndex: windowIdx,
-      rootEl,
-      terminal,
-      toolbar,
-      imeInput,
-      touchHandler,
-      connectionManager,
-      reconnectOverlayEl,
-      voiceInput,
-      fileBrowser: null,
-      gitBrowser: null,
+    return {
+      destroy() {
+        // Cleanup is handled by _destroyTabState
+      }
     };
-
-    _tabCache.set(tabKey, tabState);
   }
 
-  function _createFilesTab(initialPath = null) {
-    const rootEl = document.createElement('div');
-    rootEl.className = 'panel-filebrowser-view hidden';
+  function initFileBrowser(node, tab) {
+    tab.rootEl = node;
+    const initialPath = tab._initialPath || null;
 
     const wrapper = document.createElement('div');
     wrapper.style.height = '100%';
+    node.appendChild(wrapper);
 
     const browser = new FileBrowser(wrapper, {
       onFileSelect: (sess, filePath) => {
@@ -332,37 +465,23 @@
       },
     });
 
-    rootEl.appendChild(wrapper);
-    _contentEl.appendChild(rootEl);
-
     browser.open(session, initialPath || '.');
+    tab.fileBrowser = browser;
 
-    /** @type {TabState} */
-    const tabState = {
-      type: 'files',
-      windowIndex: null,
-      rootEl,
-      terminal: null,
-      toolbar: null,
-      imeInput: null,
-      touchHandler: null,
-      connectionManager: null,
-      reconnectOverlayEl: null,
-      voiceInput: null,
-      fileBrowser: browser,
-      gitBrowser: null,
+    return {
+      destroy() {
+        // Cleanup is handled by _destroyTabState
+      }
     };
-
-    _tabCache.set('files', tabState);
   }
 
-  function _createGitTab() {
-    const rootEl = document.createElement('div');
-    rootEl.className = 'panel-gitbrowser-view hidden';
+  function initGitBrowser(node, tab) {
+    tab.rootEl = node;
 
     const wrapper = document.createElement('div');
     wrapper.style.height = '100%';
     wrapper.style.position = 'relative';
+    node.appendChild(wrapper);
 
     const browser = new GitBrowser(wrapper, {
       onNavigate: (gitState) => {
@@ -370,75 +489,22 @@
       },
     });
 
-    rootEl.appendChild(wrapper);
-    _contentEl.appendChild(rootEl);
-
     browser.open(session);
+    tab.gitBrowser = browser;
 
-    /** @type {TabState} */
-    const tabState = {
-      type: 'git',
-      windowIndex: null,
-      rootEl,
-      terminal: null,
-      toolbar: null,
-      imeInput: null,
-      touchHandler: null,
-      connectionManager: null,
-      reconnectOverlayEl: null,
-      voiceInput: null,
-      fileBrowser: null,
-      gitBrowser: browser,
+    return {
+      destroy() {
+        // Cleanup is handled by _destroyTabState
+      }
     };
-
-    _tabCache.set('git', tabState);
-  }
-
-  function _hideTab(tabState) {
-    if (tabState.type === 'terminal') {
-      _saveToolbarState();
-    }
-    tabState.rootEl.classList.add('hidden');
-    if (tabState.type === 'terminal' && tabState.terminal) {
-      tabState.terminal.setFitEnabled(false);
-      tabState.terminal.setGlobalKeyHandlerEnabled(false);
-    }
-  }
-
-  function _showTab(tabState) {
-    tabState.rootEl.classList.remove('hidden');
-    if (tabState.type === 'terminal' && tabState.terminal) {
-      tabState.terminal.setFitEnabled(true);
-      tabState.terminal.setGlobalKeyHandlerEnabled(_focused);
-      requestAnimationFrame(() => {
-        tabState.terminal.fit();
-        if (_focused) tabState.terminal.focus();
-      });
-    }
-  }
-
-  function _destroyTabState(tabState) {
-    if (tabState.type === 'terminal') {
-      if (tabState.voiceInput) tabState.voiceInput.destroy();
-      if (tabState.touchHandler) tabState.touchHandler.destroy();
-      if (tabState.imeInput) tabState.imeInput.destroy();
-      if (tabState.toolbar) tabState.toolbar.dispose();
-      if (tabState.connectionManager) tabState.connectionManager.disconnect();
-      if (tabState.terminal) tabState.terminal.disconnect();
-    } else if (tabState.type === 'files') {
-      if (tabState.fileBrowser) tabState.fileBrowser.dispose();
-    } else if (tabState.type === 'git') {
-      if (tabState.gitBrowser) tabState.gitBrowser.dispose();
-    }
-    tabState.rootEl.remove();
   }
 
   // ───────── 内部ユーティリティ ─────────
 
   function _saveLastTab() {
-    if (!session || !_activeTabKey) return;
+    if (!session || !activeTabKey) return;
     try {
-      const type = _activeTabKey.startsWith('terminal:') ? 'terminal' : _activeTabKey;
+      const type = activeTabKey.startsWith('terminal:') ? 'terminal' : activeTabKey;
       localStorage.setItem(`palmux-last-tab-${session}`, type);
     } catch { /* ignore */ }
   }
@@ -475,16 +541,17 @@
   export { switchToTab };
 
   export function getActiveTabKey() {
-    return _activeTabKey;
+    return activeTabKey;
   }
 
   export function removeTerminalTab(windowIdx) {
     const tabKey = `terminal:${windowIdx}`;
-    const tabState = _tabCache.get(tabKey);
-    if (!tabState) return;
+    const idx = _findTabIndex(tabKey);
+    if (idx < 0) return;
+    const tabState = tabs[idx];
 
-    if (_activeTabKey === tabKey) {
-      _activeTabKey = null;
+    if (activeTabKey === tabKey) {
+      activeTabKey = null;
       if (tabState.type === 'terminal') {
         _terminal = null;
         _toolbar = null;
@@ -495,29 +562,29 @@
     }
 
     _destroyTabState(tabState);
-    _tabCache.delete(tabKey);
+    tabs.splice(idx, 1);
   }
 
   export function pruneTerminalTabs(windows) {
     const validIndices = new Set(windows.map(w => w.index));
-    const staleKeys = [];
-    for (const [tabKey, tabState] of _tabCache) {
-      if (tabState.type !== 'terminal') continue;
-      if (!validIndices.has(tabState.windowIndex)) {
-        staleKeys.push(tabKey);
+    const staleIndices = [];
+    for (const tab of tabs) {
+      if (tab.type !== 'terminal') continue;
+      if (!validIndices.has(tab.windowIndex)) {
+        staleIndices.push(tab.windowIndex);
       }
     }
-    for (const tabKey of staleKeys) {
-      removeTerminalTab(parseInt(tabKey.split(':')[1], 10));
+    for (const winIdx of staleIndices) {
+      removeTerminalTab(winIdx);
     }
   }
 
   export function clearTabCache() {
-    for (const [, tabState] of _tabCache) {
+    for (const tabState of tabs) {
       _destroyTabState(tabState);
     }
-    _tabCache.clear();
-    _activeTabKey = null;
+    tabs = [];
+    activeTabKey = null;
     _terminal = null;
     _toolbar = null;
     _imeInput = null;
@@ -529,6 +596,12 @@
     if (sessionName !== session) {
       _saveToolbarState();
       clearTabCache();
+      // flushSync is required: clearTabCache sets tabs=[] and the subsequent
+      // switchToTab re-creates a tab with the same key (e.g. "terminal:2").
+      // Without flushing, Svelte batches the removal and re-addition, sees the
+      // same keyed item, and reuses the DOM node without re-running use: actions
+      // (initTerminal, initToolbar, etc.), leaving the terminal uninitialized.
+      flushSync();
     }
     session = sessionName;
     switchToTab(`terminal:${windowIdx}`);
@@ -543,10 +616,10 @@
 
   export function showFileBrowser(sessionName, opts = {}) {
     const path = opts.path ?? null;
-    if (!_tabCache.has('files')) {
+    if (!_findTab('files')) {
       _createFilesTab(path);
     } else if (path !== null) {
-      const tabState = _tabCache.get('files');
+      const tabState = _findTab('files');
       if (tabState.fileBrowser) {
         tabState.fileBrowser.navigateTo(path);
       }
@@ -555,7 +628,7 @@
   }
 
   export function showGitBrowser(sessionName) {
-    if (!_tabCache.has('git')) {
+    if (!_findTab('git')) {
       _createGitTab();
     }
     switchToTab('git');
@@ -595,7 +668,7 @@
 
   export function getFileBrowsers() {
     const map = new Map();
-    const tabState = _tabCache.get('files');
+    const tabState = _findTab('files');
     if (tabState && tabState.fileBrowser && session) {
       map.set(session, { wrapper: tabState.rootEl, browser: tabState.fileBrowser });
     }
@@ -604,7 +677,7 @@
 
   export function getGitBrowsers() {
     const map = new Map();
-    const tabState = _tabCache.get('git');
+    const tabState = _findTab('git');
     if (tabState && tabState.gitBrowser && session) {
       map.set(session, { wrapper: tabState.rootEl, browser: tabState.gitBrowser });
     }
@@ -645,17 +718,17 @@
 
   export function getCurrentFilePath() {
     if (viewMode !== 'filebrowser' || !session) return null;
-    const tabState = _tabCache.get('files');
+    const tabState = _findTab('files');
     if (!tabState || !tabState.fileBrowser) return null;
     return tabState.fileBrowser.getCurrentPath() || '.';
   }
 
   export function increaseFontSize() {
     if (viewMode === 'filebrowser') {
-      const tabState = _tabCache.get('files');
+      const tabState = _findTab('files');
       if (tabState && tabState.fileBrowser) tabState.fileBrowser.increaseFontSize();
     } else if (viewMode === 'gitbrowser') {
-      const tabState = _tabCache.get('git');
+      const tabState = _findTab('git');
       if (tabState && tabState.gitBrowser) tabState.gitBrowser.increaseFontSize();
     } else if (_terminal) {
       _terminal.increaseFontSize();
@@ -664,10 +737,10 @@
 
   export function decreaseFontSize() {
     if (viewMode === 'filebrowser') {
-      const tabState = _tabCache.get('files');
+      const tabState = _findTab('files');
       if (tabState && tabState.fileBrowser) tabState.fileBrowser.decreaseFontSize();
     } else if (viewMode === 'gitbrowser') {
-      const tabState = _tabCache.get('git');
+      const tabState = _findTab('git');
       if (tabState && tabState.gitBrowser) tabState.gitBrowser.decreaseFontSize();
     } else if (_terminal) {
       _terminal.decreaseFontSize();
@@ -676,7 +749,7 @@
 
   export function setClaudeWindow(isClaude) {
     if (_toolbar) _toolbar.setClaudeWindow(isClaude);
-    for (const [, tabState] of _tabCache) {
+    for (const tabState of tabs) {
       if (tabState.toolbar && tabState.toolbar !== _toolbar) {
         tabState.toolbar.setClaudeWindow(isClaude);
       }
@@ -754,12 +827,185 @@
 <div
   class="panel panel--single"
   data-panel-id={id}
-  use:initPanel
+  bind:this={_el}
   onmousedown={handleMouseDown}
   ontouchstart={handleTouchStart}
 >
-  <div class="panel-header" style:display="none" use:initHeader>
-    <span class="panel-header-title" use:initHeaderTitle></span>
+  <div class="panel-header" style:display="none" bind:this={_headerEl}>
+    <span class="panel-header-title" bind:this={_headerTitleEl}></span>
   </div>
-  <div class="panel-content" use:initContent></div>
+  <div class="panel-content">
+    {#each tabs as tab (tab.key)}
+      {#if tab.type === 'terminal'}
+        <div class="panel-terminal-view" class:hidden={tab.key !== activeTabKey}>
+          <div class="panel-terminal-wrapper">
+            <div class="panel-terminal-container" use:initTerminal={tab}></div>
+            <div class="panel-reconnect-overlay" class:hidden={!tab.reconnecting}>
+              <span class="reconnect-overlay-text">Reconnecting...</span>
+            </div>
+          </div>
+          <div use:initIME={tab}></div>
+          <div use:initToolbar={tab}></div>
+        </div>
+      {:else if tab.type === 'files'}
+        <div class="panel-filebrowser-view" class:hidden={tab.key !== activeTabKey} use:initFileBrowser={tab}></div>
+      {:else if tab.type === 'git'}
+        <div class="panel-gitbrowser-view" class:hidden={tab.key !== activeTabKey} use:initGitBrowser={tab}></div>
+      {/if}
+    {/each}
+  </div>
 </div>
+
+<style>
+  /* Individual Panel */
+  .panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+    position: relative;
+    min-width: 0;
+  }
+
+  /* Single panel mode: panel takes full width */
+  :global(.panel--single) {
+    flex: 1;
+  }
+
+  /* Split mode panels */
+  :global(.panel--left) {
+    /* width set by JS via CSS variable */
+    width: var(--panel-left-width, 50%);
+    flex-shrink: 0;
+  }
+
+  :global(.panel--right) {
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* Focus indicator */
+  :global(.panel--focused) {
+    /* no outline (was causing a visual bleed line on the adjacent panel) */
+  }
+
+  /* Panel Header (visible in split mode only) */
+  .panel-header {
+    display: flex;
+    align-items: center;
+    height: 32px;
+    min-height: 32px;
+    padding: 0 8px;
+    background: #12192e;
+    border-bottom: 1px solid #2a2a4a;
+    user-select: none;
+    -webkit-user-select: none;
+    flex-shrink: 0;
+    gap: 4px;
+    transition: background 0.15s, border-color 0.15s;
+  }
+
+  /* Focused panel header accent */
+  :global(.panel--focused) .panel-header {
+    background: #142036;
+    border-bottom-color: #7ec8e3;
+  }
+
+  .panel-header-title {
+    font-size: 12px;
+    font-weight: 500;
+    color: #8888aa;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-right: auto;
+    transition: color 0.15s;
+  }
+
+  :global(.panel--focused) .panel-header-title {
+    color: #c0d8e8;
+  }
+
+  /* Panel Content Areas */
+  .panel-content {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .panel-terminal-view {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .panel-terminal-view.hidden {
+    display: none;
+  }
+
+  .panel-terminal-wrapper {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .panel-terminal-container {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .panel-terminal-container :global(.xterm) {
+    height: 100%;
+  }
+
+  .panel-reconnect-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+  }
+
+  .panel-reconnect-overlay.hidden {
+    display: none;
+  }
+
+  .panel-filebrowser-view,
+  .panel-gitbrowser-view {
+    height: 100%;
+  }
+
+  .panel-filebrowser-view.hidden,
+  .panel-gitbrowser-view.hidden {
+    display: none;
+  }
+
+  /* Responsive: auto-collapse split under 900px */
+  @media (max-width: 899px) {
+    /* Force single panel mode */
+    :global(.panel--left),
+    :global(.panel--right) {
+      width: 100% !important;
+      flex: 1;
+    }
+
+    .panel-header {
+      display: none !important;
+    }
+
+    /* Hide collapsed panel */
+    :global(.panel--collapsed) {
+      display: none !important;
+    }
+  }
+</style>

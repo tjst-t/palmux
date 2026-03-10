@@ -17,7 +17,7 @@ import VoiceInput from './VoiceInput.svelte';
  *     lang: 'ja-JP',
  *   });
  *   voice.toggle();
- *   voice.destroy();
+ *   voice.dispose();
  */
 export class VoiceInputAdapter {
   /**
@@ -100,8 +100,8 @@ export class VoiceInputAdapter {
   /**
    * リソースを解放する。
    */
-  destroy() {
-    this._component.destroy();
+  dispose() {
+    this._component.dispose();
     unmount(this._component);
     if (this._anchor) {
       this._anchor.remove();

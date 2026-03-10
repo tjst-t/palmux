@@ -17,7 +17,7 @@
   let showError = $state(false);
 
   /** @type {SpeechRecognition | null} */
-  let recognition = $state(null);
+  let recognition = null;
   /** @type {ReturnType<typeof setTimeout> | null} */
   let errorTimer = $state(null);
   /** @type {HTMLButtonElement | null} */
@@ -77,17 +77,20 @@
     return rec;
   }
 
-  // Initialize recognition on mount
-  $effect(() => {
+  import { onMount, onDestroy } from 'svelte';
+
+  // Initialize recognition on mount (run exactly once)
+  onMount(() => {
     recognition = initRecognition();
-    return () => {
-      if (recognition && state === 'listening') {
-        recognition.abort();
-      }
-      if (errorTimer) {
-        clearTimeout(errorTimer);
-      }
-    };
+  });
+
+  onDestroy(() => {
+    if (recognition && state === 'listening') {
+      recognition.abort();
+    }
+    if (errorTimer) {
+      clearTimeout(errorTimer);
+    }
   });
 
   // Sync lang changes to the recognition instance
@@ -167,7 +170,7 @@
   /**
    * リソースを解放する。
    */
-  export function destroy() {
+  export function dispose() {
     if (state === 'listening' && recognition) {
       recognition.abort();
     }
@@ -197,3 +200,46 @@
     <line x1="8" y1="21" x2="16" y2="21"></line>
   </svg>
 </button>
+
+<style>
+  /* Voice Input */
+  .voice-mic-btn {
+    flex-shrink: 0;
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid #2a2a4a;
+    border-radius: 6px;
+    color: #e0e0e0;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+
+  .voice-mic-btn:hover {
+    background: rgba(126, 200, 227, 0.1);
+    border-color: #7ec8e3;
+  }
+
+  .voice-mic-btn--listening {
+    background: rgba(244, 67, 54, 0.2);
+    border-color: #f44336;
+    color: #f44336;
+    animation: voice-pulse 1.5s ease-in-out infinite;
+  }
+
+  .voice-mic-btn--error {
+    background: rgba(255, 152, 0, 0.2);
+    border-color: #ff9800;
+    color: #ff9800;
+  }
+
+  @keyframes voice-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+</style>

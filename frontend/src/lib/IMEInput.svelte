@@ -10,20 +10,16 @@
    * - e.isComposing チェックで未確定の IME 入力中は送信しない
    */
 
-  /** @type {{ onSend: (text: string) => void, onToggle?: (visible: boolean) => void, toolbar?: { hasCtrl: () => boolean, hasAlt: () => boolean, consumeModifiers: () => { ctrl: boolean, alt: boolean } } | null }} */
-  let { onSend, onToggle = null, toolbar = null } = $props();
+  /** @type {{ onSend: (text: string) => void, onToggle?: (visible: boolean) => void }} */
+  let { onSend, onToggle = null } = $props();
 
   let visible = $state(false);
   let inputValue = $state('');
   let previewText = $state('');
   let inputEl = $state(null);
   let barEl = $state(null);
+  // toolbarRef tracks the toolbar instance. Updated via setToolbar().
   let toolbarRef = $state(null);
-
-  // Keep toolbarRef in sync with prop changes
-  $effect(() => {
-    toolbarRef = toolbar;
-  });
 
   /**
    * 修飾キー状態を入力データに適用する。
@@ -193,7 +189,7 @@
   /**
    * リソースを解放する。
    */
-  export function destroy() {
+  export function dispose() {
     // Svelte handles DOM cleanup on unmount; this is a no-op stub
     // for API compatibility. The adapter calls unmount() separately.
   }
@@ -223,3 +219,88 @@
     onclick={handleSendClick}
   >送信</button>
 </div>
+
+<style>
+  /* IME Input Bar */
+  .ime-input-bar {
+    display: flex;
+    align-items: center;
+    padding: 6px 8px;
+    background: #16213e;
+    border-top: 1px solid #2a2a4a;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .ime-input-field {
+    flex: 1;
+    padding: 8px 12px;
+    background: #1a1a2e;
+    border: 1px solid #2a2a4a;
+    border-radius: 6px;
+    color: #e0e0e0;
+    font-size: 16px; /* 16px prevents iOS Safari auto-zoom on focus */
+    outline: none;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  .ime-input-field::placeholder {
+    color: #6a6a8a;
+  }
+
+  .ime-input-field:focus {
+    border-color: #7ec8e3;
+  }
+
+  .ime-send-btn {
+    flex-shrink: 0;
+    padding: 8px 16px;
+    background: #7ec8e3;
+    color: #0f0f23;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    min-width: 44px;
+    min-height: 44px;
+    transition: background 0.15s;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .ime-send-btn:hover {
+    background: #6ab8d3;
+  }
+
+  .ime-send-btn:active {
+    background: #5aa8c3;
+  }
+
+  /* Voice interim text (rendered above IME bar) */
+  .voice-interim-text {
+    padding: 4px 8px;
+    font-size: 12px;
+    color: #6a6a8a;
+    font-style: italic;
+    background: #16213e;
+    border-top: 1px solid #2a2a4a;
+  }
+
+  /* Mobile adjustments */
+  @media (max-width: 600px) {
+    .ime-input-bar {
+      padding: 4px 6px;
+      gap: 6px;
+    }
+
+    .ime-input-field {
+      padding: 6px 10px;
+    }
+
+    .ime-send-btn {
+      padding: 6px 12px;
+      font-size: 13px;
+    }
+  }
+</style>

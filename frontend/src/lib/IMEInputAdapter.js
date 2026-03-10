@@ -2,7 +2,7 @@
 // Wraps the Svelte 5 IMEInput component via mount() so existing code
 // (e.g. panel.js) can use `new IMEInputAdapter(container, options)` unchanged.
 
-import { mount, unmount } from 'svelte';
+import { mount, unmount, flushSync } from 'svelte';
 import IMEInput from './IMEInput.svelte';
 
 /**
@@ -17,7 +17,7 @@ import IMEInput from './IMEInput.svelte';
  *   });
  *   ime.show();
  *   ime.insertText('hello');
- *   ime.destroy();
+ *   ime.dispose();
  */
 export class IMEInputAdapter {
   /**
@@ -36,9 +36,12 @@ export class IMEInputAdapter {
       props: {
         onSend: options.onSend,
         onToggle: options.onToggle || null,
-        toolbar: options.toolbar || null,
       },
     });
+    // flushSync is required here: getBarElement() is called by Panel.svelte
+    // immediately after construction to insert the VoiceInput mic button,
+    // and it depends on bind:this refs being resolved.
+    flushSync();
   }
 
   /**
@@ -105,8 +108,8 @@ export class IMEInputAdapter {
   /**
    * リソースを解放する。
    */
-  destroy() {
-    this._component.destroy();
+  dispose() {
+    this._component.dispose();
     unmount(this._component);
   }
 }
