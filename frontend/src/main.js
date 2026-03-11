@@ -9,18 +9,13 @@ import '../css/gitbrowser.css';
 import '../css/split.css';
 import '../css/tab.css';
 
-// Import existing Vanilla JS app (runs on import)
-import '../js/app.js';
+// Mount root Svelte component
+import { mount } from 'svelte';
+import App from './App.svelte';
+
+mount(App, { target: document.getElementById('app') });
 
 // Service worker registration
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js');
-}
-
-// Version display
-const versionMeta = document.querySelector('meta[name="app-version"]');
-const versionEl = document.getElementById('drawer-footer-version');
-if (versionMeta && versionEl) {
-  const v = versionMeta.getAttribute('content');
-  if (v) versionEl.textContent = v;
 }

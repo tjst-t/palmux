@@ -9,13 +9,15 @@
   import { onDestroy, flushSync } from 'svelte';
   import { getWebSocketURL, getCommands, listNotifications, deleteNotification } from '../../js/api.js';
   import { PalmuxTerminal } from '../../js/terminal.js';
-  import { ToolbarAdapter as Toolbar } from './ToolbarAdapter.js';
-  import { IMEInputAdapter as IMEInput } from './IMEInputAdapter.js';
+  import ToolbarComponent from './Toolbar.svelte';
+  import IMEInputComponent from './IMEInput.svelte';
+  import VoiceInputComponent from './VoiceInput.svelte';
   import { TouchHandler } from '../../js/touch.js';
-  import { VoiceInputAdapter as VoiceInput } from './VoiceInputAdapter.js';
   import { ConnectionManager } from '../../js/connection.js';
-  import { FileBrowser } from '../../js/filebrowser.js';
-  import { GitBrowser } from '../../js/gitbrowser.js';
+  import FileBrowserComponent from './FileBrowser.svelte';
+  import GitBrowserComponent from './GitBrowser.svelte';
+
+  const voiceSupported = !!(globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition);
 
   /**
    * @typedef {object} TabState
@@ -36,6 +38,8 @@
 
   let {
     id = 'left',
+    layout = 'single',
+    collapsed = false,
     globalUIState = {},
     isMobileDevice = () => false,
     onFocusRequest = null,
@@ -70,7 +74,7 @@
   let tabs = $state([]);
   /** @type {string|null} */
   let activeTabKey = $state(null);
-  let _focused = false;
+  let _focused = $state(false);
 
   /** @type {HTMLElement} */
   let _el = $state(null);
@@ -235,6 +239,11 @@
     }
   }
 
+  /**
+   * 明示的にタブリソースを解放する。
+   * Svelte の onDestroy でも dispose() が呼ばれるが、各コンポーネントの
+   * dispose() は null チェック済みなので二重呼び出しは安全。
+   */
   function _destroyTabState(tabState) {
     if (tabState.type === 'terminal') {
       if (tabState.voiceInput) tabState.voiceInput.dispose();
@@ -253,9 +262,7 @@
   // ───────── Svelte use:action directives ─────────
 
   function initTerminal(node, tab) {
-    tab.rootEl = node.closest('.panel-terminal-view');
     const tabKey = tab.key;
-    const windowIdx = tab.windowIndex;
 
     const terminal = new PalmuxTerminal(node);
 
@@ -276,10 +283,9 @@
 
     tab.terminal = terminal;
 
-    // If this tab is the active one, set module-level refs and show
+    // Set module-level ref immediately for active tab
     if (activeTabKey === tabKey) {
       _terminal = terminal;
-      _showTabLogic(tab);
     }
 
     terminal.setGlobalKeyHandlerEnabled(false);
@@ -291,152 +297,112 @@
     };
   }
 
-  function initIME(node, tab) {
-    const terminal = tab.terminal;
-    if (!terminal) return;
-
-    const tabKey = tab.key;
-
-    const imeInput = new IMEInput(node, {
-      onSend: (text) => terminal.sendInput(text),
-      onToggle: (visible) => {
-        terminal.setIMEMode(visible);
-        requestAnimationFrame(() => terminal.fit());
-      },
-    });
-
-    let voiceInput = null;
-    if (VoiceInput.isSupported()) {
-      voiceInput = new VoiceInput(imeInput.getBarElement(), {
-        onResult: (text) => {
-          imeInput.insertText(text);
-          imeInput.setPreviewText('');
-        },
-        onInterim: (text) => imeInput.setPreviewText(text),
-        lang: 'ja-JP',
-      });
-    }
-
-    tab.imeInput = imeInput;
-    tab.voiceInput = voiceInput;
-
-    if (activeTabKey === tabKey) {
-      _imeInput = imeInput;
-    }
-
-    // Apply keyboard mode state
-    if (globalUIState.keyboardMode !== 'none') {
-      terminal.setKeyboardMode(globalUIState.keyboardMode);
-      if (globalUIState.keyboardMode === 'ime') {
-        imeInput.show();
-      }
-    }
-
-    return {
-      destroy() {
-        // Cleanup is handled by _destroyTabState
-      }
-    };
-  }
-
-  function initToolbar(node, tab) {
-    const terminal = tab.terminal;
-    const imeInput = tab.imeInput;
-    if (!terminal) return;
-
+  /**
+   * Wire terminal tab components together after all child components are mounted.
+   * Runs on the outer panel-terminal-view div.
+   * Uses queueMicrotask to ensure bind:this refs for Toolbar/IMEInput are resolved.
+   */
+  function wireTerminalTab(node, tab) {
+    tab.rootEl = node;
     const tabKey = tab.key;
     const windowIdx = tab.windowIndex;
 
-    const toolbar = new Toolbar(node, {
-      onSendKey: (key) => terminal.sendInput(key),
-      onFetchCommands: (sess) => getCommands(sess),
-      onKeyboardMode: (mode) => {
-        terminal.setKeyboardMode(mode);
-        if (imeInput) {
-          if (mode === 'ime') {
-            imeInput.show();
+    queueMicrotask(() => {
+      const terminal = tab.terminal;
+      if (!terminal) {
+        console.warn(`[Panel] wireTerminalTab: terminal not resolved for tab ${tabKey}`);
+        return;
+      }
+
+      // Wire toolbar to terminal
+      const toolbar = tab.toolbar;
+      if (toolbar) {
+        terminal.setToolbar(toolbar);
+        toolbar.setCurrentSession(session);
+        toolbar.restoreState(globalUIState);
+
+        if (globalUIState.toolbarVisible === null) {
+          if (!isMobileDevice()) {
+            toolbar.toggleVisibility();
+            globalUIState.toolbarVisible = false;
           } else {
-            imeInput.hide();
+            globalUIState.toolbarVisible = true;
           }
         }
-        requestAnimationFrame(() => terminal.fit());
-      },
-    });
-    terminal.setToolbar(toolbar);
-    if (imeInput) imeInput.setToolbar(toolbar);
-    toolbar.setCurrentSession(session);
-    toolbar.restoreState(globalUIState);
-
-    if (globalUIState.toolbarVisible === null) {
-      if (!isMobileDevice()) {
-        toolbar.toggleVisibility();
-        globalUIState.toolbarVisible = false;
-      } else {
-        globalUIState.toolbarVisible = true;
       }
-    }
 
-    tab.toolbar = toolbar;
+      // Wire IME to toolbar
+      const imeInput = tab.imeInput;
+      if (imeInput && toolbar) {
+        imeInput.setToolbar(toolbar);
+      }
 
-    // Init touch handler (needs terminal container, use the terminal container node)
-    const terminalContainerEl = tab.rootEl?.querySelector('.panel-terminal-container');
-    if (terminalContainerEl) {
-      const touchHandler = new TouchHandler(terminalContainerEl, {
-        terminal,
-        onPinchZoom: (delta) => {
-          if (delta > 0) terminal.increaseFontSize();
-          else terminal.decreaseFontSize();
+      // Apply keyboard mode state
+      if (globalUIState.keyboardMode !== 'none') {
+        terminal.setKeyboardMode(globalUIState.keyboardMode);
+        if (globalUIState.keyboardMode === 'ime' && imeInput) {
+          imeInput.show();
+        }
+      }
+
+      // Init touch handler
+      const terminalContainerEl = node.querySelector('.panel-terminal-container');
+      if (terminalContainerEl) {
+        const touchHandler = new TouchHandler(terminalContainerEl, {
+          terminal,
+          onPinchZoom: (delta) => {
+            if (delta > 0) terminal.increaseFontSize();
+            else terminal.decreaseFontSize();
+          },
+        });
+        tab.touchHandler = touchHandler;
+      }
+
+      // Init connection manager
+      const connectionManager = new ConnectionManager({
+        getWSUrl: () => getWebSocketURL(session, windowIdx),
+        onStateChange: (state) => {
+          if (state === 'connected') {
+            tab.reconnecting = false;
+          } else if (state === 'connecting') {
+            tab.reconnecting = true;
+          } else {
+            tab.reconnecting = false;
+          }
+          if (state === 'connected') {
+            deleteNotification(session, windowIdx)
+              .then(() => listNotifications())
+              .then((notifications) => {
+                if (onNotificationUpdate && notifications) {
+                  onNotificationUpdate(notifications);
+                }
+              })
+              .catch(() => {});
+          }
+          if (activeTabKey === tabKey && onConnectionStateChange) {
+            onConnectionStateChange(state);
+          }
         },
+        terminal,
       });
-      tab.touchHandler = touchHandler;
+      connectionManager.connect();
+      tab.connectionManager = connectionManager;
+
+      terminal.setOnReconnectFlush(() => {
+        if (_focused && activeTabKey === tabKey) {
+          terminal.focus();
+        }
+      });
+
+      // Set module-level refs if this is the active tab
       if (activeTabKey === tabKey) {
-        _touchHandler = touchHandler;
-      }
-    }
-
-    // Init connection manager
-    const connectionManager = new ConnectionManager({
-      getWSUrl: () => getWebSocketURL(session, windowIdx),
-      onStateChange: (state) => {
-        if (state === 'connected') {
-          tab.reconnecting = false;
-        } else if (state === 'connecting') {
-          tab.reconnecting = true;
-        } else {
-          tab.reconnecting = false;
-        }
-        if (state === 'connected') {
-          deleteNotification(session, windowIdx)
-            .then(() => listNotifications())
-            .then((notifications) => {
-              if (onNotificationUpdate && notifications) {
-                onNotificationUpdate(notifications);
-              }
-            })
-            .catch(() => {});
-        }
-        if (activeTabKey === tabKey && onConnectionStateChange) {
-          onConnectionStateChange(state);
-        }
-      },
-      terminal,
-    });
-    connectionManager.connect();
-
-    tab.connectionManager = connectionManager;
-
-    terminal.setOnReconnectFlush(() => {
-      if (_focused && activeTabKey === tabKey) {
-        terminal.focus();
+        _toolbar = toolbar;
+        _imeInput = imeInput;
+        _touchHandler = tab.touchHandler;
+        _connectionManager = connectionManager;
+        _showTabLogic(tab);
       }
     });
-
-    if (activeTabKey === tabKey) {
-      _toolbar = toolbar;
-      _connectionManager = connectionManager;
-      // Now that everything is initialized, show the tab
-      _showTabLogic(tab);
-    }
 
     return {
       destroy() {
@@ -445,28 +411,21 @@
     };
   }
 
-  function initFileBrowser(node, tab) {
+  /**
+   * Wire files tab after FileBrowserComponent is mounted.
+   * Calls open() via queueMicrotask to ensure bind:this is resolved.
+   */
+  function wireFilesTab(node, tab) {
     tab.rootEl = node;
     const initialPath = tab._initialPath || null;
 
-    const wrapper = document.createElement('div');
-    wrapper.style.height = '100%';
-    node.appendChild(wrapper);
-
-    const browser = new FileBrowser(wrapper, {
-      onFileSelect: (sess, filePath) => {
-        if (onFileBrowserPreview) onFileBrowserPreview(sess, filePath);
-      },
-      onNavigate: (path) => {
-        if (onFileBrowserNavigate) onFileBrowserNavigate(session, path);
-      },
-      onPreviewClose: (sess, dirPath) => {
-        if (onFileBrowserPreviewClose) onFileBrowserPreviewClose(sess, dirPath);
-      },
+    queueMicrotask(() => {
+      if (tab.fileBrowser) {
+        tab.fileBrowser.open(session, initialPath || '.');
+      } else {
+        console.warn('[Panel] wireFilesTab: fileBrowser not resolved');
+      }
     });
-
-    browser.open(session, initialPath || '.');
-    tab.fileBrowser = browser;
 
     return {
       destroy() {
@@ -475,22 +434,20 @@
     };
   }
 
-  function initGitBrowser(node, tab) {
+  /**
+   * Wire git tab after GitBrowserComponent is mounted.
+   * Calls open() via queueMicrotask to ensure bind:this is resolved.
+   */
+  function wireGitTab(node, tab) {
     tab.rootEl = node;
 
-    const wrapper = document.createElement('div');
-    wrapper.style.height = '100%';
-    wrapper.style.position = 'relative';
-    node.appendChild(wrapper);
-
-    const browser = new GitBrowser(wrapper, {
-      onNavigate: (gitState) => {
-        if (onGitBrowserNavigate) onGitBrowserNavigate(session, gitState);
-      },
+    queueMicrotask(() => {
+      if (tab.gitBrowser) {
+        tab.gitBrowser.open(session);
+      } else {
+        console.warn('[Panel] wireGitTab: gitBrowser not resolved');
+      }
     });
-
-    browser.open(session);
-    tab.gitBrowser = browser;
 
     return {
       destroy() {
@@ -511,10 +468,10 @@
 
   function _saveToolbarState() {
     if (_toolbar) {
-      globalUIState.toolbarVisible = _toolbar.visible;
-      globalUIState.keyboardMode = _toolbar.keyboardMode;
-      globalUIState.ctrlState = _toolbar.ctrlState;
-      globalUIState.altState = _toolbar.altState;
+      globalUIState.toolbarVisible = _toolbar.getVisible();
+      globalUIState.keyboardMode = _toolbar.getKeyboardMode();
+      globalUIState.ctrlState = _toolbar.getCtrlState();
+      globalUIState.altState = _toolbar.getAltState();
     }
   }
 
@@ -532,6 +489,10 @@
 
   export function getElement() {
     return _el;
+  }
+
+  export function getId() {
+    return id;
   }
 
   export function setHeaderVisible(visible) {
@@ -636,13 +597,6 @@
 
   export function setFocused(focused) {
     _focused = focused;
-    if (_el) {
-      if (focused) {
-        _el.classList.add('panel--focused');
-      } else {
-        _el.classList.remove('panel--focused');
-      }
-    }
 
     if (_terminal && viewMode === 'terminal') {
       _terminal.setGlobalKeyHandlerEnabled(focused);
@@ -759,7 +713,7 @@
   export function toggleToolbar() {
     if (_toolbar) {
       _toolbar.toggleVisibility();
-      globalUIState.toolbarVisible = _toolbar.visible;
+      globalUIState.toolbarVisible = _toolbar.getVisible();
       if (_terminal) {
         requestAnimationFrame(() => _terminal.fit());
       }
@@ -825,32 +779,77 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-  class="panel panel--single"
+  class="panel"
+  class:panel--single={layout === 'single'}
+  class:panel--left={layout === 'left'}
+  class:panel--right={layout === 'right'}
+  class:panel--focused={_focused}
+  class:panel--collapsed={collapsed}
   data-panel-id={id}
   bind:this={_el}
   onmousedown={handleMouseDown}
   ontouchstart={handleTouchStart}
 >
-  <div class="panel-header" style:display="none" bind:this={_headerEl}>
+  <div class="panel-header" style:display={layout === 'single' ? 'none' : ''} bind:this={_headerEl}>
     <span class="panel-header-title" bind:this={_headerTitleEl}></span>
   </div>
   <div class="panel-content">
     {#each tabs as tab (tab.key)}
       {#if tab.type === 'terminal'}
-        <div class="panel-terminal-view" class:hidden={tab.key !== activeTabKey}>
+        <div class="panel-terminal-view" class:hidden={tab.key !== activeTabKey} use:wireTerminalTab={tab}>
           <div class="panel-terminal-wrapper">
             <div class="panel-terminal-container" use:initTerminal={tab}></div>
             <div class="panel-reconnect-overlay" class:hidden={!tab.reconnecting}>
               <span class="reconnect-overlay-text">Reconnecting...</span>
             </div>
           </div>
-          <div use:initIME={tab}></div>
-          <div use:initToolbar={tab}></div>
+          <IMEInputComponent
+            bind:this={tab.imeInput}
+            onSend={(text) => tab.terminal?.sendInput(text)}
+            onToggle={(visible) => {
+              tab.terminal?.setIMEMode(visible);
+              requestAnimationFrame(() => tab.terminal?.fit());
+            }}
+          >
+            {#if voiceSupported}
+              <VoiceInputComponent
+                bind:this={tab.voiceInput}
+                onResult={(text) => { tab.imeInput?.insertText(text); tab.imeInput?.setPreviewText(''); }}
+                onInterim={(text) => tab.imeInput?.setPreviewText(text)}
+                lang="ja-JP"
+              />
+            {/if}
+          </IMEInputComponent>
+          <ToolbarComponent
+            bind:this={tab.toolbar}
+            onSendKey={(key) => tab.terminal?.sendInput(key)}
+            onFetchCommands={(sess) => getCommands(sess)}
+            onKeyboardMode={(mode) => {
+              tab.terminal?.setKeyboardMode(mode);
+              if (tab.imeInput) {
+                if (mode === 'ime') tab.imeInput.show();
+                else tab.imeInput.hide();
+              }
+              requestAnimationFrame(() => tab.terminal?.fit());
+            }}
+          />
         </div>
       {:else if tab.type === 'files'}
-        <div class="panel-filebrowser-view" class:hidden={tab.key !== activeTabKey} use:initFileBrowser={tab}></div>
+        <div class="panel-filebrowser-view" class:hidden={tab.key !== activeTabKey} use:wireFilesTab={tab}>
+          <FileBrowserComponent
+            bind:this={tab.fileBrowser}
+            onFileSelect={(sess, filePath) => onFileBrowserPreview?.(sess, filePath)}
+            onNavigate={(path) => onFileBrowserNavigate?.(session, path)}
+            onPreviewClose={(sess, dirPath) => onFileBrowserPreviewClose?.(sess, dirPath)}
+          />
+        </div>
       {:else if tab.type === 'git'}
-        <div class="panel-gitbrowser-view" class:hidden={tab.key !== activeTabKey} use:initGitBrowser={tab}></div>
+        <div class="panel-gitbrowser-view" class:hidden={tab.key !== activeTabKey} use:wireGitTab={tab}>
+          <GitBrowserComponent
+            bind:this={tab.gitBrowser}
+            onNavigate={(gitState) => onGitBrowserNavigate?.(session, gitState)}
+          />
+        </div>
       {/if}
     {/each}
   </div>

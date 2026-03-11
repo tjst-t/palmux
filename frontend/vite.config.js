@@ -17,4 +17,7 @@ export default defineConfig({
   },
   // Base path is injected at runtime by Go server, use relative paths
   base: './',
+  test: {
+    exclude: ['e2e/**', 'node_modules/**'],
+  },
 });

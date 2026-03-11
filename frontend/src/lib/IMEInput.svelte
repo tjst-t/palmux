@@ -10,8 +10,8 @@
    * - e.isComposing チェックで未確定の IME 入力中は送信しない
    */
 
-  /** @type {{ onSend: (text: string) => void, onToggle?: (visible: boolean) => void }} */
-  let { onSend, onToggle = null } = $props();
+  /** @type {{ onSend: (text: string) => void, onToggle?: (visible: boolean) => void, children?: import('svelte').Snippet }} */
+  let { onSend, onToggle = null, children } = $props();
 
   let visible = $state(false);
   let inputValue = $state('');
@@ -214,6 +214,7 @@
     onkeydown={handleKeydown}
     oninput={handleInput}
   />
+  {@render children?.()}
   <button
     class="ime-send-btn"
     onclick={handleSendClick}

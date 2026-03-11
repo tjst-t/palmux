@@ -66,4 +66,4 @@ export function dispose() {
 }
 </script>
 
-<div class="gitbrowser-container" use:initGitBrowser></div>
+<div class="gitbrowser-container" style="height: 100%; position: relative" use:initGitBrowser></div>

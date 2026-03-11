@@ -147,6 +147,8 @@ let isDragging = false;
 let dragStartX = 0;
 let dragScrollLeft = 0;
 let hasDragged = false;
+/** @type {EventTarget|null} */
+let pointerDownTarget = null;
 
 function onPointerDown(e) {
   // Only handle primary button for mouse
@@ -155,6 +157,7 @@ function onPointerDown(e) {
   hasDragged = false;
   dragStartX = e.clientX;
   dragScrollLeft = scrollEl.scrollLeft;
+  pointerDownTarget = e.target;
   scrollEl.setPointerCapture(e.pointerId);
 }
 
@@ -166,8 +169,32 @@ function onPointerMove(e) {
 }
 
 function onPointerUp(e) {
+  const target = pointerDownTarget;
   isDragging = false;
+  pointerDownTarget = null;
   scrollEl.releasePointerCapture(e.pointerId);
+
+  // setPointerCapture redirects pointerup to the scroll container,
+  // which prevents click from firing on the original button.
+  // Handle tap detection here using the saved pointerdown target.
+  if (!hasDragged && !longPressTriggered && target) {
+    const button = target instanceof Element ? target.closest('button.tab') : null;
+    if (button) {
+      const type = button.dataset.type;
+      if (type === 'add') {
+        if (onSelect) onSelect('add');
+      } else if (type === 'terminal') {
+        if (onSelect) onSelect('terminal', parseInt(button.dataset.window, 10));
+      } else if (type === 'files') {
+        if (onSelect) onSelect('files');
+      } else if (type === 'git') {
+        if (onSelect) onSelect('git');
+      }
+    }
+  }
+  if (longPressTriggered) {
+    longPressTriggered = false;
+  }
 }
 
 // ---------------------------------------------------------------------------

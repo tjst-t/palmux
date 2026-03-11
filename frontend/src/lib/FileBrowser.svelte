@@ -94,4 +94,4 @@ export function dispose() {
 }
 </script>
 
-<div class="filebrowser-container" use:initBrowser></div>
+<div class="filebrowser-container" style="height: 100%" use:initBrowser></div>
