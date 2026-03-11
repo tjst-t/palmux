@@ -30,28 +30,28 @@
 .gb-loading {
   padding: 40px 16px;
   text-align: center;
-  color: #8888aa;
+  color: var(--text-secondary);
   font-size: 14px;
 }
 
 .gb-empty {
   padding: 20px 16px;
   text-align: center;
-  color: #8888aa;
+  color: var(--text-secondary);
   font-size: var(--gb-font-size, 14px);
 }
 
 .gb-error {
   padding: 40px 16px;
   text-align: center;
-  color: #e57373;
+  color: var(--color-error-text);
   font-size: 14px;
 }
 
 .gb-placeholder {
   padding: 40px 16px;
   text-align: center;
-  color: #8888aa;
+  color: var(--text-secondary);
   font-size: 16px;
 }
 
@@ -77,12 +77,12 @@
   display: flex;
   align-items: center;
   padding: 8px 12px;
-  background: #16213e;
-  border-bottom: 1px solid #2a2a4a;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border-subtle);
   min-height: 40px;
   font-size: var(--gb-font-size, 14px);
   font-weight: 600;
-  color: #e0e0e0;
+  color: var(--text-primary);
   flex-shrink: 0;
   gap: 8px;
   overflow: hidden;
@@ -97,7 +97,7 @@
 }
 
 .gb-file-header-title--commit {
-  color: #7ec8e3;
+  color: var(--accent-primary);
   font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
   font-size: calc(var(--gb-font-size, 14px) - 1px);
 }
@@ -110,9 +110,9 @@
   min-width: 32px;
   min-height: 32px;
   background: none;
-  border: 1px solid #2a2a4a;
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  color: #7ec8e3;
+  color: var(--accent-primary);
   font-size: 18px;
   cursor: pointer;
   flex-shrink: 0;
@@ -122,11 +122,11 @@
 }
 
 .gb-reload-btn:hover {
-  background: rgba(126, 200, 227, 0.15);
+  background: var(--bg-hover);
 }
 
 .gb-reload-btn:active {
-  background: rgba(126, 200, 227, 0.25);
+  background: var(--bg-active);
   transform: rotate(180deg);
 }
 
@@ -137,9 +137,9 @@
   min-width: 28px;
   min-height: 28px;
   background: none;
-  border: 1px solid #2a2a4a;
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  color: #7ec8e3;
+  color: var(--accent-primary);
   font-size: 14px;
   cursor: pointer;
   flex-shrink: 0;
@@ -149,11 +149,11 @@
 }
 
 .gb-file-header-back:hover {
-  background: rgba(126, 200, 227, 0.15);
+  background: var(--bg-hover);
 }
 
 .gb-file-header-back:active {
-  background: rgba(126, 200, 227, 0.25);
+  background: var(--bg-active);
 }
 
 .gb-file-list {
@@ -199,7 +199,7 @@
 
 .gb-status--modified {
   background: rgba(255, 183, 77, 0.2);
-  color: #ffb74d;
+  color: var(--color-warning-text);
 }
 
 .gb-status--added {
@@ -209,12 +209,12 @@
 
 .gb-status--deleted {
   background: rgba(229, 115, 115, 0.2);
-  color: #e57373;
+  color: var(--color-error-text);
 }
 
 .gb-status--untracked {
   background: rgba(136, 136, 170, 0.2);
-  color: #8888aa;
+  color: var(--text-secondary);
 }
 
 .gb-status--renamed {
@@ -225,7 +225,7 @@
 .gb-file-name {
   flex: 1;
   font-size: var(--gb-font-size, 14px);
-  color: #e0e0e0;
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -235,7 +235,7 @@
 /* Divider (draggable) */
 .gb-divider {
   height: 12px;
-  background: #2a2a4a;
+  background: var(--border-subtle);
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -247,24 +247,24 @@
 }
 
 .gb-divider:hover {
-  background: #3a3a5a;
+  background: var(--divider-hover);
 }
 
 .gb-divider--dragging {
-  background: #4a4a6a;
+  background: var(--divider-active);
 }
 
 .gb-divider-handle {
   width: 32px;
   height: 4px;
   border-radius: 2px;
-  background: #5a5a7a;
+  background: var(--divider-handle-alt);
   transition: background 0.15s;
 }
 
 .gb-divider:hover .gb-divider-handle,
 .gb-divider--dragging .gb-divider-handle {
-  background: #7ec8e3;
+  background: var(--accent-primary);
 }
 
 /* Log Section (lower part) */
@@ -298,13 +298,13 @@
 
 .gb-log-entry--selected {
   background: rgba(126, 200, 227, 0.12);
-  border-left: 3px solid #7ec8e3;
+  border-left: 3px solid var(--accent-primary);
 }
 
 .gb-log-hash {
   font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
   font-size: calc(var(--gb-font-size, 14px) - 2px);
-  color: #7ec8e3;
+  color: var(--accent-primary);
   flex-shrink: 0;
   min-width: 56px;
 }
@@ -312,7 +312,7 @@
 .gb-log-subject {
   flex: 1;
   font-size: var(--gb-font-size, 14px);
-  color: #e0e0e0;
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -339,7 +339,7 @@
 
 .gb-log-ref--branch {
   background: rgba(126, 200, 227, 0.18);
-  color: #7ec8e3;
+  color: var(--accent-primary);
 }
 
 .gb-log-ref--tag {
@@ -349,12 +349,12 @@
 
 .gb-log-ref--remote {
   background: rgba(136, 136, 170, 0.15);
-  color: #8888aa;
+  color: var(--text-secondary);
 }
 
 .gb-log-date {
   font-size: calc(var(--gb-font-size, 14px) - 2px);
-  color: #8888aa;
+  color: var(--text-secondary);
   flex-shrink: 0;
   min-width: 32px;
   text-align: right;
@@ -367,7 +367,7 @@
 
 .gb-log-uncommitted-icon {
   font-size: 12px;
-  color: #ffb74d;
+  color: var(--color-warning-text);
   flex-shrink: 0;
   min-width: 16px;
   text-align: center;
@@ -376,8 +376,8 @@
 .gb-log-uncommitted-badge {
   font-size: 11px;
   font-weight: 700;
-  color: #1a1a3a;
-  background: #ffb74d;
+  color: var(--bg-surface);
+  background: var(--color-warning-text);
   min-width: 20px;
   height: 20px;
   border-radius: 10px;
@@ -393,8 +393,8 @@
   display: flex;
   align-items: center;
   padding: 8px 12px;
-  background: #16213e;
-  border-top: 1px solid #2a2a4a;
+  background: var(--bg-header);
+  border-top: 1px solid var(--border-subtle);
   min-height: 40px;
   flex-shrink: 0;
   gap: 8px;
@@ -420,7 +420,7 @@
 .gb-branch-name {
   flex: 1;
   font-size: var(--gb-font-size, 14px);
-  color: #7ec8e3;
+  color: var(--accent-primary);
   font-weight: 600;
   font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
   white-space: nowrap;
@@ -430,7 +430,7 @@
 
 .gb-branch-arrow {
   font-size: 10px;
-  color: #8888aa;
+  color: var(--text-secondary);
   flex-shrink: 0;
 }
 
@@ -443,8 +443,8 @@
   max-height: 50%;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  background: #1a1a3a;
-  border-top: 1px solid #2a2a4a;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-subtle);
   z-index: 10;
 }
 
@@ -474,13 +474,13 @@
 }
 
 .gb-branch-item--remote .gb-branch-item-name {
-  color: #8888aa;
+  color: var(--text-secondary);
 }
 
 .gb-branch-item-name {
   flex: 1;
   font-size: var(--gb-font-size, 14px);
-  color: #e0e0e0;
+  color: var(--text-primary);
   font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
   white-space: nowrap;
   overflow: hidden;
@@ -489,7 +489,7 @@
 
 .gb-branch-item-badge {
   font-size: 11px;
-  color: #7ec8e3;
+  color: var(--accent-primary);
   background: rgba(126, 200, 227, 0.15);
   padding: 2px 8px;
   border-radius: 10px;
@@ -501,8 +501,8 @@
   display: flex;
   align-items: center;
   padding: 8px 12px;
-  background: #16213e;
-  border-bottom: 1px solid #2a2a4a;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
   min-height: 40px;
   gap: 10px;
@@ -515,9 +515,9 @@
   min-width: 36px;
   min-height: 36px;
   background: none;
-  border: 1px solid #2a2a4a;
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  color: #7ec8e3;
+  color: var(--accent-primary);
   font-size: 16px;
   cursor: pointer;
   flex-shrink: 0;
@@ -527,16 +527,16 @@
 }
 
 .gb-diff-back:hover {
-  background: rgba(126, 200, 227, 0.15);
+  background: var(--bg-hover);
 }
 
 .gb-diff-back:active {
-  background: rgba(126, 200, 227, 0.25);
+  background: var(--bg-active);
 }
 
 .gb-diff-filename {
   font-size: 14px;
-  color: #e0e0e0;
+  color: var(--text-primary);
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -572,7 +572,7 @@
 
 .gb-diff-line--removed {
   background: rgba(229, 115, 115, 0.12);
-  color: #e57373;
+  color: var(--color-error-text);
 }
 
 .gb-diff-line--hunk {
@@ -581,7 +581,7 @@
 }
 
 .gb-diff-line--meta {
-  color: #8888aa;
+  color: var(--text-secondary);
 }
 
 /* Hunk action buttons */
@@ -638,7 +638,7 @@
 }
 
 .gb-hunk-btn--revert {
-  color: #e57373;
+  color: var(--color-error-text);
   border-color: rgba(229, 115, 115, 0.3);
 }
 
@@ -659,7 +659,7 @@
 
 .gb-diff-meta-block {
   flex-shrink: 0;
-  border-bottom: 1px solid #2a2a4a;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .gb-diff-sbs {
@@ -678,7 +678,7 @@
 }
 
 .gb-diff-sbs-left {
-  border-right: 1px solid #2a2a4a;
+  border-right: 1px solid var(--border-subtle);
 }
 
 .gb-diff-line--empty {
@@ -690,7 +690,7 @@
   padding: 6px 12px;
   font-size: calc(var(--gb-font-size, 14px) - 2px);
   font-weight: 600;
-  color: #8888aa;
+  color: var(--text-secondary);
   background: rgba(22, 33, 62, 0.5);
   border-bottom: 1px solid rgba(42, 42, 74, 0.4);
   text-transform: uppercase;
@@ -840,7 +840,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #8888aa;
+    color: var(--text-secondary);
     font-size: 14px;
   }
 
@@ -853,18 +853,18 @@
   }
 
   .gb-diff-header--pane {
-    border-bottom: 1px solid #2a2a4a;
+    border-bottom: 1px solid var(--border-subtle);
   }
 
   .gb-file-entry--selected {
     background: rgba(126, 200, 227, 0.12);
-    border-left: 3px solid #7ec8e3;
+    border-left: 3px solid var(--accent-primary);
   }
 
   /* 横分割ドラッグハンドル */
   .gb-hdivider {
     width: 8px;
-    background: #2a2a4a;
+    background: var(--border-subtle);
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -876,23 +876,190 @@
   }
 
   .gb-hdivider:hover {
-    background: #3a3a5a;
+    background: var(--divider-hover);
   }
 
   .gb-hdivider--dragging {
-    background: #4a4a6a;
+    background: var(--divider-active);
   }
 
   .gb-hdivider-handle {
     width: 4px;
     height: 32px;
     border-radius: 2px;
-    background: #5a5a7a;
+    background: var(--divider-handle-alt);
     transition: background 0.15s;
   }
 
   .gb-hdivider:hover .gb-hdivider-handle,
   .gb-hdivider--dragging .gb-hdivider-handle {
-    background: #7ec8e3;
+    background: var(--accent-primary);
+  }
+}
+
+/* ============================================================
+   Light theme overrides
+   ============================================================ */
+[data-theme="light"] {
+
+  /* --- Borders ------------------------------------------------ */
+  .gb-file-entry,
+  .gb-log-entry,
+  .gb-branch-item,
+  .gb-group-header {
+    border-bottom-color: rgba(0, 0, 0, 0.06);
+  }
+
+  .gb-diff-hunk-row {
+    border-bottom-color: rgba(0, 0, 0, 0.05);
+  }
+
+  /* --- File entry hover / active ------------------------------ */
+  .gb-file-entry:hover,
+  .gb-log-entry:hover,
+  .gb-branch-item:hover {
+    background: rgba(14, 124, 134, 0.04);
+  }
+
+  .gb-file-entry:active,
+  .gb-log-entry:active,
+  .gb-branch-item:active {
+    background: rgba(14, 124, 134, 0.08);
+  }
+
+  /* --- Selected / current states ------------------------------ */
+  .gb-log-entry--selected {
+    background: rgba(14, 124, 134, 0.08);
+  }
+
+  .gb-branch-item--current {
+    background: rgba(14, 124, 134, 0.06);
+  }
+
+  .gb-branch-bar:active {
+    background: rgba(14, 124, 134, 0.06);
+  }
+
+  /* --- Branch bar hover --------------------------------------- */
+  .gb-branch-bar:hover {
+    background: rgba(0, 0, 0, 0.03);
+  }
+
+  /* --- Ref badges --------------------------------------------- */
+  .gb-log-ref--branch {
+    background: rgba(14, 124, 134, 0.10);
+  }
+
+  .gb-log-ref--tag {
+    background: rgba(26, 138, 62, 0.10);
+    color: #1a8a3e;
+  }
+
+  .gb-log-ref--remote {
+    background: rgba(0, 0, 0, 0.06);
+  }
+
+  .gb-branch-item-badge {
+    background: rgba(14, 124, 134, 0.08);
+  }
+
+  /* --- Group header / section backgrounds --------------------- */
+  .gb-group-header {
+    background: rgba(0, 0, 0, 0.02);
+  }
+
+  /* --- Status badges ------------------------------------------ */
+  .gb-status--modified {
+    background: rgba(180, 130, 0, 0.12);
+  }
+
+  .gb-status--added {
+    background: rgba(26, 138, 62, 0.12);
+    color: #1a8a3e;
+  }
+
+  .gb-status--deleted {
+    background: rgba(196, 30, 30, 0.10);
+  }
+
+  .gb-status--untracked {
+    background: rgba(0, 0, 0, 0.06);
+  }
+
+  .gb-status--renamed {
+    background: rgba(14, 90, 200, 0.10);
+    color: #1a6bc4;
+  }
+
+  /* --- Uncommitted entry -------------------------------------- */
+  .gb-log-entry--uncommitted {
+    border-bottom-color: rgba(180, 130, 0, 0.12);
+  }
+
+  /* --- Diff lines --------------------------------------------- */
+  .gb-diff-line--added {
+    background: rgba(26, 138, 62, 0.08);
+    color: #1a8a3e;
+  }
+
+  .gb-diff-line--removed {
+    background: rgba(196, 30, 30, 0.08);
+  }
+
+  .gb-diff-line--hunk {
+    background: rgba(14, 90, 200, 0.06);
+    color: #1a6bc4;
+  }
+
+  .gb-diff-hunk-row {
+    background: rgba(14, 90, 200, 0.06);
+  }
+
+  .gb-diff-line--empty {
+    background: rgba(0, 0, 0, 0.02);
+  }
+
+  /* --- Hunk action buttons ------------------------------------ */
+  .gb-hunk-btn {
+    border-color: rgba(0, 0, 0, 0.12);
+  }
+
+  .gb-hunk-btn--stage {
+    color: #1a8a3e;
+    border-color: rgba(26, 138, 62, 0.25);
+  }
+
+  .gb-hunk-btn--stage:hover {
+    background: rgba(26, 138, 62, 0.08);
+  }
+
+  .gb-hunk-btn--stage:active {
+    background: rgba(26, 138, 62, 0.14);
+  }
+
+  .gb-hunk-btn--revert {
+    border-color: rgba(196, 30, 30, 0.25);
+  }
+
+  .gb-hunk-btn--revert:hover {
+    background: rgba(196, 30, 30, 0.08);
+  }
+
+  .gb-hunk-btn--revert:active {
+    background: rgba(196, 30, 30, 0.14);
+  }
+
+  /* --- Wide layout selected file (1024px+) -------------------- */
+  @media (min-width: 1024px) {
+    .gb-file-entry--selected {
+      background: rgba(14, 124, 134, 0.08);
+    }
+  }
+
+  /* --- Mobile hunk-actions border (600px-) -------------------- */
+  @media (max-width: 600px) {
+    .gb-hunk-actions {
+      border-top-color: rgba(0, 0, 0, 0.05);
+    }
   }
 }

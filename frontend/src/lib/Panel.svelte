@@ -617,15 +617,48 @@
   }
 
   /**
-   * Send input to a specific window's terminal without switching tabs.
+   * Send input to a specific window's terminal.
+   * If the terminal's WebSocket isn't connected yet (tab never visited),
+   * switches to the tab to trigger connection, waits, then sends.
    * @param {number} windowIdx
    * @param {string} data
    */
   export function sendToWindow(windowIdx, data) {
-    const tabState = _findTab(`terminal:${windowIdx}`);
-    if (tabState && tabState.terminal) {
+    const tabKey = `terminal:${windowIdx}`;
+    const tabState = _findTab(tabKey);
+
+    // Terminal already connected — send immediately
+    if (tabState?.terminal?._ws?.readyState === WebSocket.OPEN) {
       tabState.terminal.sendInput(data);
+      return;
     }
+
+    // Tab doesn't exist or terminal not connected — switch to it to trigger init
+    const prevTabKey = activeTabKey;
+    switchToTab(tabKey);
+
+    // Wait for the WebSocket connection then send
+    const maxWait = 5000;
+    const interval = 100;
+    let elapsed = 0;
+    const timer = setInterval(() => {
+      elapsed += interval;
+      const ts = _findTab(tabKey);
+      if (ts?.terminal?._ws?.readyState === WebSocket.OPEN) {
+        clearInterval(timer);
+        ts.terminal.sendInput(data);
+        // Switch back to the original tab
+        if (prevTabKey && prevTabKey !== tabKey) {
+          switchToTab(prevTabKey);
+        }
+      } else if (elapsed >= maxWait) {
+        clearInterval(timer);
+        // Timeout — switch back
+        if (prevTabKey && prevTabKey !== tabKey) {
+          switchToTab(prevTabKey);
+        }
+      }
+    }, interval);
   }
 
   export function getToolbar() {
@@ -735,6 +768,14 @@
   export function reconnectNow() {
     if (_connectionManager && _connectionManager.state !== 'connected') {
       _connectionManager.reconnectNow();
+    }
+  }
+
+  export function applyTerminalTheme(isDark) {
+    for (const tab of tabs) {
+      if (tab.type === 'terminal' && tab.terminal) {
+        tab.terminal.setTheme(isDark);
+      }
     }
   }
 
@@ -907,8 +948,8 @@
     height: 32px;
     min-height: 32px;
     padding: 0 8px;
-    background: #12192e;
-    border-bottom: 1px solid #2a2a4a;
+    background: var(--bg-panel-header);
+    border-bottom: 1px solid var(--border-subtle);
     user-select: none;
     -webkit-user-select: none;
     flex-shrink: 0;
@@ -918,14 +959,14 @@
 
   /* Focused panel header accent */
   :global(.panel--focused) .panel-header {
-    background: #142036;
-    border-bottom-color: #7ec8e3;
+    background: var(--bg-panel-header-focused);
+    border-bottom-color: var(--accent-primary);
   }
 
   .panel-header-title {
     font-size: 12px;
     font-weight: 500;
-    color: #8888aa;
+    color: var(--panel-header-title);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -934,7 +975,7 @@
   }
 
   :global(.panel--focused) .panel-header-title {
-    color: #c0d8e8;
+    color: var(--panel-header-title-focused);
   }
 
   /* Panel Content Areas */
@@ -999,6 +1040,11 @@
   .panel-filebrowser-view.hidden,
   .panel-gitbrowser-view.hidden {
     display: none;
+  }
+
+  /* Light mode overrides */
+  :global([data-theme="light"]) .panel-reconnect-overlay {
+    background: rgba(255, 255, 255, 0.75);
   }
 
   /* Responsive: auto-collapse split under 900px */

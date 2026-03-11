@@ -19,6 +19,7 @@ import { Router } from '../js/router.js';
 import SessionList from './lib/SessionList.svelte';
 import TabBar from './lib/TabBar.svelte';
 import Drawer from './lib/Drawer.svelte';
+import { getTheme, toggleTheme } from './stores/theme.svelte.js';
 
 // ─────────── Meta tags ───────────
 const basePath = document.querySelector('meta[name="base-path"]')?.getAttribute('content') || '/';
@@ -47,8 +48,6 @@ let toolbarToggleVisible = $state(false);
 let fontControlsVisible = $state(false);
 let splitToggleVisible = $state(false);
 let drawerBtnVisible = $state(false);
-let connectionState = $state('disconnected');
-let connectionVisible = $state(false);
 let portmanLeases = $state(null);
 let portmanVisible = $state(false);
 let githubURL = $state(null);
@@ -56,6 +55,9 @@ let githubVisible = $state(false);
 let splitActive = $state(false);
 let drawerPanelTarget = $state('');
 let drawerPanelTargetVisible = $state(false);
+
+// Theme
+let currentTheme = $derived(getTheme());
 
 // Global UI state (shared across Panel/Toolbar/IME components)
 const globalUIState = {
@@ -318,7 +320,6 @@ function _switchToSessionListView() {
     panelManager.getLeftPanel().cleanup();
   }
 
-  connectionVisible = false;
   tabBarVisible = false;
   headerTitleVisible = true;
   headerTitle = 'Palmux';
@@ -516,8 +517,9 @@ async function switchSession(sessionName, windowIndex) {
 }
 
 function updateConnectionUI(state) {
-  connectionState = state;
-  connectionVisible = true;
+  // Update global UI state store (used by other components)
+  // Connection indicator removed from header, but state is still tracked
+  void state;
 }
 
 async function autoConnect() {
@@ -901,16 +903,20 @@ function handleSplitToggle() {
   _updateDrawerPanelTarget();
 }
 
-function handleReconnect() {
-  if (panelManager) panelManager.getFocusedPanel().reconnectNow();
-}
-
 function handleFontDecrease() {
   if (panelManager) panelManager.getFocusedPanel().decreaseFontSize();
 }
 
 function handleFontIncrease() {
   if (panelManager) panelManager.getFocusedPanel().increaseFontSize();
+}
+
+function handleThemeToggle() {
+  toggleTheme();
+  if (panelManager) {
+    const isDark = getTheme() === 'dark';
+    panelManager.applyTerminalTheme(isDark);
+  }
 }
 
 function handlePortmanClick() {
@@ -1227,10 +1233,7 @@ $effect(() => {
     />
   </div>
   <button id="split-toggle-btn" class:hidden={!splitToggleVisible} class:split-toggle-btn--active={splitActive} aria-label="Toggle split screen" onclick={handleSplitToggle}>&#x2AFF;</button>
-  <div id="connection-status" class="connection-status" class:hidden={!connectionVisible} class:connection-status--disconnected={connectionState === 'disconnected'} onclick={handleReconnect}>
-    <span class="connection-dot" class:connection-dot--connected={connectionState === 'connected'} class:connection-dot--connecting={connectionState === 'connecting'} class:connection-dot--disconnected={connectionState === 'disconnected'}></span>
-    <span class="connection-text">{connectionState === 'connecting' ? 'Reconnecting...' : connectionState === 'disconnected' ? 'Disconnected' : ''}</span>
-  </div>
+  <button class="theme-toggle-btn" aria-label="Toggle theme" onclick={handleThemeToggle}>{currentTheme === 'dark' ? '\u2600' : '\u263E'}</button>
   <button id="portman-btn" class="portman-btn" class:hidden={!portmanVisible} aria-label="Open portman URL" onclick={handlePortmanClick}>
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
       <path d="M6 2H3C2.44772 2 2 2.44772 2 3V13C2 13.5523 2.44772 14 3 14H13C13.5523 14 14 13.5523 14 13V10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>

@@ -227,8 +227,8 @@
     display: flex;
     align-items: center;
     padding: 6px 8px;
-    background: #16213e;
-    border-top: 1px solid #2a2a4a;
+    background: var(--bg-header);
+    border-top: 1px solid var(--border-subtle);
     gap: 8px;
     flex-shrink: 0;
   }
@@ -236,28 +236,28 @@
   .ime-input-field {
     flex: 1;
     padding: 8px 12px;
-    background: #1a1a2e;
-    border: 1px solid #2a2a4a;
+    background: var(--ime-bg);
+    border: 1px solid var(--border-subtle);
     border-radius: 6px;
-    color: #e0e0e0;
+    color: var(--text-primary);
     font-size: 16px; /* 16px prevents iOS Safari auto-zoom on focus */
     outline: none;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
 
   .ime-input-field::placeholder {
-    color: #6a6a8a;
+    color: var(--ime-placeholder);
   }
 
   .ime-input-field:focus {
-    border-color: #7ec8e3;
+    border-color: var(--accent-primary);
   }
 
   .ime-send-btn {
     flex-shrink: 0;
     padding: 8px 16px;
-    background: #7ec8e3;
-    color: #0f0f23;
+    background: var(--accent-primary);
+    color: var(--bg-body);
     border: none;
     border-radius: 6px;
     font-size: 14px;
@@ -271,21 +271,21 @@
   }
 
   .ime-send-btn:hover {
-    background: #6ab8d3;
+    background: rgba(126, 200, 227, 0.8);
   }
 
   .ime-send-btn:active {
-    background: #5aa8c3;
+    background: rgba(126, 200, 227, 0.65);
   }
 
   /* Voice interim text (rendered above IME bar) */
   .voice-interim-text {
     padding: 4px 8px;
     font-size: 12px;
-    color: #6a6a8a;
+    color: var(--ime-placeholder);
     font-style: italic;
-    background: #16213e;
-    border-top: 1px solid #2a2a4a;
+    background: var(--bg-header);
+    border-top: 1px solid var(--border-subtle);
   }
 
   /* Mobile adjustments */
@@ -303,5 +303,14 @@
       padding: 6px 12px;
       font-size: 13px;
     }
+  }
+
+  /* Light mode overrides for dark-mode-specific rgba values */
+  :global([data-theme="light"]) .ime-send-btn:hover {
+    background: rgba(14, 124, 134, 0.8);
+  }
+
+  :global([data-theme="light"]) .ime-send-btn:active {
+    background: rgba(14, 124, 134, 0.65);
   }
 </style>

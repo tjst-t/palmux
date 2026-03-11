@@ -211,9 +211,9 @@
     align-items: center;
     justify-content: center;
     background: transparent;
-    border: 1px solid #2a2a4a;
+    border: 1px solid var(--border-subtle);
     border-radius: 6px;
-    color: #e0e0e0;
+    color: var(--text-primary);
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
@@ -222,24 +222,37 @@
 
   .voice-mic-btn:hover {
     background: rgba(126, 200, 227, 0.1);
-    border-color: #7ec8e3;
+    border-color: var(--accent-primary);
   }
 
   .voice-mic-btn--listening {
     background: rgba(244, 67, 54, 0.2);
-    border-color: #f44336;
-    color: #f44336;
+    border-color: var(--color-danger);
+    color: var(--color-danger);
     animation: voice-pulse 1.5s ease-in-out infinite;
   }
 
   .voice-mic-btn--error {
     background: rgba(255, 152, 0, 0.2);
-    border-color: #ff9800;
-    color: #ff9800;
+    border-color: var(--color-warning);
+    color: var(--color-warning);
   }
 
   @keyframes voice-pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }
+  }
+
+  /* Light mode overrides for dark-mode-specific rgba values */
+  :global([data-theme="light"]) .voice-mic-btn:hover {
+    background: rgba(14, 124, 134, 0.07);
+  }
+
+  :global([data-theme="light"]) .voice-mic-btn--listening {
+    background: rgba(196, 30, 30, 0.12);
+  }
+
+  :global([data-theme="light"]) .voice-mic-btn--error {
+    background: rgba(184, 134, 11, 0.12);
   }
 </style>

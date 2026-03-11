@@ -31,8 +31,8 @@
   display: flex;
   align-items: center;
   padding: 8px 12px;
-  background: #16213e;
-  border-bottom: 1px solid #2a2a4a;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
   min-height: 40px;
   overflow: hidden;
@@ -45,9 +45,9 @@
   min-width: 36px;
   min-height: 36px;
   background: none;
-  border: 1px solid #2a2a4a;
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  color: #7ec8e3;
+  color: var(--accent-primary);
   font-size: 16px;
   cursor: pointer;
   margin-right: 8px;
@@ -58,11 +58,11 @@
 }
 
 .fb-breadcrumb-back:hover {
-  background: rgba(126, 200, 227, 0.15);
+  background: var(--bg-hover);
 }
 
 .fb-breadcrumb-back:active {
-  background: rgba(126, 200, 227, 0.25);
+  background: var(--bg-active);
 }
 
 .fb-breadcrumb-items {
@@ -82,7 +82,7 @@
 .fb-breadcrumb-item {
   background: none;
   border: none;
-  color: #7ec8e3;
+  color: var(--accent-primary);
   font-size: calc(var(--fb-font-size, 14px) - 1px);
   padding: 4px 6px;
   cursor: pointer;
@@ -95,15 +95,15 @@
 }
 
 .fb-breadcrumb-item:hover {
-  background: rgba(126, 200, 227, 0.15);
+  background: var(--bg-hover);
 }
 
 .fb-breadcrumb-item:active {
-  background: rgba(126, 200, 227, 0.25);
+  background: var(--bg-active);
 }
 
 .fb-breadcrumb-item--current {
-  color: #e0e0e0;
+  color: var(--text-primary);
   font-weight: 600;
   cursor: default;
 }
@@ -113,7 +113,7 @@
 }
 
 .fb-breadcrumb-sep {
-  color: #555;
+  color: var(--text-muted);
   font-size: 13px;
   flex-shrink: 0;
   user-select: none;
@@ -132,9 +132,9 @@
   height: 30px;
   padding: 0 8px;
   background: rgba(42, 42, 74, 0.7);
-  border: 1px solid #2a2a4a;
+  border: 1px solid var(--border-subtle);
   border-radius: 15px;
-  color: #e0e0e0;
+  color: var(--text-primary);
   font-size: 12px;
   outline: none;
   transition: width 0.2s, border-color 0.15s;
@@ -144,18 +144,18 @@
 
 .fb-search-input:focus {
   width: 160px;
-  border-color: #7ec8e3;
+  border-color: var(--accent-primary);
 }
 
 .fb-search-input::placeholder {
-  color: #666;
+  color: var(--text-dim);
 }
 
 /* Search result label in breadcrumb */
 .fb-search-result-label {
   flex: 1;
   font-size: 13px;
-  color: #8888aa;
+  color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -178,7 +178,7 @@
 
 .fb-search-result-path {
   font-size: 11px;
-  color: #555;
+  color: var(--text-muted);
   font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
   white-space: nowrap;
   overflow: hidden;
@@ -229,7 +229,7 @@
 .fb-entry-name {
   flex: 1;
   font-size: var(--fb-font-size, 14px);
-  color: #e0e0e0;
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -237,7 +237,7 @@
 }
 
 .fb-entry--dir .fb-entry-name {
-  color: #81d4fa;
+  color: var(--accent-light);
 }
 
 .fb-entry-meta {
@@ -245,7 +245,7 @@
   align-items: center;
   gap: 12px;
   flex-shrink: 0;
-  color: #8888aa;
+  color: var(--text-secondary);
   font-size: calc(var(--fb-font-size, 14px) - 2px);
 }
 
@@ -264,21 +264,21 @@
 .fb-loading {
   padding: 40px 16px;
   text-align: center;
-  color: #8888aa;
+  color: var(--text-secondary);
   font-size: 14px;
 }
 
 .fb-empty {
   padding: 40px 16px;
   text-align: center;
-  color: #8888aa;
+  color: var(--text-secondary);
   font-size: 14px;
 }
 
 .fb-error {
   padding: 40px 16px;
   text-align: center;
-  color: #e57373;
+  color: var(--color-error-text);
   font-size: 14px;
 }
 
@@ -291,7 +291,7 @@
   min-height: 36px;
   background: none;
   border: none;
-  color: #8888aa;
+  color: var(--text-secondary);
   font-size: 16px;
   cursor: pointer;
   border-radius: 4px;
@@ -303,13 +303,13 @@
 }
 
 .drawer-session-filebrowser-btn:hover {
-  background: rgba(126, 200, 227, 0.15);
-  color: #7ec8e3;
+  background: var(--bg-hover);
+  color: var(--accent-primary);
 }
 
 .drawer-session-filebrowser-btn:active {
-  background: rgba(126, 200, 227, 0.25);
-  color: #7ec8e3;
+  background: var(--bg-active);
+  color: var(--accent-primary);
 }
 
 /* ===========================
@@ -329,8 +329,8 @@
   display: flex;
   align-items: center;
   padding: 8px 12px;
-  background: #16213e;
-  border-bottom: 1px solid #2a2a4a;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
   min-height: 40px;
   gap: 10px;
@@ -343,9 +343,9 @@
   min-width: 36px;
   min-height: 36px;
   background: none;
-  border: 1px solid #2a2a4a;
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  color: #7ec8e3;
+  color: var(--accent-primary);
   font-size: 16px;
   cursor: pointer;
   flex-shrink: 0;
@@ -355,11 +355,11 @@
 }
 
 .fp-back-btn:hover {
-  background: rgba(126, 200, 227, 0.15);
+  background: var(--bg-hover);
 }
 
 .fp-back-btn:active {
-  background: rgba(126, 200, 227, 0.25);
+  background: var(--bg-active);
 }
 
 .fp-file-info {
@@ -373,7 +373,7 @@
 
 .fp-file-name {
   font-size: 14px;
-  color: #e0e0e0;
+  color: var(--text-primary);
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -383,7 +383,7 @@
 
 .fp-file-size {
   font-size: 12px;
-  color: #8888aa;
+  color: var(--text-secondary);
   flex-shrink: 0;
 }
 
@@ -399,7 +399,7 @@
 .fp-loading {
   padding: 40px 16px;
   text-align: center;
-  color: #8888aa;
+  color: var(--text-secondary);
   font-size: 14px;
 }
 
@@ -407,7 +407,7 @@
 .fp-error {
   padding: 40px 16px;
   text-align: center;
-  color: #e57373;
+  color: var(--color-error-text);
   font-size: 14px;
 }
 
@@ -415,7 +415,7 @@
 .fp-truncated {
   padding: 12px 16px;
   text-align: center;
-  color: #ffb74d;
+  color: var(--color-warning-text);
   font-size: 13px;
   background: rgba(255, 183, 77, 0.08);
   border-top: 1px solid rgba(255, 183, 77, 0.2);
@@ -424,7 +424,7 @@
 /* --- Markdown Preview --- */
 .fp-markdown {
   padding: 16px;
-  color: #e0e0e0;
+  color: var(--text-primary);
   font-size: var(--fb-font-size, 14px);
   line-height: 1.6;
   word-wrap: break-word;
@@ -437,7 +437,7 @@
 .fp-markdown h4,
 .fp-markdown h5,
 .fp-markdown h6 {
-  color: #81d4fa;
+  color: var(--accent-light);
   margin-top: 1.2em;
   margin-bottom: 0.5em;
   font-weight: 600;
@@ -447,13 +447,13 @@
 .fp-markdown h1 {
   font-size: 1.6em;
   padding-bottom: 0.3em;
-  border-bottom: 1px solid #2a2a4a;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .fp-markdown h2 {
   font-size: 1.35em;
   padding-bottom: 0.2em;
-  border-bottom: 1px solid #2a2a4a;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .fp-markdown h3 { font-size: 1.15em; }
@@ -464,7 +464,7 @@
 }
 
 .fp-markdown a {
-  color: #4fc3f7;
+  color: var(--accent-secondary);
   text-decoration: none;
 }
 
@@ -481,8 +481,8 @@
 }
 
 .fp-markdown pre {
-  background: #0d1117;
-  border: 1px solid #2a2a4a;
+  background: var(--fb-editor-bg);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 12px;
   overflow-x: auto;
@@ -498,10 +498,10 @@
 }
 
 .fp-markdown blockquote {
-  border-left: 3px solid #4fc3f7;
+  border-left: 3px solid var(--accent-secondary);
   margin: 0.8em 0;
   padding: 4px 12px;
-  color: #aaa;
+  color: var(--blockquote-color);
   background: rgba(79, 195, 247, 0.04);
 }
 
@@ -524,13 +524,13 @@
 
 .fp-markdown th,
 .fp-markdown td {
-  border: 1px solid #2a2a4a;
+  border: 1px solid var(--border-subtle);
   padding: 6px 10px;
   text-align: left;
 }
 
 .fp-markdown th {
-  background: #16213e;
+  background: var(--bg-header);
   font-weight: 600;
 }
 
@@ -546,7 +546,7 @@
 
 .fp-markdown hr {
   border: none;
-  border-top: 1px solid #2a2a4a;
+  border-top: 1px solid var(--border-subtle);
   margin: 1em 0;
 }
 
@@ -573,17 +573,17 @@
   white-space: nowrap;
   padding: 0 12px;
   text-align: right;
-  color: #555;
+  color: var(--text-muted);
   user-select: none;
   vertical-align: top;
-  border-right: 1px solid #2a2a4a;
+  border-right: 1px solid var(--border-subtle);
   background: rgba(22, 33, 62, 0.5);
 }
 
 .fp-code-line {
   padding: 0 12px;
   white-space: pre;
-  color: #e0e0e0;
+  color: var(--text-primary);
 }
 
 .fp-code-table tr:hover {
@@ -594,7 +594,7 @@
 .fp-plaintext {
   padding: 16px;
   margin: 0;
-  color: #e0e0e0;
+  color: var(--text-primary);
   font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
   font-size: calc(var(--fb-font-size, 14px) - 1px);
   line-height: 1.5;
@@ -617,7 +617,7 @@
   height: auto;
   object-fit: contain;
   border-radius: 4px;
-  background: repeating-conic-gradient(#1a1a3a 0% 25%, #0f0f23 0% 50%) 50% / 20px 20px;
+  background: repeating-conic-gradient(var(--bg-surface) 0% 25%, var(--bg-body) 0% 50%) 50% / 20px 20px;
 }
 
 /* --- PDF Preview --- */
@@ -639,10 +639,10 @@
   display: block;
   padding: 10px 16px;
   text-align: center;
-  color: #4fc3f7;
+  color: var(--accent-secondary);
   text-decoration: none;
   font-size: 14px;
-  border-top: 1px solid #2a2a4a;
+  border-top: 1px solid var(--border-subtle);
 }
 
 .fp-pdf-download:hover {
@@ -693,7 +693,7 @@
   align-items: center;
   justify-content: center;
   background: rgba(15, 15, 35, 0.8);
-  color: #8888aa;
+  color: var(--text-secondary);
   font-size: 14px;
   z-index: 10;
 }
@@ -701,8 +701,8 @@
 .fp-drawio-edit-btn {
   padding: 4px 14px;
   background: rgba(79, 195, 247, 0.15);
-  color: #4fc3f7;
-  border: 1px solid #4fc3f7;
+  color: var(--accent-secondary);
+  border: 1px solid var(--accent-secondary);
   border-radius: 6px;
   font-size: 12px;
   font-weight: 600;
@@ -728,13 +728,13 @@
 }
 
 .fp-unknown-msg {
-  color: #8888aa;
+  color: var(--text-secondary);
   font-size: 16px;
   margin-bottom: 16px;
 }
 
 .fp-unknown-info {
-  color: #666;
+  color: var(--text-dim);
   font-size: 13px;
   line-height: 1.8;
 }
@@ -743,8 +743,8 @@
   display: inline-block;
   margin-top: 16px;
   padding: 8px 20px;
-  color: #4fc3f7;
-  border: 1px solid #4fc3f7;
+  color: var(--accent-secondary);
+  border: 1px solid var(--accent-secondary);
   border-radius: 6px;
   text-decoration: none;
   font-size: 14px;
@@ -764,8 +764,8 @@
   align-items: center;
   gap: 4px;
   padding: 4px 8px;
-  background: #12192e;
-  border-bottom: 1px solid #2a2a4a;
+  background: var(--bg-panel-header);
+  border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
   flex-wrap: wrap;
   min-height: 38px;
@@ -779,9 +779,9 @@
   min-height: 28px;
   padding: 0 6px;
   background: rgba(42, 42, 74, 0.6);
-  border: 1px solid #2a2a4a;
+  border: 1px solid var(--border-subtle);
   border-radius: 5px;
-  color: #e0e0e0;
+  color: var(--text-primary);
   font-size: 14px;
   cursor: pointer;
   flex-shrink: 0;
@@ -791,11 +791,11 @@
 }
 
 .fp-edit-tool-btn:hover:not(:disabled) {
-  background: rgba(126, 200, 227, 0.15);
+  background: var(--bg-hover);
 }
 
 .fp-edit-tool-btn:active:not(:disabled) {
-  background: rgba(126, 200, 227, 0.25);
+  background: var(--bg-active);
 }
 
 .fp-edit-tool-btn:disabled {
@@ -806,7 +806,7 @@
 .fp-edit-toolbar-sep {
   width: 1px;
   height: 20px;
-  background: #2a2a4a;
+  background: var(--border-subtle);
   flex-shrink: 0;
   margin: 0 2px;
 }
@@ -818,9 +818,9 @@
   max-width: 160px;
   padding: 0 8px;
   background: rgba(13, 17, 23, 0.8);
-  border: 1px solid #2a2a4a;
+  border: 1px solid var(--border-subtle);
   border-radius: 4px;
-  color: #e0e0e0;
+  color: var(--text-primary);
   font-size: 12px;
   outline: none;
   transition: border-color 0.15s;
@@ -828,7 +828,7 @@
 }
 
 .fp-edit-search-input:focus {
-  border-color: #7ec8e3;
+  border-color: var(--accent-primary);
 }
 
 .fp-edit-replace-input {
@@ -838,9 +838,9 @@
   max-width: 140px;
   padding: 0 8px;
   background: rgba(13, 17, 23, 0.8);
-  border: 1px solid #2a2a4a;
+  border: 1px solid var(--border-subtle);
   border-radius: 4px;
-  color: #e0e0e0;
+  color: var(--text-primary);
   font-size: 12px;
   outline: none;
   transition: border-color 0.15s;
@@ -848,7 +848,7 @@
 }
 
 .fp-edit-replace-input:focus {
-  border-color: #ffb74d;
+  border-color: var(--color-warning-text);
 }
 
 .fp-edit-replace-btn {
@@ -882,7 +882,7 @@
   position: relative;
   width: 40px;
   height: 22px;
-  background: #3a3a5a;
+  background: var(--toggle-bg);
   border-radius: 11px;
   transition: background 0.2s;
   flex-shrink: 0;
@@ -901,7 +901,7 @@
 }
 
 .fp-edit-toggle-input:checked + .fp-edit-toggle-slider {
-  background: #4fc3f7;
+  background: var(--accent-secondary);
 }
 
 .fp-edit-toggle-input:checked + .fp-edit-toggle-slider::after {
@@ -911,12 +911,12 @@
 
 .fp-edit-toggle-label {
   font-size: 12px;
-  color: #8888aa;
+  color: var(--text-secondary);
   white-space: nowrap;
 }
 
 .fp-edit-toggle-input:checked ~ .fp-edit-toggle-label {
-  color: #4fc3f7;
+  color: var(--accent-secondary);
 }
 
 /* Content area in edit mode: flex column to fill height */
@@ -943,8 +943,8 @@
   border: none;
   outline: none;
   resize: none;
-  background: #0d1117;
-  color: #e0e0e0;
+  background: var(--fb-editor-bg);
+  color: var(--text-primary);
   font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
   font-size: calc(var(--fb-font-size, 14px) - 1px);
   line-height: 1.5;
@@ -967,14 +967,14 @@
   justify-content: flex-end;
   gap: 10px;
   padding: 8px 12px;
-  background: #16213e;
-  border-top: 1px solid #2a2a4a;
+  background: var(--bg-header);
+  border-top: 1px solid var(--border-subtle);
   flex-shrink: 0;
 }
 
 .fp-edit-save-status {
   font-size: 12px;
-  color: #8888aa;
+  color: var(--text-secondary);
   flex: 1;
   white-space: nowrap;
   overflow: hidden;
@@ -982,17 +982,17 @@
 }
 
 .fp-edit-save-status--success {
-  color: #66bb6a;
+  color: var(--color-success-text);
 }
 
 .fp-edit-save-status--error {
-  color: #e57373;
+  color: var(--color-error-text);
 }
 
 .fp-edit-save-btn {
   padding: 6px 20px;
-  background: #4fc3f7;
-  color: #0f0f23;
+  background: var(--accent-secondary);
+  color: var(--bg-body);
   border: none;
   border-radius: 6px;
   font-size: 13px;
@@ -1005,7 +1005,7 @@
 }
 
 .fp-edit-save-btn:hover:not(:disabled) {
-  background: #81d4fa;
+  background: var(--accent-light);
 }
 
 .fp-edit-save-btn:active:not(:disabled) {
@@ -1033,8 +1033,8 @@
 }
 
 .fp-dialog {
-  background: #1a1a3a;
-  border: 1px solid #2a2a4a;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
   border-radius: 12px;
   padding: 20px;
   max-width: 340px;
@@ -1043,7 +1043,7 @@
 }
 
 .fp-dialog-msg {
-  color: #e0e0e0;
+  color: var(--text-primary);
   font-size: 14px;
   line-height: 1.5;
   margin-bottom: 20px;
@@ -1070,7 +1070,7 @@
 
 .fp-dialog-btn--discard {
   background: rgba(229, 115, 115, 0.15);
-  color: #e57373;
+  color: var(--color-error-text);
 }
 
 .fp-dialog-btn--discard:hover {
@@ -1079,7 +1079,7 @@
 
 .fp-dialog-btn--cancel {
   background: rgba(136, 136, 170, 0.15);
-  color: #8888aa;
+  color: var(--text-secondary);
 }
 
 .fp-dialog-btn--cancel:hover {
@@ -1087,12 +1087,12 @@
 }
 
 .fp-dialog-btn--save {
-  background: #4fc3f7;
-  color: #0f0f23;
+  background: var(--accent-secondary);
+  color: var(--bg-body);
 }
 
 .fp-dialog-btn--save:hover {
-  background: #81d4fa;
+  background: var(--accent-light);
 }
 
 .fp-dialog-btn:disabled {
@@ -1108,9 +1108,9 @@
   min-width: 30px;
   min-height: 30px;
   background: none;
-  border: 1px solid #2a2a4a;
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  color: #8888aa;
+  color: var(--text-secondary);
   font-size: 12px;
   cursor: pointer;
   flex-shrink: 0;
@@ -1121,13 +1121,13 @@
 }
 
 .fb-search-mode-toggle:hover {
-  background: rgba(126, 200, 227, 0.15);
-  color: #7ec8e3;
+  background: var(--bg-hover);
+  color: var(--accent-primary);
 }
 
 .fb-search-mode-toggle--active {
-  color: #4fc3f7;
-  border-color: #4fc3f7;
+  color: var(--accent-secondary);
+  border-color: var(--accent-secondary);
   background: rgba(79, 195, 247, 0.1);
 }
 
@@ -1137,8 +1137,8 @@
   align-items: center;
   justify-content: flex-end;
   padding: 4px 12px;
-  background: #12192e;
-  border-bottom: 1px solid #2a2a4a;
+  background: var(--bg-panel-header);
+  border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
   gap: 4px;
 }
@@ -1148,20 +1148,20 @@
   height: 26px;
   padding: 0 6px;
   background: rgba(42, 42, 74, 0.7);
-  border: 1px solid #2a2a4a;
+  border: 1px solid var(--border-subtle);
   border-radius: 4px;
-  color: #e0e0e0;
+  color: var(--text-primary);
   font-size: 11px;
   outline: none;
   font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
 }
 
 .fb-grep-filter-input:focus {
-  border-color: #7ec8e3;
+  border-color: var(--accent-primary);
 }
 
 .fb-grep-filter-input::placeholder {
-  color: #555;
+  color: var(--text-muted);
 }
 
 .fb-grep-filter-btn {
@@ -1172,9 +1172,9 @@
   height: 26px;
   padding: 0 6px;
   background: rgba(42, 42, 74, 0.4);
-  border: 1px solid #2a2a4a;
+  border: 1px solid var(--border-subtle);
   border-radius: 4px;
-  color: #8888aa;
+  color: var(--text-secondary);
   font-size: 11px;
   font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
   cursor: pointer;
@@ -1185,19 +1185,19 @@
 }
 
 .fb-grep-filter-btn:hover {
-  background: rgba(126, 200, 227, 0.15);
+  background: var(--bg-hover);
 }
 
 .fb-grep-filter-btn--active {
-  color: #4fc3f7;
-  border-color: #4fc3f7;
+  color: var(--accent-secondary);
+  border-color: var(--accent-secondary);
   background: rgba(79, 195, 247, 0.15);
 }
 
 .fb-grep-engine {
   margin-left: auto;
   font-size: 10px;
-  color: #555;
+  color: var(--text-muted);
   white-space: nowrap;
 }
 
@@ -1214,7 +1214,7 @@
   cursor: pointer;
   gap: 8px;
   font-size: 13px;
-  color: #81d4fa;
+  color: var(--accent-light);
   font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
@@ -1225,7 +1225,7 @@
 }
 
 .fb-grep-match-count {
-  color: #8888aa;
+  color: var(--text-secondary);
   font-size: 11px;
   margin-left: auto;
   flex-shrink: 0;
@@ -1250,7 +1250,7 @@
 }
 
 .fb-grep-line-number {
-  color: #555;
+  color: var(--text-muted);
   min-width: 40px;
   text-align: right;
   flex-shrink: 0;
@@ -1266,8 +1266,8 @@
 }
 
 .fb-grep-line-text mark {
-  background: rgba(255, 213, 79, 0.3);
-  color: #ffd54f;
+  background: var(--grep-highlight-bg);
+  color: var(--grep-highlight-color);
   border-radius: 2px;
   padding: 0 1px;
 }
@@ -1276,12 +1276,12 @@
   padding: 8px 12px;
   text-align: center;
   font-size: 11px;
-  color: #555;
+  color: var(--text-muted);
   border-top: 1px solid rgba(42, 42, 74, 0.4);
 }
 
 .fb-grep-truncated {
-  color: #ffb74d;
+  color: var(--color-warning-text);
   margin-right: 8px;
 }
 
@@ -1291,7 +1291,7 @@
 }
 
 .fp-code-table tr.fp-code-line--highlight .fp-code-linenum {
-  color: #ffd54f;
+  color: var(--grep-highlight-color);
   background: rgba(255, 213, 79, 0.1);
 }
 
@@ -1302,7 +1302,7 @@
 
 .fp-code-table tr.fp-code-line--highlight-fade .fp-code-linenum {
   transition: color 0.5s ease-out, background 0.5s ease-out;
-  color: #555;
+  color: var(--text-muted);
   background: rgba(22, 33, 62, 0.5);
 }
 
@@ -1496,4 +1496,90 @@
     min-height: 26px;
     font-size: 11px;
   }
+}
+
+/* ===========================
+   Light Theme Overrides
+   =========================== */
+[data-theme="light"] {
+  /* File entry borders / hover / active */
+  .fb-entry { border-bottom-color: rgba(0, 0, 0, 0.06); }
+  .fb-entry:hover { background: rgba(14, 124, 134, 0.04); }
+  .fb-entry:active { background: rgba(14, 124, 134, 0.08); }
+
+  /* Search input */
+  .fb-search-input { background: rgba(0, 0, 0, 0.03); }
+
+  /* Markdown inline code */
+  .fp-markdown code { background: rgba(0, 0, 0, 0.02); }
+
+  /* Markdown blockquote */
+  .fp-markdown blockquote { background: rgba(14, 124, 134, 0.04); }
+
+  /* Markdown table alt rows */
+  .fp-markdown tr:nth-child(even) { background: rgba(0, 0, 0, 0.02); }
+
+  /* Code line numbers */
+  .fp-code-linenum { background: rgba(0, 0, 0, 0.02); }
+
+  /* Code table row hover */
+  .fp-code-table tr:hover { background: rgba(14, 124, 134, 0.03); }
+
+  /* Truncated notice */
+  .fp-truncated { background: rgba(180, 130, 0, 0.06); border-top-color: rgba(180, 130, 0, 0.2); }
+
+  /* Drawio loading overlay */
+  .fp-drawio-loading { background: rgba(255, 255, 255, 0.85); }
+
+  /* Drawio edit button */
+  .fp-drawio-edit-btn { background: rgba(14, 124, 134, 0.08); }
+  .fp-drawio-edit-btn:hover { background: rgba(14, 124, 134, 0.14); }
+  .fp-drawio-edit-btn:active { background: rgba(14, 124, 134, 0.20); }
+
+  /* Edit toolbar tool buttons */
+  .fp-edit-tool-btn { background: rgba(0, 0, 0, 0.04); }
+
+  /* Edit search / replace inputs */
+  .fp-edit-search-input { background: rgba(0, 0, 0, 0.03); }
+  .fp-edit-replace-input { background: rgba(0, 0, 0, 0.03); }
+
+  /* Dialog discard button */
+  .fp-dialog-btn--discard { background: rgba(196, 30, 30, 0.08); }
+  .fp-dialog-btn--discard:hover { background: rgba(196, 30, 30, 0.14); }
+
+  /* Dialog cancel button */
+  .fp-dialog-btn--cancel { background: rgba(0, 0, 0, 0.04); }
+  .fp-dialog-btn--cancel:hover { background: rgba(0, 0, 0, 0.08); }
+
+  /* Search mode toggle active */
+  .fb-search-mode-toggle--active { background: rgba(14, 124, 134, 0.08); }
+
+  /* Grep filter input / button */
+  .fb-grep-filter-input { background: rgba(0, 0, 0, 0.03); }
+  .fb-grep-filter-btn { background: rgba(0, 0, 0, 0.03); }
+  .fb-grep-filter-btn--active { background: rgba(14, 124, 134, 0.10); }
+
+  /* Grep file group border */
+  .fb-grep-file-group { border-bottom-color: rgba(0, 0, 0, 0.06); }
+
+  /* Grep file header */
+  .fb-grep-file-header { background: rgba(0, 0, 0, 0.02); }
+  .fb-grep-file-header:hover { background: rgba(14, 124, 134, 0.05); }
+
+  /* Grep match line */
+  .fb-grep-match-line:hover { background: rgba(14, 124, 134, 0.04); }
+
+  /* Grep line text */
+  .fb-grep-line-text { color: #555; }
+
+  /* Grep mark highlight */
+  .fb-grep-line-text mark { background: rgba(180, 130, 0, 0.20); color: #8b6914; }
+
+  /* Grep footer border */
+  .fb-grep-footer { border-top-color: rgba(0, 0, 0, 0.06); }
+
+  /* Line highlight in file preview */
+  .fp-code-table tr.fp-code-line--highlight { background: rgba(180, 130, 0, 0.12) !important; }
+  .fp-code-table tr.fp-code-line--highlight .fp-code-linenum { color: #8b6914; background: rgba(180, 130, 0, 0.06); }
+  .fp-code-table tr.fp-code-line--highlight-fade .fp-code-linenum { background: rgba(0, 0, 0, 0.02); }
 }

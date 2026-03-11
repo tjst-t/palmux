@@ -232,7 +232,13 @@ function savePinState() {
 }
 
 function checkSavedPinState() {
-  try { return localStorage.getItem('palmux-drawer-pinned') === '1' && window.innerWidth > 600; }
+  try {
+    const saved = localStorage.getItem('palmux-drawer-pinned');
+    // If user explicitly unpinned, respect that
+    if (saved === '0') return false;
+    // If user explicitly pinned, or no preference yet (default pinned on desktop)
+    return window.innerWidth > 600;
+  }
   catch { return false; }
 }
 
@@ -1732,7 +1738,7 @@ function getBranchPickerWorktreeBranches() {
     width: 280px;
     max-width: 80vw;
     height: 100%;
-    background: #16213e;
+    background: var(--bg-header);
     z-index: 101;
     transform: translateX(-100%);
     transition: transform 0.3s ease;
@@ -1749,14 +1755,14 @@ function getBranchPickerWorktreeBranches() {
     display: flex;
     align-items: center;
     padding: 14px 16px;
-    border-bottom: 1px solid #2a2a4a;
+    border-bottom: 1px solid var(--border-subtle);
     flex-shrink: 0;
   }
 
   .drawer-header-title {
     font-size: 16px;
     font-weight: 600;
-    color: #e0e0e0;
+    color: var(--text-primary);
   }
 
   /* Drawer Sort Toggle */
@@ -1777,7 +1783,7 @@ function getBranchPickerWorktreeBranches() {
   }
 
   .drawer-sort-label--active {
-    color: #7ec8e3;
+    color: var(--accent-primary);
   }
 
   .drawer-sort-switch {
@@ -1799,7 +1805,7 @@ function getBranchPickerWorktreeBranches() {
     left: 0;
     right: 0;
     bottom: 0;
-    background: #2a2a4a;
+    background: var(--border-subtle);
     border-radius: 9px;
     transition: background 0.2s;
   }
@@ -1811,7 +1817,7 @@ function getBranchPickerWorktreeBranches() {
     height: 14px;
     left: 2px;
     bottom: 2px;
-    background: #7ec8e3;
+    background: var(--accent-primary);
     border-radius: 50%;
     transition: transform 0.2s;
   }
@@ -1846,7 +1852,7 @@ function getBranchPickerWorktreeBranches() {
   }
 
   .drawer-session-header:active {
-    background: rgba(126, 200, 227, 0.15);
+    background: var(--bg-hover);
   }
 
   .drawer-session-header--current {
@@ -1856,14 +1862,14 @@ function getBranchPickerWorktreeBranches() {
   .drawer-session-arrow {
     width: 20px;
     font-size: 12px;
-    color: #8888aa;
+    color: var(--text-secondary);
     flex-shrink: 0;
   }
 
   .drawer-session-name {
     font-size: 15px;
     font-weight: 500;
-    color: #e0e0e0;
+    color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1891,7 +1897,7 @@ function getBranchPickerWorktreeBranches() {
   }
 
   .drawer-window-item:active {
-    background: rgba(126, 200, 227, 0.15);
+    background: var(--bg-hover);
   }
 
   .drawer-window-item--current {
@@ -1901,7 +1907,7 @@ function getBranchPickerWorktreeBranches() {
   .drawer-window-name {
     flex: 1;
     font-size: 14px;
-    color: #e0e0e0;
+    color: var(--text-primary);
     font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
     white-space: nowrap;
     overflow: hidden;
@@ -1910,7 +1916,7 @@ function getBranchPickerWorktreeBranches() {
 
   .drawer-window-index {
     font-size: 14px;
-    color: #e0e0e0;
+    color: var(--text-primary);
     font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
     flex-shrink: 0;
   }
@@ -1920,21 +1926,21 @@ function getBranchPickerWorktreeBranches() {
     min-width: 0;
     font-size: 14px;
     font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
-    color: #e0e0e0;
+    color: var(--text-primary);
     background: rgba(126, 200, 227, 0.15);
-    border: 1px solid #7ec8e3;
+    border: 1px solid var(--accent-primary);
     border-radius: 4px;
     padding: 2px 6px;
     outline: none;
   }
 
   .drawer-window-rename-input:focus {
-    border-color: #4caf50;
+    border-color: var(--color-success);
     box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
   }
 
   .drawer-window-active {
-    color: #4caf50;
+    color: var(--color-success);
     font-size: 10px;
     flex-shrink: 0;
     width: 18px;
@@ -1996,7 +2002,7 @@ function getBranchPickerWorktreeBranches() {
   }
 
   .drawer-virtual-item:active {
-    background: rgba(126, 200, 227, 0.15);
+    background: var(--bg-hover);
   }
 
   .drawer-virtual-item--current {
@@ -2007,7 +2013,7 @@ function getBranchPickerWorktreeBranches() {
     width: 14px;
     height: 14px;
     margin-right: 8px;
-    color: #7ec8e3;
+    color: var(--accent-primary);
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -2019,7 +2025,7 @@ function getBranchPickerWorktreeBranches() {
 
   .drawer-virtual-item-name {
     font-size: 14px;
-    color: #e0e0e0;
+    color: var(--text-primary);
     font-family: "Cascadia Code", "Fira Code", "Source Code Pro", monospace;
   }
 
@@ -2028,7 +2034,7 @@ function getBranchPickerWorktreeBranches() {
     width: 14px;
     height: 14px;
     margin-right: 6px;
-    color: #7ec8e3;
+    color: var(--accent-primary);
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -2049,7 +2055,7 @@ function getBranchPickerWorktreeBranches() {
     justify-content: center;
     padding: 8px 16px 8px 36px;
     min-height: 40px;
-    color: #7ec8e3;
+    color: var(--accent-primary);
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
@@ -2066,7 +2072,7 @@ function getBranchPickerWorktreeBranches() {
   }
 
   .drawer-new-window-btn:active {
-    background: rgba(126, 200, 227, 0.15);
+    background: var(--bg-hover);
   }
 
   .drawer-new-window-btn--disabled {
@@ -2081,17 +2087,17 @@ function getBranchPickerWorktreeBranches() {
     padding: 24px 16px;
     text-align: center;
     font-size: 14px;
-    color: #8888aa;
+    color: var(--text-secondary);
   }
 
   .drawer-error {
-    color: #e57373;
+    color: var(--color-error-text);
   }
 
   .drawer-window-loading {
     padding: 10px 16px 10px 36px;
     font-size: 13px;
-    color: #8888aa;
+    color: var(--text-secondary);
   }
 
   /* Drawer New Session Button */
@@ -2121,12 +2127,12 @@ function getBranchPickerWorktreeBranches() {
 
   .drawer-new-session-btn:hover {
     background: rgba(126, 200, 227, 0.06);
-    color: #7ec8e3;
+    color: var(--accent-primary);
   }
 
   .drawer-new-session-btn:active {
     background: rgba(126, 200, 227, 0.12);
-    color: #7ec8e3;
+    color: var(--accent-primary);
   }
 
   /* Drawer New Session Input Form */
@@ -2140,10 +2146,10 @@ function getBranchPickerWorktreeBranches() {
     width: 100%;
     padding: 8px 12px;
     min-height: 40px;
-    background: #1a1a2e;
-    border: 1px solid #2a2a4a;
+    background: var(--bg-container);
+    border: 1px solid var(--border-subtle);
     border-radius: 6px;
-    color: #e0e0e0;
+    color: var(--text-primary);
     font-size: 16px;
     outline: none;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -2154,7 +2160,7 @@ function getBranchPickerWorktreeBranches() {
   }
 
   .drawer-new-session-input:focus {
-    border-color: #7ec8e3;
+    border-color: var(--accent-primary);
   }
 
   .drawer-new-session-input:disabled {
@@ -2170,8 +2176,8 @@ function getBranchPickerWorktreeBranches() {
   .drawer-new-session-create {
     padding: 8px 16px;
     min-height: 40px;
-    background: #7ec8e3;
-    color: #0f0f23;
+    background: var(--accent-primary);
+    color: var(--bg-body);
     border: none;
     border-radius: 6px;
     font-size: 14px;
@@ -2194,8 +2200,8 @@ function getBranchPickerWorktreeBranches() {
     padding: 8px 16px;
     min-height: 40px;
     background: none;
-    color: #8888aa;
-    border: 1px solid #2a2a4a;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-subtle);
     border-radius: 6px;
     font-size: 14px;
     cursor: pointer;
@@ -2206,13 +2212,13 @@ function getBranchPickerWorktreeBranches() {
 
   .drawer-new-session-cancel:hover {
     background: rgba(136, 136, 170, 0.1);
-    color: #e0e0e0;
+    color: var(--text-primary);
   }
 
   /* Drawer Inline Error */
   .drawer-inline-error {
     font-size: 13px;
-    color: #e57373;
+    color: var(--color-error-text);
     padding: 4px 0;
   }
 
@@ -2235,7 +2241,7 @@ function getBranchPickerWorktreeBranches() {
     background: rgba(0, 0, 0, 0.2);
     border: 1px solid rgba(126, 200, 227, 0.12);
     border-radius: 6px;
-    color: #e0e0e0;
+    color: var(--text-primary);
     font-size: 16px;
     outline: none;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -2374,7 +2380,7 @@ function getBranchPickerWorktreeBranches() {
 
   .drawer-delete-modal-path {
     font-size: 11px;
-    color: #8888aa;
+    color: var(--text-secondary);
     word-break: break-all;
     padding: 4px 0 8px;
     font-family: monospace;
@@ -2535,8 +2541,8 @@ function getBranchPickerWorktreeBranches() {
   }
 
   .drawer-delete-modal {
-    background: #1a1a2e;
-    border: 1px solid #2a2a4a;
+    background: var(--bg-container);
+    border: 1px solid var(--border-subtle);
     border-radius: 12px;
     padding: 24px;
     max-width: 300px;
@@ -2546,7 +2552,7 @@ function getBranchPickerWorktreeBranches() {
 
   .drawer-delete-modal-message {
     font-size: 15px;
-    color: #e0e0e0;
+    color: var(--text-primary);
     text-align: center;
     margin-bottom: 20px;
     line-height: 1.5;
@@ -2564,8 +2570,8 @@ function getBranchPickerWorktreeBranches() {
     padding: 10px 16px;
     min-height: 44px;
     background: none;
-    color: #8888aa;
-    border: 1px solid #2a2a4a;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-subtle);
     border-radius: 8px;
     font-size: 14px;
     cursor: pointer;
@@ -2576,14 +2582,14 @@ function getBranchPickerWorktreeBranches() {
 
   .drawer-delete-modal-cancel:hover {
     background: rgba(136, 136, 170, 0.1);
-    color: #e0e0e0;
+    color: var(--text-primary);
   }
 
   .drawer-delete-modal-delete {
     flex: 1;
     padding: 10px 16px;
     min-height: 44px;
-    background: #e57373;
+    background: var(--color-error-text);
     color: #fff;
     border: none;
     border-radius: 8px;
@@ -2662,7 +2668,7 @@ function getBranchPickerWorktreeBranches() {
       background: none;
       border: 1px solid transparent;
       border-radius: 4px;
-      color: #8888aa;
+      color: var(--text-secondary);
       cursor: pointer;
       flex-shrink: 0;
       transition: background 0.15s, color 0.15s, border-color 0.15s;
@@ -2672,7 +2678,7 @@ function getBranchPickerWorktreeBranches() {
 
     .drawer-pin-btn:hover {
       background: rgba(126, 200, 227, 0.1);
-      color: #7ec8e3;
+      color: var(--accent-primary);
     }
 
     .drawer-pin-btn:active {
@@ -2685,7 +2691,7 @@ function getBranchPickerWorktreeBranches() {
     }
 
     .drawer-pin-btn--active {
-      color: #7ec8e3;
+      color: var(--accent-primary);
       border-color: rgba(126, 200, 227, 0.3);
       background: rgba(126, 200, 227, 0.1);
     }
@@ -2703,7 +2709,7 @@ function getBranchPickerWorktreeBranches() {
       transform: translateX(0);
       width: var(--drawer-pinned-width, 280px);
       max-width: none;
-      border-right: 1px solid #2a2a4a;
+      border-right: 1px solid var(--border-subtle);
     }
 
     /* Drawer Resize Handle */
@@ -2861,5 +2867,231 @@ function getBranchPickerWorktreeBranches() {
     .drawer-delete-modal-message {
       font-size: 14px;
     }
+  }
+
+  /* ============================================================
+     Light mode overrides
+     ============================================================ */
+  :global([data-theme="light"]) .drawer-session-header {
+    border-bottom-color: rgba(0, 0, 0, 0.06);
+  }
+  :global([data-theme="light"]) .drawer-session-header:hover {
+    background: rgba(14, 124, 134, 0.05);
+  }
+  :global([data-theme="light"]) .drawer-session-header:active {
+    background: rgba(14, 124, 134, 0.09);
+  }
+  :global([data-theme="light"]) .drawer-session-header--current {
+    background: rgba(14, 124, 134, 0.04);
+  }
+  :global([data-theme="light"]) .drawer-windows {
+    background: rgba(0, 0, 0, 0.02);
+  }
+  :global([data-theme="light"]) .drawer-window-item {
+    border-bottom-color: rgba(0, 0, 0, 0.05);
+  }
+  :global([data-theme="light"]) .drawer-window-item:hover {
+    background: rgba(14, 124, 134, 0.05);
+  }
+  :global([data-theme="light"]) .drawer-window-item:active {
+    background: rgba(14, 124, 134, 0.09);
+  }
+  :global([data-theme="light"]) .drawer-window-item--current {
+    background: rgba(14, 124, 134, 0.06);
+  }
+  :global([data-theme="light"]) .drawer-window-rename-input {
+    background: rgba(14, 124, 134, 0.05);
+  }
+  :global([data-theme="light"]) .drawer-window-badge {
+    background: #d35400;
+  }
+  :global([data-theme="light"]) .drawer-virtual-item {
+    border-bottom-color: rgba(0, 0, 0, 0.05);
+  }
+  :global([data-theme="light"]) .drawer-virtual-item:hover {
+    background: rgba(14, 124, 134, 0.05);
+  }
+  :global([data-theme="light"]) .drawer-virtual-item:active {
+    background: rgba(14, 124, 134, 0.09);
+  }
+  :global([data-theme="light"]) .drawer-virtual-item--current {
+    background: rgba(14, 124, 134, 0.06);
+  }
+  :global([data-theme="light"]) .drawer-new-window-btn {
+    border-bottom-color: rgba(0, 0, 0, 0.05);
+  }
+  :global([data-theme="light"]) .drawer-new-window-btn:hover {
+    background: rgba(14, 124, 134, 0.05);
+  }
+  :global([data-theme="light"]) .drawer-new-session-btn {
+    border-top-color: rgba(14, 124, 134, 0.06);
+  }
+  :global([data-theme="light"]) .drawer-new-session-btn:hover {
+    background: rgba(14, 124, 134, 0.04);
+  }
+  :global([data-theme="light"]) .drawer-new-session-btn:active {
+    background: rgba(14, 124, 134, 0.08);
+  }
+  :global([data-theme="light"]) .drawer-new-session-create:hover {
+    background: #0a6b74;
+  }
+  :global([data-theme="light"]) .drawer-new-session-create:active {
+    background: #085e66;
+  }
+  :global([data-theme="light"]) .drawer-new-session-cancel:hover {
+    background: rgba(0, 0, 0, 0.04);
+  }
+  :global([data-theme="light"]) .drawer-new-session-input::placeholder {
+    color: #a0a0a0;
+  }
+  :global([data-theme="light"]) .drawer-project-picker-filter {
+    background: rgba(0, 0, 0, 0.03);
+    border-color: rgba(14, 124, 134, 0.12);
+  }
+  :global([data-theme="light"]) .drawer-project-picker-filter::placeholder {
+    color: #a0a0a0;
+  }
+  :global([data-theme="light"]) .drawer-project-picker-filter:focus {
+    border-color: rgba(14, 124, 134, 0.35);
+    background-color: rgba(0, 0, 0, 0.01);
+  }
+  :global([data-theme="light"]) .drawer-project-picker-item {
+    border-bottom-color: rgba(0, 0, 0, 0.05);
+  }
+  :global([data-theme="light"]) .drawer-project-picker-item:hover {
+    background: rgba(14, 124, 134, 0.04);
+  }
+  :global([data-theme="light"]) .drawer-project-picker-item--current {
+    background: rgba(14, 124, 134, 0.06);
+    border-left-color: rgba(14, 124, 134, 0.3);
+  }
+  :global([data-theme="light"]) .drawer-project-picker-item--selected {
+    background: rgba(14, 124, 134, 0.08);
+    border-left-color: rgba(14, 124, 134, 0.5);
+  }
+  :global([data-theme="light"]) .drawer-project-picker-item--creating {
+    color: #a0a0a0;
+  }
+  :global([data-theme="light"]) .drawer-project-picker-item-name {
+    color: #2c2c2c;
+  }
+  :global([data-theme="light"]) .drawer-project-picker-item-path {
+    color: #8a8a8a;
+  }
+  :global([data-theme="light"]) .drawer-project-picker-item-path--full {
+    color: #8a8a8a;
+  }
+  :global([data-theme="light"]) .drawer-project-picker-custom {
+    color: rgba(14, 124, 134, 0.7);
+  }
+  :global([data-theme="light"]) .drawer-project-picker-custom:hover {
+    background: rgba(14, 124, 134, 0.04);
+    color: rgba(14, 124, 134, 0.9);
+  }
+  :global([data-theme="light"]) .drawer-project-picker-clone {
+    color: rgba(14, 124, 134, 0.7);
+  }
+  :global([data-theme="light"]) .drawer-project-picker-clone:hover {
+    background: rgba(14, 124, 134, 0.04);
+    color: rgba(14, 124, 134, 0.9);
+  }
+  :global([data-theme="light"]) .drawer-project-picker-clone-status {
+    color: #1a8a3e;
+  }
+  :global([data-theme="light"]) .drawer-project-picker-cancel {
+    color: rgba(0, 0, 0, 0.4);
+  }
+  :global([data-theme="light"]) .drawer-project-picker-cancel:hover {
+    background: rgba(0, 0, 0, 0.03);
+    color: rgba(0, 0, 0, 0.6);
+  }
+  :global([data-theme="light"]) .drawer-project-picker-loading {
+    color: #a0a0a0;
+  }
+  :global([data-theme="light"]) .drawer-sort-label {
+    color: #8a8a8a;
+  }
+  :global([data-theme="light"]) .drawer-delete-modal-overlay {
+    background: rgba(0, 0, 0, 0.3);
+  }
+  :global([data-theme="light"]) .drawer-delete-modal {
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  }
+  :global([data-theme="light"]) .drawer-delete-modal-cancel:hover {
+    background: rgba(0, 0, 0, 0.04);
+  }
+  :global([data-theme="light"]) .drawer-delete-modal-delete:hover {
+    background: #b01c1c;
+  }
+  :global([data-theme="light"]) .drawer-delete-modal-delete:active {
+    background: #a01919;
+  }
+  :global([data-theme="light"]) .drawer-overlay {
+    background: rgba(0, 0, 0, 0.2);
+  }
+  :global([data-theme="light"]) .drawer-branch-item {
+    border-bottom-color: rgba(0, 0, 0, 0.05);
+  }
+  :global([data-theme="light"]) .drawer-branch-item:hover {
+    background: rgba(14, 124, 134, 0.04);
+  }
+  :global([data-theme="light"]) .drawer-branch-item:active {
+    background: rgba(14, 124, 134, 0.08);
+  }
+  :global([data-theme="light"]) .drawer-branch-item--current {
+    background: rgba(14, 124, 134, 0.06);
+  }
+  :global([data-theme="light"]) .drawer-open-branch-btn {
+    color: rgba(14, 124, 134, 0.5);
+  }
+  :global([data-theme="light"]) .drawer-open-branch-btn:hover {
+    color: rgba(14, 124, 134, 0.8);
+    background: rgba(14, 124, 134, 0.04);
+  }
+  :global([data-theme="light"]) .drawer-other-sessions-header {
+    color: #6b6b6b;
+  }
+  :global([data-theme="light"]) .drawer-branch-merged-badge {
+    color: rgba(0, 0, 0, 0.4);
+    background: rgba(0, 0, 0, 0.04);
+  }
+  :global([data-theme="light"]) .drawer-branch-delete-btn {
+    color: #c41e1e;
+  }
+  :global([data-theme="light"]) .drawer-branch-delete-btn:hover {
+    background: rgba(196, 30, 30, 0.06);
+  }
+  :global([data-theme="light"]) .drawer-branch-new-name-input {
+    background: rgba(0, 0, 0, 0.03);
+    border-color: rgba(14, 124, 134, 0.2);
+    color: #2c2c2c;
+  }
+  :global([data-theme="light"]) .drawer-branch-new-name-input::placeholder {
+    color: #a0a0a0;
+  }
+  :global([data-theme="light"]) .drawer-pin-btn {
+    color: #8a8a8a;
+  }
+  :global([data-theme="light"]) .drawer-pin-btn:hover {
+    background: rgba(14, 124, 134, 0.06);
+  }
+  :global([data-theme="light"]) .drawer-pin-btn:active {
+    background: rgba(14, 124, 134, 0.10);
+  }
+  :global([data-theme="light"]) .drawer-pin-btn--active {
+    border-color: rgba(14, 124, 134, 0.25);
+    background: rgba(14, 124, 134, 0.06);
+  }
+  :global([data-theme="light"]) .drawer-resize-handle-line {
+    background: rgba(14, 124, 134, 0.3);
+  }
+  :global([data-theme="light"]) .drawer-session-footer {
+    border-top-color: rgba(0, 0, 0, 0.06);
+  }
+  :global([data-theme="light"]) .drawer-session-footer-version {
+    color: rgba(0, 0, 0, 0.3);
+  }
+  :global([data-theme="light"]) .drawer-toast {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
   }
 </style>

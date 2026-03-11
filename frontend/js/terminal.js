@@ -7,6 +7,13 @@ import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { ClipboardAddon } from '@xterm/addon-clipboard';
 import { uploadImage } from './api.js';
 
+function _getTerminalTheme() {
+  const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
+  return isDark
+    ? { background: '#1a1a2e', foreground: '#e0e0e0', cursor: '#e0e0e0', selectionBackground: 'rgba(255, 255, 255, 0.3)' }
+    : { background: '#faf9f6', foreground: '#333333', cursor: '#0e7c86', selectionBackground: 'rgba(14, 124, 134, 0.18)' };
+}
+
 /**
  * PalmuxTerminal は xterm.js のラッパー。
  * WebSocket 経由でサーバーの pty と双方向通信する。
@@ -100,12 +107,7 @@ export class PalmuxTerminal {
       cursorBlink: true,
       fontSize: fontSize,
       fontFamily: '"Cascadia Code", "Fira Code", "Source Code Pro", monospace',
-      theme: {
-        background: '#1a1a2e',
-        foreground: '#e0e0e0',
-        cursor: '#e0e0e0',
-        selectionBackground: 'rgba(255, 255, 255, 0.3)',
-      },
+      theme: _getTerminalTheme(),
     });
 
     this._term.loadAddon(this._fitAddon);
@@ -510,6 +512,18 @@ export class PalmuxTerminal {
    */
   getFontSize() {
     return this._term?.options.fontSize || 14;
+  }
+
+  /**
+   * ターミナルのテーマ（ダーク/ライト）を切り替える。
+   * xterm.js は CSS 変数を解釈しないため、直接値を設定する。
+   * @param {boolean} isDark
+   */
+  setTheme(isDark) {
+    if (!this._term) return;
+    this._term.options.theme = isDark
+      ? { background: '#1a1a2e', foreground: '#e0e0e0', cursor: '#e0e0e0', selectionBackground: 'rgba(255, 255, 255, 0.3)' }
+      : { background: '#faf9f6', foreground: '#333333', cursor: '#0e7c86', selectionBackground: 'rgba(14, 124, 134, 0.18)' };
   }
 
   /**

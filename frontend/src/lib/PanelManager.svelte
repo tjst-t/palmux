@@ -370,6 +370,11 @@
     }
   }
 
+  export function applyTerminalTheme(isDark) {
+    if (_leftPanelRef) _leftPanelRef.applyTerminalTheme(isDark);
+    if (_rightPanelRef) _rightPanelRef.applyTerminalTheme(isDark);
+  }
+
   export function cleanup() {
     if (_resizeHandler) {
       window.removeEventListener('resize', _resizeHandler);
