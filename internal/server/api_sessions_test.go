@@ -189,6 +189,10 @@ func (m *configurableMock) GetClientSessionWindow(tty string) (string, int, erro
 	return "", -1, fmt.Errorf("not implemented")
 }
 
+func (m *configurableMock) GetPaneCommand(session string, windowIndex int) (string, error) {
+	return "bash", nil
+}
+
 func (m *configurableMock) IsGhqSession(session string) bool {
 	m.calledIsGhqSession = session
 	return m.isGhqSession

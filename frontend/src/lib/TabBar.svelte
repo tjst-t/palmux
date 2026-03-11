@@ -53,6 +53,12 @@ let activeTab = $state(null);
 /** @type {Array<{session: string, window_index: number, type: string}>} */
 let notifications = $state([]);
 
+/** @type {number} */
+let gitFileCount = $state(0);
+
+/** @type {Set<number>} Window indexes with running commands */
+let runningWindows = $state(new Set());
+
 // ---------------------------------------------------------------------------
 // Derived: ordered tabs
 // ---------------------------------------------------------------------------
@@ -314,6 +320,32 @@ export function setNotifications(notifs) {
 }
 
 /**
+ * Set the uncommitted file count for the Git tab badge.
+ * @param {number} count
+ */
+export function setGitFileCount(count) {
+  gitFileCount = count;
+}
+
+/**
+ * Mark a window as having a running command (shows spinning badge).
+ * @param {number} windowIndex
+ */
+export function setWindowRunning(windowIndex) {
+  runningWindows = new Set([...runningWindows, windowIndex]);
+}
+
+/**
+ * Clear the running state for a window (removes spinning badge).
+ * @param {number} windowIndex
+ */
+export function clearWindowRunning(windowIndex) {
+  const next = new Set(runningWindows);
+  next.delete(windowIndex);
+  runningWindows = next;
+}
+
+/**
  * Release resources.
  */
 export function dispose() {
@@ -322,6 +354,8 @@ export function dispose() {
   windows = [];
   activeTab = null;
   notifications = [];
+  gitFileCount = 0;
+  runningWindows = new Set();
 }
 </script>
 
@@ -352,7 +386,9 @@ export function dispose() {
         >
           <span class="tab-icon">{@html tab.isClaude ? CLAUDE_ICON : TERMINAL_ICON}</span>
           <span class="tab-label">{tab.win.name}</span>
-          {#if hasNotification(tab)}
+          {#if runningWindows.has(tab.win.index)}
+            <span class="tab-running">&#x21BB;</span>
+          {:else if hasNotification(tab)}
             <span
               class="tab-notification"
               class:tab-notification--claude={isClaudeNotification(tab)}
@@ -378,6 +414,9 @@ export function dispose() {
         >
           <span class="tab-icon">{@html GIT_ICON}</span>
           <span class="tab-label">Git</span>
+          {#if gitFileCount > 0}
+            <span class="tab-badge">{gitFileCount}</span>
+          {/if}
         </button>
       {:else if tab.kind === 'add'}
         <button

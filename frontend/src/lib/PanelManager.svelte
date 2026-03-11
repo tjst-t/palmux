@@ -232,6 +232,16 @@
     return _getFocusedRef()?.getTerminal() ?? null;
   }
 
+  /**
+   * Send input to a specific window's terminal without switching tabs.
+   * @param {number} windowIdx
+   * @param {string} data
+   */
+  export function sendToWindow(windowIdx, data) {
+    if (_leftPanelRef) _leftPanelRef.sendToWindow(windowIdx, data);
+    else if (_rightPanelRef) _rightPanelRef.sendToWindow(windowIdx, data);
+  }
+
   export function getToolbar() {
     return _getFocusedRef()?.getToolbar() ?? null;
   }

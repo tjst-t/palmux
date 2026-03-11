@@ -207,6 +207,43 @@ func (s *Server) handleRestartClaudeWindow() http.Handler {
 	})
 }
 
+// handleGetPaneCommand は GET /api/sessions/{session}/windows/{index}/command のハンドラ。
+// 指定ウィンドウのフォアグラウンドプロセス名と、それがシェルかどうかを返す。
+func (s *Server) handleGetPaneCommand() http.Handler {
+	type paneCommandResponse struct {
+		Command string `json:"command"`
+		IsShell bool   `json:"is_shell"`
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		session := r.PathValue("session")
+		indexStr := r.PathValue("index")
+
+		index, err := strconv.Atoi(indexStr)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid window index: "+indexStr)
+			return
+		}
+
+		cmd, err := s.tmux.GetPaneCommand(session, index)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		isShell := false
+		switch cmd {
+		case "bash", "zsh", "sh", "fish", "dash", "ksh", "tcsh", "csh":
+			isShell = true
+		}
+
+		writeJSON(w, http.StatusOK, paneCommandResponse{
+			Command: cmd,
+			IsShell: isShell,
+		})
+	})
+}
+
 // handleDeleteWindow は DELETE /api/sessions/{session}/windows/{index} のハンドラ。
 // パスパラメータの session と index で指定されたウィンドウを削除し、204 No Content を返す。
 func (s *Server) handleDeleteWindow() http.Handler {

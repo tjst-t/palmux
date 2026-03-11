@@ -155,6 +155,16 @@ export async function deleteWindow(session, index) {
 }
 
 /**
+ * 指定ウィンドウのフォアグラウンドプロセス情報を取得する。
+ * @param {string} session - セッション名
+ * @param {number} index - ウィンドウインデックス
+ * @returns {Promise<{command: string, is_shell: boolean}>}
+ */
+export async function getPaneCommand(session, index) {
+  return fetchAPI(`api/sessions/${encodeURIComponent(session)}/windows/${index}/command`);
+}
+
+/**
  * セッションの現在の作業ディレクトリ（CWD）を取得する。
  * @param {string} session - セッション名
  * @returns {Promise<{path: string}>}

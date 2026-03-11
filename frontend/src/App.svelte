@@ -8,7 +8,7 @@ import { onMount, onDestroy } from 'svelte';
 import {
   listSessions, listWindows, listNotifications, deleteNotification,
   getSessionMode, createWindow, deleteWindow, renameWindow, restartClaudeWindow,
-  getPortmanLeases, getGitHubURL,
+  getPortmanLeases, getGitHubURL, getGitStatus, getCommands, getPaneCommand,
   createSession, deleteSession as deleteSessionAPI,
   listGhqRepos, cloneGhqRepo, deleteGhqRepo,
   listProjectWorktrees, createProjectWorktree, deleteProjectWorktree,
@@ -82,6 +82,63 @@ let drawerRef = $state(null);
 let tabBarSessionName = $state(null);
 let tabBarWindows = $state([]);
 let tabBarIsClaudeCodeMode = $state(false);
+
+// ─────────── Commands cache ───────────
+let commandsCache = null;
+const COMMANDS_CACHE_TTL = 30000;
+
+async function _fetchCachedCommands(session) {
+  if (commandsCache &&
+      commandsCache.session === session &&
+      Date.now() - commandsCache.timestamp < COMMANDS_CACHE_TTL) {
+    return commandsCache.commands;
+  }
+  try {
+    const result = await getCommands(session);
+    const commands = result.commands || [];
+    commandsCache = { session, commands, timestamp: Date.now() };
+    return commands;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Send a command to a specific window and show/clear running badge.
+ * Polls the pane's foreground process to detect when the shell prompt returns.
+ * @param {number} windowIndex
+ * @param {string} command
+ */
+function _sendCommandToWindow(windowIndex, command) {
+  if (!panelManager || !tabBarRef) return;
+  const session = panelManager.getCurrentSession();
+  if (!session) return;
+
+  tabBarRef.setWindowRunning(windowIndex);
+  panelManager.sendToWindow(windowIndex, command);
+
+  // Poll pane foreground process until it returns to a shell
+  let pollCount = 0;
+  const maxPolls = 300; // 5 minutes at 1s intervals
+  const pollInterval = setInterval(async () => {
+    pollCount++;
+    if (pollCount > maxPolls) {
+      clearInterval(pollInterval);
+      if (tabBarRef) tabBarRef.clearWindowRunning(windowIndex);
+      return;
+    }
+    try {
+      const result = await getPaneCommand(session, windowIndex);
+      if (result.is_shell) {
+        clearInterval(pollInterval);
+        if (tabBarRef) tabBarRef.clearWindowRunning(windowIndex);
+      }
+    } catch {
+      clearInterval(pollInterval);
+      if (tabBarRef) tabBarRef.clearWindowRunning(windowIndex);
+    }
+  }, 1000);
+}
 
 // ─────────── Helpers ───────────
 
@@ -180,9 +237,10 @@ function _updateDrawerPanelTarget() {
 async function _refreshTabBar(sessionName, activeTab) {
   if (!tabBarRef) return;
   try {
-    const [windows, mode] = await Promise.all([
+    const [windows, mode, gitStatus] = await Promise.all([
       listWindows(sessionName),
       getSessionMode(sessionName).catch(() => null),
+      getGitStatus(sessionName).catch(() => null),
     ]);
     if (!windows) return;
     const isClaudeCodeMode = !!(mode && mode.claude_code);
@@ -194,6 +252,7 @@ async function _refreshTabBar(sessionName, activeTab) {
 
     tabBarRef.setWindows(sessionName, windows, isClaudeCodeMode);
     tabBarRef.setActiveTab(activeTab);
+    tabBarRef.setGitFileCount(gitStatus && gitStatus.files ? gitStatus.files.length : 0);
 
     if (panelManager) {
       panelManager.getFocusedPanel().pruneTerminalTabs(windows);
@@ -695,7 +754,7 @@ async function handleCreateWindow() {
   }
 }
 
-function handleTabContextMenu(event, type, windowIndex) {
+async function handleTabContextMenu(event, type, windowIndex) {
   const currentSession = panelManager?.getCurrentSession();
   if (!currentSession) return;
   if (type !== 'terminal') return;
@@ -706,6 +765,34 @@ function handleTabContextMenu(event, type, windowIndex) {
 
   // Build context menu items
   const items = [];
+
+  // Add Makefile/project commands
+  const commands = await _fetchCachedCommands(currentSession);
+  if (commands.length > 0) {
+    // "serve" command goes at top level
+    const serveCmd = commands.find(c => c.label === 'serve');
+    if (serveCmd) {
+      items.push({
+        label: serveCmd.label,
+        action: () => _sendCommandToWindow(windowIndex, serveCmd.command),
+      });
+    }
+
+    // Other commands go into a submenu
+    const otherCommands = commands.filter(c => c.label !== 'serve');
+    if (otherCommands.length > 0) {
+      items.push({
+        label: 'Commands',
+        submenu: otherCommands.map(cmd => ({
+          label: cmd.label,
+          action: () => _sendCommandToWindow(windowIndex, cmd.command),
+        })),
+      });
+    }
+
+    items.push({ separator: true });
+  }
+
   if (tabBarIsClaudeCodeMode) {
     items.push({ label: 'Restart', action: () => _showTabModelSelectDialog(currentSession, claudePath) });
     items.push({ label: 'Resume', action: () => _showTabModelSelectDialog(currentSession, `${claudePath} --continue`) });
@@ -713,19 +800,27 @@ function handleTabContextMenu(event, type, windowIndex) {
   items.push({ label: 'Rename', action: () => _showTabRenameDialog(currentSession, windowIndex, windowName) });
   items.push({ label: 'Delete', action: () => _handleTabDeleteWindow(currentSession, windowIndex) });
 
-  _showContextMenu(event.x, event.y, items);
+  _showContextMenu(event.x, event.y, items, event.isMobile);
 }
 
-function _showContextMenu(x, y, items) {
+function _showContextMenu(x, y, items, isMobile = false) {
   const existing = document.querySelector('.context-menu-overlay');
   if (existing) existing.remove();
 
   const overlay = document.createElement('div');
   overlay.className = 'context-menu-overlay';
+  if (!isMobile) {
+    // Desktop: don't center, let the menu position itself at cursor
+    overlay.style.alignItems = 'flex-start';
+    overlay.style.justifyContent = 'flex-start';
+  }
   const menu = document.createElement('div');
   menu.className = 'context-menu';
-  menu.style.left = x + 'px';
-  menu.style.top = y + 'px';
+  if (!isMobile) {
+    menu.style.position = 'absolute';
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+  }
 
   const closeMenu = () => {
     overlay.classList.remove('context-menu-overlay--visible');
@@ -733,6 +828,37 @@ function _showContextMenu(x, y, items) {
   };
 
   for (const item of items) {
+    if (item.separator) {
+      const sep = document.createElement('div');
+      sep.className = 'context-menu__separator';
+      menu.appendChild(sep);
+      continue;
+    }
+    if (item.submenu) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'context-menu__submenu-wrapper';
+      const trigger = document.createElement('button');
+      trigger.className = 'context-menu__submenu-trigger';
+      trigger.textContent = item.label;
+      // Toggle submenu on click (for mobile)
+      trigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        wrapper.classList.toggle('context-menu__submenu-wrapper--open');
+      });
+      wrapper.appendChild(trigger);
+      const sub = document.createElement('div');
+      sub.className = 'context-menu__submenu';
+      for (const subItem of item.submenu) {
+        const subBtn = document.createElement('button');
+        subBtn.className = 'context-menu__item';
+        subBtn.textContent = subItem.label;
+        subBtn.addEventListener('click', () => { closeMenu(); subItem.action(); });
+        sub.appendChild(subBtn);
+      }
+      wrapper.appendChild(sub);
+      menu.appendChild(wrapper);
+      continue;
+    }
     const btn = document.createElement('button');
     btn.className = 'context-menu__item';
     btn.textContent = item.label;
@@ -742,7 +868,17 @@ function _showContextMenu(x, y, items) {
 
   overlay.appendChild(menu);
   document.body.appendChild(overlay);
-  requestAnimationFrame(() => overlay.classList.add('context-menu-overlay--visible'));
+  requestAnimationFrame(() => {
+    overlay.classList.add('context-menu-overlay--visible');
+    // Clamp to viewport on desktop
+    if (!isMobile) {
+      const rect = menu.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      if (rect.right > vw) menu.style.left = Math.max(0, vw - rect.width - 8) + 'px';
+      if (rect.bottom > vh) menu.style.top = Math.max(0, vh - rect.height - 8) + 'px';
+    }
+  });
   overlay.addEventListener('click', (e) => { if (e.target === overlay) closeMenu(); });
 }
 

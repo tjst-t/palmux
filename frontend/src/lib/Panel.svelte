@@ -616,6 +616,18 @@
     return _terminal;
   }
 
+  /**
+   * Send input to a specific window's terminal without switching tabs.
+   * @param {number} windowIdx
+   * @param {string} data
+   */
+  export function sendToWindow(windowIdx, data) {
+    const tabState = _findTab(`terminal:${windowIdx}`);
+    if (tabState && tabState.terminal) {
+      tabState.terminal.sendInput(data);
+    }
+  }
+
   export function getToolbar() {
     return _toolbar;
   }

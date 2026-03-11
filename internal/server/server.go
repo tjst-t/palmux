@@ -31,6 +31,7 @@ type TmuxManager interface {
 	GetSessionCwd(session string) (string, error)
 	GetSessionProjectDir(session string) (string, error)
 	GetClientSessionWindow(tty string) (string, int, error)
+	GetPaneCommand(session string, windowIndex int) (string, error)
 	ListGhqRepos() ([]tmux.GhqRepo, error)
 	CloneGhqRepo(url string) (*tmux.GhqRepo, error)
 	DeleteGhqRepo(fullPath string) error
@@ -126,6 +127,7 @@ func NewServer(opts Options) *Server {
 	mux.Handle("DELETE /api/sessions/{session}/windows/{index}", auth(s.handleDeleteWindow()))
 	mux.Handle("PATCH /api/sessions/{session}/windows/{index}", auth(s.handleRenameWindow()))
 	mux.Handle("GET /api/sessions/{session}/windows/{index}/attach", auth(s.handleAttach()))
+	mux.Handle("GET /api/sessions/{session}/windows/{index}/command", auth(s.handleGetPaneCommand()))
 	mux.Handle("GET /api/sessions/{session}/cwd", auth(s.handleGetCwd()))
 	mux.Handle("GET /api/sessions/{session}/portman-urls", auth(s.handleGetPortmanURLs()))
 	mux.Handle("GET /api/sessions/{session}/github-url", auth(s.handleGetGitHubURL()))

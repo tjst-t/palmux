@@ -54,6 +54,9 @@ func (m *mockTmuxManager) GetClientSessionWindow(tty string) (string, int, error
 	return "", -1, fmt.Errorf("not implemented")
 }
 func (m *mockTmuxManager) IsGhqSession(session string) bool { return false }
+func (m *mockTmuxManager) GetPaneCommand(session string, windowIndex int) (string, error) {
+	return "bash", nil
+}
 func (m *mockTmuxManager) EnsureClaudeWindow(session, claudePath string) (*tmux.Window, error) {
 	return nil, fmt.Errorf("not implemented")
 }
