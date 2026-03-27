@@ -314,24 +314,37 @@ func (s *Server) watchNotifications(
 }
 
 // ptyToWS は pty からの出力を WebSocket に中継する。
+// UTF-8 のマルチバイト文字がバッファ境界で分断されないよう、
+// 不完全なシーケンスは次回の読み取りに繰り越す。
 func (s *Server) ptyToWS(ctx context.Context, writeWS func(context.Context, []byte) error, ptmx *os.File, cleanup func()) {
 	buf := make([]byte, 4096)
+	carry := 0 // 前回の繰り越しバイト数
 	for {
-		n, err := ptmx.Read(buf)
+		n, err := ptmx.Read(buf[carry:])
 		if err != nil {
 			// pty が閉じられた
 			cleanup()
 			return
 		}
+		n += carry
+		carry = 0
+
+		// 末尾の不完全な UTF-8 シーケンスを検出して繰り越す
+		sendEnd := utf8TruncIndex(buf[:n])
 
 		msg := wsOutputMessage{
 			Type: "output",
-			Data: string(buf[:n]),
+			Data: string(buf[:sendEnd]),
 		}
 		data, err := json.Marshal(msg)
 		if err != nil {
 			log.Printf("json marshal error: %v", err)
 			continue
+		}
+
+		// 不完全バイトをバッファ先頭に繰り越す
+		if sendEnd < n {
+			carry = copy(buf, buf[sendEnd:n])
 		}
 
 		if err := writeWS(ctx, data); err != nil {
@@ -340,6 +353,47 @@ func (s *Server) ptyToWS(ctx context.Context, writeWS func(context.Context, []by
 			return
 		}
 	}
+}
+
+// utf8TruncIndex は data の末尾にある不完全な UTF-8 シーケンスの開始位置を返す。
+// 末尾が完全な UTF-8 であれば len(data) を返す。
+func utf8TruncIndex(data []byte) int {
+	n := len(data)
+	if n == 0 {
+		return 0
+	}
+	// 末尾から最大3バイト戻って不完全なリードバイトを探す
+	// UTF-8 の最大バイト長は4なので、末尾3バイト以内に開始バイトがあるはず
+	for i := 1; i <= 3 && i <= n; i++ {
+		b := data[n-i]
+		if b&0x80 == 0 {
+			// ASCII: 完全
+			return n
+		}
+		if b&0xC0 == 0xC0 {
+			// リードバイト発見: 期待バイト数を算出
+			var expected int
+			switch {
+			case b&0xE0 == 0xC0:
+				expected = 2
+			case b&0xF0 == 0xE0:
+				expected = 3
+			case b&0xF8 == 0xF0:
+				expected = 4
+			default:
+				// 不正なリードバイト: そのまま送る
+				return n
+			}
+			if i >= expected {
+				// 十分なバイトがある: 完全
+				return n
+			}
+			// 不完全: このリードバイトの位置で切る
+			return n - i
+		}
+		// 継続バイト (10xxxxxx): さらに戻る
+	}
+	return n
 }
 
 // wsToPty は WebSocket からの入力を pty に中継する。

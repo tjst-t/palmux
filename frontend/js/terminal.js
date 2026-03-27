@@ -244,9 +244,10 @@ export class PalmuxTerminal {
     };
 
     // ターミナル入力を WebSocket に送信（修飾キー合成付き）
-    // IME モード有効時は直接入力を抑制する（IME フィールド経由で送信）
+    // IME モード有効時はキーボード入力を抑制する（IME フィールド経由で送信）
+    // ただしマウスイベント（スクロール等）のエスケープシーケンスは通す
     this._term.onData((data) => {
-      if (this._imeMode) {
+      if (this._imeMode && !data.startsWith('\x1b[')) {
         return;
       }
       // 修飾キー即時送信で既に処理済みの場合はスキップ（二重送信防止）

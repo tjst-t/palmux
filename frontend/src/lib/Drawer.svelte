@@ -72,7 +72,7 @@ let otherSessions = $state([]);
 let expandedProjects = $state(new Set());
 
 /** @type {'activity'|'name'} */
-let sortOrder = $state('activity');
+let sortOrder = $state(localStorage.getItem('palmux-sort-order') === 'activity' ? 'activity' : 'name');
 
 /** @type {Array<{session: string, window_index: number, type: string}>} */
 let notifications = $state([]);
@@ -1270,7 +1270,7 @@ function getBranchPickerWorktreeBranches() {
           type="checkbox"
           class="drawer-sort-checkbox"
           checked={sortOrder === 'name'}
-          onchange={() => { sortOrder = sortOrder === 'activity' ? 'name' : 'activity'; }}
+          onchange={() => { sortOrder = sortOrder === 'activity' ? 'name' : 'activity'; localStorage.setItem('palmux-sort-order', sortOrder); }}
         />
         <span class="drawer-sort-slider"></span>
       </div>

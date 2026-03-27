@@ -35,32 +35,44 @@ func TestHandleGetPortmanURLs(t *testing.T) {
 		wantFirstURL string
 	}{
 		{
-			name:    "正常系: 1件のリースを返す",
+			name:    "正常系: exposeされた1件のリースを返す",
 			session: "main",
 			cwd:     "/home/user/projects/app",
 			leases: []portman.Lease{
-				{Name: "app", URL: "https://app.example.com", Status: "listening"},
+				{Name: "app", URL: "https://app.example.com", Status: "listening", Expose: true},
 			},
 			wantStatus:   http.StatusOK,
 			wantCount:    1,
 			wantFirstURL: "https://app.example.com",
 		},
 		{
-			name:    "正常系: 複数リースを返す",
+			name:    "正常系: expose=falseのリースは除外される",
 			session: "main",
 			cwd:     "/home/user/projects/app",
 			leases: []portman.Lease{
-				{Name: "web", URL: "https://web.example.com"},
-				{Name: "api", URL: "https://api.example.com"},
+				{Name: "web", URL: "https://web.example.com", Expose: true},
+				{Name: "internal", URL: "https://internal.example.com", Expose: false},
+				{Name: "api", URL: "https://api.example.com", Expose: true},
 			},
-			wantStatus: http.StatusOK,
-			wantCount:  2,
+			wantStatus:   http.StatusOK,
+			wantCount:    2,
+			wantFirstURL: "https://web.example.com",
 		},
 		{
 			name:       "正常系: リースなし → 空配列",
 			session:    "main",
 			cwd:        "/home/user/projects/app",
 			leases:     []portman.Lease{},
+			wantStatus: http.StatusOK,
+			wantCount:  0,
+		},
+		{
+			name:    "正常系: 全てexpose=false → 空配列",
+			session: "main",
+			cwd:     "/home/user/projects/app",
+			leases: []portman.Lease{
+				{Name: "internal", URL: "https://internal.example.com", Expose: false},
+			},
 			wantStatus: http.StatusOK,
 			wantCount:  0,
 		},

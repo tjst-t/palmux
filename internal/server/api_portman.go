@@ -32,10 +32,13 @@ func (s *Server) handleGetPortmanURLs() http.Handler {
 			return
 		}
 
-		if leases == nil {
-			leases = []portman.Lease{}
+		exposed := make([]portman.Lease, 0, len(leases))
+		for _, l := range leases {
+			if l.Expose {
+				exposed = append(exposed, l)
+			}
 		}
 
-		writeJSON(w, http.StatusOK, leases)
+		writeJSON(w, http.StatusOK, exposed)
 	})
 }

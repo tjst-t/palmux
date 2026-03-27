@@ -53,6 +53,7 @@ let portmanVisible = $state(false);
 let githubURL = $state(null);
 let githubVisible = $state(false);
 let splitActive = $state(false);
+let headerMenuOpen = $state(false);
 let drawerPanelTarget = $state('');
 let drawerPanelTargetVisible = $state(false);
 
@@ -239,10 +240,9 @@ function _updateDrawerPanelTarget() {
 async function _refreshTabBar(sessionName, activeTab) {
   if (!tabBarRef) return;
   try {
-    const [windows, mode, gitStatus] = await Promise.all([
+    const [windows, mode] = await Promise.all([
       listWindows(sessionName),
       getSessionMode(sessionName).catch(() => null),
-      getGitStatus(sessionName).catch(() => null),
     ]);
     if (!windows) return;
     const isClaudeCodeMode = !!(mode && mode.claude_code);
@@ -254,7 +254,6 @@ async function _refreshTabBar(sessionName, activeTab) {
 
     tabBarRef.setWindows(sessionName, windows, isClaudeCodeMode);
     tabBarRef.setActiveTab(activeTab);
-    tabBarRef.setGitFileCount(gitStatus && gitStatus.files ? gitStatus.files.length : 0);
 
     if (panelManager) {
       panelManager.getFocusedPanel().pruneTerminalTabs(windows);
@@ -271,28 +270,73 @@ async function _refreshTabBar(sessionName, activeTab) {
   } catch (err) {
     console.error('Failed to refresh tab bar:', err);
   }
+
+  // バッジ・ボタンの即時更新（ポーリング周期を待たずに反映）
+  _headerPollTick();
 }
 
-async function _refreshPortmanButton(sessionName) {
-  portmanVisible = false;
-  portmanLeases = null;
-  try {
-    const leases = await getPortmanLeases(sessionName);
-    if (!leases || leases.length === 0) return;
-    portmanLeases = leases;
-    portmanVisible = true;
-  } catch { /* ignore */ }
+// ─────────── ヘッダー状態の定期ポーリング（2秒間隔） ───────────
+let _headerPollTimer = null;
+let _headerPollRunning = false;
+let _headerPollCache = { gitFileCount: -1, portmanKeys: '', githubURL: null };
+
+function _startHeaderPoll() {
+  _stopHeaderPoll();
+  _headerPollCache = { gitFileCount: -1, portmanKeys: '', githubURL: null };
+  _headerPollTick();
+  _headerPollTimer = setInterval(_headerPollTick, 2000);
 }
 
-async function _refreshGitHubButton(sessionName) {
-  githubVisible = false;
-  githubURL = null;
+function _stopHeaderPoll() {
+  if (_headerPollTimer) {
+    clearInterval(_headerPollTimer);
+    _headerPollTimer = null;
+  }
+}
+
+async function _headerPollTick() {
+  if (_headerPollRunning) return;
+  _headerPollRunning = true;
   try {
-    const result = await getGitHubURL(sessionName);
-    if (!result || !result.url) return;
-    githubURL = result.url;
-    githubVisible = true;
-  } catch { /* ignore */ }
+    const session = currentSessionName;
+    if (!session || currentView !== 'terminal') return;
+
+    const [gitStatus, leases, ghResult] = await Promise.all([
+      getGitStatus(session).catch(() => null),
+      getPortmanLeases(session).catch(() => null),
+      getGitHubURL(session).catch(() => null),
+    ]);
+
+    // セッションが変わっていたら破棄
+    if (session !== currentSessionName) return;
+
+    // Git badge: ファイル数が変わった場合のみ更新
+    const newGitCount = gitStatus?.files ? gitStatus.files.length : 0;
+    if (newGitCount !== _headerPollCache.gitFileCount) {
+      _headerPollCache.gitFileCount = newGitCount;
+      if (tabBarRef) tabBarRef.setGitFileCount(newGitCount);
+    }
+
+    // Portman: リース名リストが変わった場合のみ更新
+    const newPortmanKeys = leases && leases.length > 0
+      ? leases.map(l => l.name).join(',')
+      : '';
+    if (newPortmanKeys !== _headerPollCache.portmanKeys) {
+      _headerPollCache.portmanKeys = newPortmanKeys;
+      portmanLeases = leases && leases.length > 0 ? leases : null;
+      portmanVisible = !!portmanLeases;
+    }
+
+    // GitHub: URL が変わった場合のみ更新
+    const newGhURL = ghResult?.url || null;
+    if (newGhURL !== _headerPollCache.githubURL) {
+      _headerPollCache.githubURL = newGhURL;
+      githubURL = newGhURL;
+      githubVisible = !!newGhURL;
+    }
+  } finally {
+    _headerPollRunning = false;
+  }
 }
 
 function _getLastTab(sessionName) {
@@ -314,6 +358,7 @@ function _restoreLastTab(sessionName) {
 
 function _switchToSessionListView() {
   currentView = 'sessions';
+  _stopHeaderPoll();
 
   if (panelManager) {
     if (panelManager.getIsSplit()) panelManager.toggleSplit();
@@ -430,8 +475,7 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
   }
 
   _updateDrawerPanelTarget();
-  _refreshPortmanButton(sessionName);
-  _refreshGitHubButton(sessionName);
+  _startHeaderPoll();
 }
 
 function showFileBrowser(sessionName, { push = true, path = null } = {}) {
@@ -1185,6 +1229,7 @@ onMount(() => {
 });
 
 onDestroy(() => {
+  _stopHeaderPoll();
   if (panelManager) panelManager.cleanup();
   if (router) router.dispose();
   if (window.visualViewport) {
@@ -1196,6 +1241,12 @@ onDestroy(() => {
 // Track split state reactively
 $effect(() => {
   splitActive = panelManager?.getIsSplit() ?? false;
+});
+
+// ビュー切り替え時にヘッダーメニューを閉じる
+$effect(() => {
+  currentView;
+  headerMenuOpen = false;
 });
 </script>
 
@@ -1221,6 +1272,8 @@ $effect(() => {
   {deleteProjectBranch}
 />
 
+<svelte:window onkeydown={(e) => { if (e.key === 'Escape' && headerMenuOpen) headerMenuOpen = false; }} />
+
 <!-- Header -->
 <div id="header">
   <button id="drawer-btn" class:hidden={!drawerBtnVisible} aria-label="Open drawer" onclick={handleDrawerOpen}>&#9776;</button>
@@ -1233,24 +1286,79 @@ $effect(() => {
     />
   </div>
   <button id="split-toggle-btn" class:hidden={!splitToggleVisible} class:split-toggle-btn--active={splitActive} aria-label="Toggle split screen" onclick={handleSplitToggle}>&#x2AFF;</button>
-  <button class="theme-toggle-btn" aria-label="Toggle theme" onclick={handleThemeToggle}>{currentTheme === 'dark' ? '\u2600' : '\u263E'}</button>
-  <button id="portman-btn" class="portman-btn" class:hidden={!portmanVisible} aria-label="Open portman URL" onclick={handlePortmanClick}>
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M6 2H3C2.44772 2 2 2.44772 2 3V13C2 13.5523 2.44772 14 3 14H13C13.5523 14 14 13.5523 14 13V10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-      <path d="M9 2H14V7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-      <path d="M14 2L7 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-    </svg>
-  </button>
-  <button id="github-btn" class="github-btn" class:hidden={!githubVisible} aria-label="Open GitHub Issues" onclick={handleGitHubClick}>
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M8 1C4.13 1 1 4.13 1 8C1 11.1 3.05 13.71 5.86 14.68C6.23 14.75 6.36 14.53 6.36 14.34C6.36 14.17 6.36 13.71 6.35 13.11C4.34 13.56 3.91 12.13 3.91 12.13C3.57 11.29 3.08 11.07 3.08 11.07C2.42 10.62 3.13 10.63 3.13 10.63C3.86 10.68 4.25 11.38 4.25 11.38C4.9 12.5 5.96 12.17 6.38 11.99C6.44 11.52 6.63 11.19 6.83 11.01C5.24 10.82 3.57 10.21 3.57 7.57C3.57 6.77 3.86 6.12 4.27 5.61C4.2 5.42 3.95 4.68 4.33 3.68C4.33 3.68 4.94 3.48 6.35 4.41C6.93 4.25 7.47 4.17 8 4.17C8.53 4.17 9.07 4.25 9.65 4.41C11.06 3.48 11.67 3.68 11.67 3.68C12.05 4.68 11.8 5.42 11.73 5.61C12.14 6.12 12.43 6.77 12.43 7.57C12.43 10.22 10.76 10.82 9.16 11C9.42 11.23 9.65 11.68 9.65 12.37C9.65 13.37 9.64 14.18 9.64 14.34C9.64 14.53 9.77 14.76 10.15 14.68C12.95 13.71 15 11.1 15 8C15 4.13 11.87 1 8 1Z" fill="currentColor"/>
-    </svg>
-  </button>
-  <div id="font-size-controls" class="font-size-controls" class:hidden={!fontControlsVisible}>
-    <button id="font-decrease-btn" class="font-size-btn" aria-label="Decrease font size" onclick={handleFontDecrease}>A&#x2212;</button>
-    <button id="font-increase-btn" class="font-size-btn" aria-label="Increase font size" onclick={handleFontIncrease}>A+</button>
+  <!-- Desktop: inline buttons -->
+  <div class="header-actions header-actions--desktop">
+    <button class="theme-toggle-btn" aria-label="Toggle theme" onclick={handleThemeToggle}>{currentTheme === 'dark' ? '\u2600' : '\u263E'}</button>
+    <button id="portman-btn" class="portman-btn" class:hidden={!portmanVisible} aria-label="Open portman URL" onclick={handlePortmanClick}>
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M6 2H3C2.44772 2 2 2.44772 2 3V13C2 13.5523 2.44772 14 3 14H13C13.5523 14 14 13.5523 14 13V10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M9 2H14V7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M14 2L7 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+    <button id="github-btn" class="github-btn" class:hidden={!githubVisible} aria-label="Open GitHub Issues" onclick={handleGitHubClick}>
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8 1C4.13 1 1 4.13 1 8C1 11.1 3.05 13.71 5.86 14.68C6.23 14.75 6.36 14.53 6.36 14.34C6.36 14.17 6.36 13.71 6.35 13.11C4.34 13.56 3.91 12.13 3.91 12.13C3.57 11.29 3.08 11.07 3.08 11.07C2.42 10.62 3.13 10.63 3.13 10.63C3.86 10.68 4.25 11.38 4.25 11.38C4.9 12.5 5.96 12.17 6.38 11.99C6.44 11.52 6.63 11.19 6.83 11.01C5.24 10.82 3.57 10.21 3.57 7.57C3.57 6.77 3.86 6.12 4.27 5.61C4.2 5.42 3.95 4.68 4.33 3.68C4.33 3.68 4.94 3.48 6.35 4.41C6.93 4.25 7.47 4.17 8 4.17C8.53 4.17 9.07 4.25 9.65 4.41C11.06 3.48 11.67 3.68 11.67 3.68C12.05 4.68 11.8 5.42 11.73 5.61C12.14 6.12 12.43 6.77 12.43 7.57C12.43 10.22 10.76 10.82 9.16 11C9.42 11.23 9.65 11.68 9.65 12.37C9.65 13.37 9.64 14.18 9.64 14.34C9.64 14.53 9.77 14.76 10.15 14.68C12.95 13.71 15 11.1 15 8C15 4.13 11.87 1 8 1Z" fill="currentColor"/>
+      </svg>
+    </button>
+    <div id="font-size-controls" class="font-size-controls" class:hidden={!fontControlsVisible}>
+      <button id="font-decrease-btn" class="font-size-btn" aria-label="Decrease font size" onclick={handleFontDecrease}>A&#x2212;</button>
+      <button id="font-increase-btn" class="font-size-btn" aria-label="Increase font size" onclick={handleFontIncrease}>A+</button>
+    </div>
+    <button id="toolbar-toggle-btn" class:hidden={!toolbarToggleVisible} aria-label="Toggle toolbar" onclick={handleToolbarToggle}>&#9000;</button>
   </div>
-  <button id="toolbar-toggle-btn" class:hidden={!toolbarToggleVisible} aria-label="Toggle toolbar" onclick={handleToolbarToggle}>&#9000;</button>
+  <!-- Mobile: dropdown menu -->
+  <div class="header-actions header-actions--mobile">
+    <button class="header-menu-btn" aria-label="Open menu" onclick={() => headerMenuOpen = !headerMenuOpen}>&#x22EE;</button>
+    {#if headerMenuOpen}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="header-menu-overlay" onclick={() => headerMenuOpen = false}></div>
+      <div class="header-menu-dropdown">
+        <button class="header-menu-item" onclick={() => { handleThemeToggle(); headerMenuOpen = false; }}>
+          <span class="header-menu-icon">{currentTheme === 'dark' ? '\u2600' : '\u263E'}</span>
+          <span>{currentTheme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
+        </button>
+        {#if portmanVisible}
+          <button class="header-menu-item" onclick={() => { handlePortmanClick(); headerMenuOpen = false; }}>
+            <span class="header-menu-icon">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M6 2H3C2.44772 2 2 2.44772 2 3V13C2 13.5523 2.44772 14 3 14H13C13.5523 14 14 13.5523 14 13V10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M9 2H14V7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M14 2L7 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </span>
+            <span>Open URL</span>
+          </button>
+        {/if}
+        {#if githubVisible}
+          <button class="header-menu-item" onclick={() => { handleGitHubClick(); headerMenuOpen = false; }}>
+            <span class="header-menu-icon">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M8 1C4.13 1 1 4.13 1 8C1 11.1 3.05 13.71 5.86 14.68C6.23 14.75 6.36 14.53 6.36 14.34C6.36 14.17 6.36 13.71 6.35 13.11C4.34 13.56 3.91 12.13 3.91 12.13C3.57 11.29 3.08 11.07 3.08 11.07C2.42 10.62 3.13 10.63 3.13 10.63C3.86 10.68 4.25 11.38 4.25 11.38C4.9 12.5 5.96 12.17 6.38 11.99C6.44 11.52 6.63 11.19 6.83 11.01C5.24 10.82 3.57 10.21 3.57 7.57C3.57 6.77 3.86 6.12 4.27 5.61C4.2 5.42 3.95 4.68 4.33 3.68C4.33 3.68 4.94 3.48 6.35 4.41C6.93 4.25 7.47 4.17 8 4.17C8.53 4.17 9.07 4.25 9.65 4.41C11.06 3.48 11.67 3.68 11.67 3.68C12.05 4.68 11.8 5.42 11.73 5.61C12.14 6.12 12.43 6.77 12.43 7.57C12.43 10.22 10.76 10.82 9.16 11C9.42 11.23 9.65 11.68 9.65 12.37C9.65 13.37 9.64 14.18 9.64 14.34C9.64 14.53 9.77 14.76 10.15 14.68C12.95 13.71 15 11.1 15 8C15 4.13 11.87 1 8 1Z" fill="currentColor"/>
+              </svg>
+            </span>
+            <span>GitHub</span>
+          </button>
+        {/if}
+        {#if fontControlsVisible}
+          <div class="header-menu-item header-menu-font-controls">
+            <span class="header-menu-icon">A</span>
+            <span>Font size</span>
+            <div class="header-menu-font-btns">
+              <button class="header-menu-font-btn" aria-label="Decrease font size" onclick={handleFontDecrease}>&#x2212;</button>
+              <button class="header-menu-font-btn" aria-label="Increase font size" onclick={handleFontIncrease}>+</button>
+            </div>
+          </div>
+        {/if}
+        {#if toolbarToggleVisible}
+          <button class="header-menu-item" onclick={() => { handleToolbarToggle(); headerMenuOpen = false; }}>
+            <span class="header-menu-icon">&#9000;</span>
+            <span>Toolbar</span>
+          </button>
+        {/if}
+      </div>
+    {/if}
+  </div>
 </div>
 
 <!-- Main Content -->

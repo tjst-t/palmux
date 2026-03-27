@@ -1031,3 +1031,34 @@ func TestHandleAttach_ClientStatusSent_SessionChange(t *testing.T) {
 		}
 	}
 }
+
+func TestUtf8TruncIndex(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+		want int
+	}{
+		{"空", nil, 0},
+		{"ASCII のみ", []byte("hello"), 5},
+		{"完全な2バイト文字", []byte{0xC3, 0xA9}, 2},                         // é
+		{"不完全な2バイト文字（リードバイトのみ）", []byte{0x61, 0xC3}, 1},     // a + リードバイト
+		{"完全な3バイト文字", []byte{0xE7, 0xAE, 0xA1}, 3},                   // 管
+		{"不完全な3バイト文字（1バイト）", []byte{0x61, 0xE7}, 1},              // a + リードバイト
+		{"不完全な3バイト文字（2バイト）", []byte{0x61, 0xE7, 0xAE}, 1},        // a + 2/3バイト
+		{"完全な4バイト文字", []byte{0xF0, 0x9F, 0x98, 0x80}, 4},             // 😀
+		{"不完全な4バイト文字（1バイト）", []byte{0x61, 0xF0}, 1},              // a + リードバイト
+		{"不完全な4バイト文字（2バイト）", []byte{0x61, 0xF0, 0x9F}, 1},        // a + 2/4バイト
+		{"不完全な4バイト文字（3バイト）", []byte{0x61, 0xF0, 0x9F, 0x98}, 1},  // a + 3/4バイト
+		{"混合: ASCII + 完全な日本語", []byte("hello世界"), 11},
+		{"混合: ASCII + 不完全な日本語", append([]byte("hello"), 0xE4, 0xB8), 5}, // hello + 2/3バイト
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := utf8TruncIndex(tt.data)
+			if got != tt.want {
+				t.Errorf("utf8TruncIndex(%v) = %d, want %d", tt.data, got, tt.want)
+			}
+		})
+	}
+}

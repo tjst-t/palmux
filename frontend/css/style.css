@@ -808,6 +808,163 @@ html, body {
   background: var(--bg-active);
 }
 
+/* Header Actions: Desktop / Mobile Toggle */
+.header-actions {
+  display: flex;
+  align-items: center;
+}
+
+.header-actions--desktop {
+  display: flex;
+}
+
+.header-actions--mobile {
+  display: none;
+  position: relative;
+}
+
+@media (max-width: 599px) {
+  .header-actions--desktop {
+    display: none;
+  }
+
+  .header-actions--mobile {
+    display: flex;
+  }
+}
+
+/* Header Menu Button (⋮) */
+.header-menu-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  min-height: 40px;
+  background: none;
+  border: none;
+  color: var(--accent-primary);
+  font-size: 20px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  letter-spacing: 1px;
+}
+
+.header-menu-btn:hover {
+  background: var(--bg-hover);
+}
+
+.header-menu-btn:active {
+  background: var(--bg-active);
+}
+
+/* Header Menu Overlay */
+.header-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+}
+
+/* Header Menu Dropdown */
+.header-menu-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 100;
+  min-width: 180px;
+  background: var(--bg-container);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  padding: 4px 0;
+  animation: header-menu-fade-in 0.12s ease-out;
+}
+
+@keyframes header-menu-fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Header Menu Item */
+.header-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.12s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  text-align: left;
+}
+
+.header-menu-item:hover {
+  background: var(--bg-hover);
+}
+
+.header-menu-item:active {
+  background: var(--bg-active);
+}
+
+.header-menu-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  color: var(--accent-primary);
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+/* Font size controls inside dropdown */
+.header-menu-font-controls {
+  cursor: default;
+}
+
+.header-menu-font-controls:hover {
+  background: none;
+}
+
+.header-menu-font-btns {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.header-menu-font-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  color: var(--accent-primary);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.header-menu-font-btn:hover {
+  background: var(--bg-active);
+}
+
+.header-menu-font-btn:active {
+  background: var(--border-subtle);
+}
+
 /* IME Input Bar */
 .ime-input-bar {
   display: flex;
