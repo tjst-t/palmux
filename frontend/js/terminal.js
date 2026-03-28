@@ -49,6 +49,11 @@ export class PalmuxTerminal {
     this._fitEnabled = true;
     /** @type {function|null} 再接続バッファフラッシュ後のコールバック */
     this._onReconnectFlush = null;
+    /** @type {number|null} checkAlive 用のタイマー */
+    this._aliveCheckInterval = null;
+    this._aliveCheckTimeout = null;
+    /** @type {boolean} サーバーからの最後の ping 受信後にフラグをセット */
+    this._lastPongReceived = false;
   }
 
   /**
@@ -218,6 +223,7 @@ export class PalmuxTerminal {
           this._term.write(msg.data);
         } else if (msg.type === 'ping') {
           // サーバーからの ping に pong で応答（Cloudflare アイドルタイムアウト対策）
+          this._lastPongReceived = true;
           this._ws.send(JSON.stringify({ type: 'pong' }));
         } else if (msg.type === 'client_status') {
           if (this._onClientStatus) {
@@ -355,6 +361,7 @@ export class PalmuxTerminal {
    * WebSocket 接続を切断し、リソースをクリーンアップする。
    */
   disconnect() {
+    this._clearAliveTimers();
     if (this._boundGlobalKeyHandler) {
       document.removeEventListener('keydown', this._boundGlobalKeyHandler);
       this._boundGlobalKeyHandler = null;
@@ -542,6 +549,58 @@ export class PalmuxTerminal {
    */
   setToolbar(toolbar) {
     this._toolbar = toolbar;
+  }
+
+  /**
+   * WebSocket 接続が生きているかチェックする。
+   * readyState が OPEN でない場合は即座に false を返す。
+   * OPEN の場合は ping を送信し、タイムアウト内にサーバーから ping が
+   * 返ってくるかで判定する。
+   * @param {number} [timeout=5000] - 応答待ちタイムアウト（ミリ秒）
+   * @returns {Promise<boolean>} 接続が生きていれば true
+   */
+  checkAlive(timeout = 5000) {
+    this._clearAliveTimers();
+
+    if (!this._ws || this._ws.readyState !== WebSocket.OPEN) {
+      return Promise.resolve(false);
+    }
+
+    // pong を送ってサーバーからの即応答 ping を待つ
+    this._lastPongReceived = false;
+    try {
+      this._ws.send(JSON.stringify({ type: 'pong' }));
+    } catch {
+      return Promise.resolve(false);
+    }
+
+    return new Promise((resolve) => {
+      this._aliveCheckInterval = setInterval(() => {
+        if (this._lastPongReceived) {
+          this._clearAliveTimers();
+          resolve(true);
+        }
+      }, 200);
+      this._aliveCheckTimeout = setTimeout(() => {
+        this._clearAliveTimers();
+        resolve(false);
+      }, timeout);
+    });
+  }
+
+  /**
+   * checkAlive のタイマーをクリアする。
+   * @private
+   */
+  _clearAliveTimers() {
+    if (this._aliveCheckInterval) {
+      clearInterval(this._aliveCheckInterval);
+      this._aliveCheckInterval = null;
+    }
+    if (this._aliveCheckTimeout) {
+      clearTimeout(this._aliveCheckTimeout);
+      this._aliveCheckTimeout = null;
+    }
   }
 
   /**

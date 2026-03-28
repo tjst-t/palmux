@@ -237,7 +237,7 @@ func (s *Server) handleAttach() http.Handler {
 		go s.watchNotifications(ctx, writeWS, cleanup)
 
 		// WebSocket → pty (入力)
-		s.wsToPty(ctx, conn, ptmx, cleanup)
+		s.wsToPty(ctx, conn, ptmx, writeWS, cleanup)
 	})
 }
 
@@ -397,7 +397,7 @@ func utf8TruncIndex(data []byte) int {
 }
 
 // wsToPty は WebSocket からの入力を pty に中継する。
-func (s *Server) wsToPty(ctx context.Context, conn *websocket.Conn, ptmx *os.File, cleanup func()) {
+func (s *Server) wsToPty(ctx context.Context, conn *websocket.Conn, ptmx *os.File, writeWS func(context.Context, []byte) error, cleanup func()) {
 	for {
 		_, msgData, err := conn.Read(ctx)
 		if err != nil {
@@ -430,7 +430,9 @@ func (s *Server) wsToPty(ctx context.Context, conn *websocket.Conn, ptmx *os.Fil
 				}
 			}
 		case "pong":
-			// クライアントからの ping 応答 — 処理不要
+			// クライアントからの生存確認に即 ping で応答
+			pingMsg, _ := json.Marshal(wsOutputMessage{Type: "ping"})
+			_ = writeWS(ctx, pingMsg)
 		default:
 			log.Printf("unknown message type: %q", msg.Type)
 		}

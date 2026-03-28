@@ -154,6 +154,8 @@ export class ConnectionManager {
   /**
    * ページが再表示された時の処理（スマホのスリープ復帰など）。
    * connecting 状態の場合、バックオフをリセットして即座に再接続を試行する。
+   * connected 状態の場合でも、WebSocket の生存確認を行い、
+   * 死んでいれば再接続を開始する（スリープ中に onclose が発火しないケース対策）。
    * @private
    */
   _onVisibilityChange() {
@@ -164,6 +166,16 @@ export class ConnectionManager {
       this._clearRetryTimer();
       this._retryCount = 0;
       this.connect();
+    } else if (this._state === 'connected') {
+      // スリープ復帰後、WebSocket が実際に生きているか確認
+      this._terminal.checkAlive().then((alive) => {
+        if (this._destroyed) return;
+        if (!alive && this._state === 'connected') {
+          this._setState('connecting');
+          this._retryCount = 0;
+          this.connect();
+        }
+      });
     }
   }
 
