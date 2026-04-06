@@ -8,7 +8,6 @@ import { onMount, onDestroy } from 'svelte';
 import {
   listSessions, listWindows, listNotifications, deleteNotification,
   getSessionMode, createWindow, deleteWindow, renameWindow, restartClaudeWindow,
-  getPortmanLeases, getGitHubURL, getGitStatus, getCommands, getPaneCommand,
   createSession, deleteSession as deleteSessionAPI,
   listGhqRepos, cloneGhqRepo, deleteGhqRepo,
   listProjectWorktrees, createProjectWorktree, deleteProjectWorktree,
@@ -19,7 +18,11 @@ import { Router } from '../js/router.js';
 import SessionList from './lib/SessionList.svelte';
 import TabBar from './lib/TabBar.svelte';
 import Drawer from './lib/Drawer.svelte';
+import ContextMenuManager from './lib/ContextMenuManager.svelte';
 import { getTheme, toggleTheme } from './stores/theme.svelte.js';
+import * as windowStore from './stores/windowStore.svelte.js';
+import * as headerPoll from './stores/headerPoll.svelte.js';
+import { fetchCachedCommands, sendCommandToWindow } from '../js/commandRunner.js';
 
 // ─────────── Meta tags ───────────
 const basePath = document.querySelector('meta[name="base-path"]')?.getAttribute('content') || '/';
@@ -29,10 +32,10 @@ const claudePath = claudePathMeta ? (claudePathMeta.getAttribute('content') || '
 const appVersion = document.querySelector('meta[name="app-version"]')?.getAttribute('content') || '';
 
 // ─────────── State ───────────
-/** @type {'sessions'|'windows'|'terminal'|'files'|'git'} */
-let currentView = $state('sessions');
-let currentSessionName = $state(null);
-let currentWindowIndex = $state(null);
+// currentView, currentSessionName, currentWindowIndex は store から読む
+let currentView = $derived(windowStore.getActiveView());
+let currentSessionName = $derived(windowStore.getActiveSession());
+let currentWindowIndex = $derived(windowStore.getActiveWindowIndex());
 
 // Session list state
 let sessionListSessions = $state([]);
@@ -48,10 +51,10 @@ let toolbarToggleVisible = $state(false);
 let fontControlsVisible = $state(false);
 let splitToggleVisible = $state(false);
 let drawerBtnVisible = $state(false);
-let portmanLeases = $state(null);
-let portmanVisible = $state(false);
-let githubURL = $state(null);
-let githubVisible = $state(false);
+let portmanLeases = $derived(windowStore.getPortmanLeases());
+let portmanVisible = $derived(!!windowStore.getPortmanLeases());
+let githubURL = $derived(windowStore.getGithubURL());
+let githubVisible = $derived(!!windowStore.getGithubURL());
 let splitActive = $state(false);
 let headerMenuOpen = $state(false);
 let drawerPanelTarget = $state('');
@@ -78,69 +81,21 @@ let panelManager = $state(null);
 let router = null;
 
 // ─────────── Svelte component refs ───────────
-let tabBarRef = $state(null);
 let drawerRef = $state(null);
+let contextMenuRef = $state(null);
 
-// ─────────── TabBar internal state (for Claude detection) ───────────
-let tabBarSessionName = $state(null);
-let tabBarWindows = $state([]);
-let tabBarIsClaudeCodeMode = $state(false);
+const CLAUDE_MODELS = [
+  { label: 'opus', flag: 'opus' },
+  { label: 'opus (plan)', flag: 'opusplan' },
+  { label: 'sonnet', flag: 'sonnet' },
+  { label: 'haiku', flag: 'haiku' },
+];
 
-// ─────────── Commands cache ───────────
-let commandsCache = null;
-const COMMANDS_CACHE_TTL = 30000;
+// TabBar shadow state は削除済み — windowStore から直接読む
 
-async function _fetchCachedCommands(session) {
-  if (commandsCache &&
-      commandsCache.session === session &&
-      Date.now() - commandsCache.timestamp < COMMANDS_CACHE_TTL) {
-    return commandsCache.commands;
-  }
-  try {
-    const result = await getCommands(session);
-    const commands = result.commands || [];
-    commandsCache = { session, commands, timestamp: Date.now() };
-    return commands;
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Send a command to a specific window and show/clear running badge.
- * Polls the pane's foreground process to detect when the shell prompt returns.
- * @param {number} windowIndex
- * @param {string} command
- */
+// _sendCommandToWindow と _fetchCachedCommands は commandRunner.js に移動
 function _sendCommandToWindow(windowIndex, command) {
-  if (!panelManager || !tabBarRef) return;
-  const session = panelManager.getCurrentSession();
-  if (!session) return;
-
-  tabBarRef.setWindowRunning(windowIndex);
-  panelManager.sendToWindow(windowIndex, command);
-
-  // Poll pane foreground process until it returns to a shell
-  let pollCount = 0;
-  const maxPolls = 300; // 5 minutes at 1s intervals
-  const pollInterval = setInterval(async () => {
-    pollCount++;
-    if (pollCount > maxPolls) {
-      clearInterval(pollInterval);
-      if (tabBarRef) tabBarRef.clearWindowRunning(windowIndex);
-      return;
-    }
-    try {
-      const result = await getPaneCommand(session, windowIndex);
-      if (result.is_shell) {
-        clearInterval(pollInterval);
-        if (tabBarRef) tabBarRef.clearWindowRunning(windowIndex);
-      }
-    } catch {
-      clearInterval(pollInterval);
-      if (tabBarRef) tabBarRef.clearWindowRunning(windowIndex);
-    }
-  }, 1000);
+  sendCommandToWindow(panelManager, windowIndex, command);
 }
 
 // ─────────── Helpers ───────────
@@ -164,10 +119,11 @@ function _checkClaudeNotificationHaptic(notifications) {
 
   if (claudeNotifications.length === 0) return;
 
-  const hasNewClaudeNotif = tabBarIsClaudeCodeMode &&
+  const storeWindows = windowStore.getWindows();
+  const hasNewClaudeNotif = windowStore.getIsClaudeCodeMode() &&
     claudeNotifications.some(n => {
-      if (n.session !== tabBarSessionName) return false;
-      return tabBarWindows.some(w => w.index === n.window_index && w.name === 'claude');
+      if (n.session !== windowStore.getActiveSession()) return false;
+      return storeWindows.some(w => w.index === n.window_index && w.name === 'claude');
     });
 
   if (!hasNewClaudeNotif) return;
@@ -237,23 +193,16 @@ function _updateDrawerPanelTarget() {
   }
 }
 
-async function _refreshTabBar(sessionName, activeTab) {
-  if (!tabBarRef) return;
+async function _refreshTabBar(sessionName, activeTabDesc, { skipModeCheck = false } = {}) {
   try {
-    const [windows, mode] = await Promise.all([
-      listWindows(sessionName),
-      getSessionMode(sessionName).catch(() => null),
-    ]);
-    if (!windows) return;
-    const isClaudeCodeMode = !!(mode && mode.claude_code);
+    // Store 経由でリフレッシュ（レース防止・リクエスト合体）
+    await windowStore.refreshWindows(sessionName, { skipModeCheck });
 
-    // Update local tracking state
-    tabBarSessionName = sessionName;
-    tabBarWindows = windows;
-    tabBarIsClaudeCodeMode = isClaudeCodeMode;
+    const windows = windowStore.getWindows();
+    const isClaudeCodeMode = windowStore.getIsClaudeCodeMode();
 
-    tabBarRef.setWindows(sessionName, windows, isClaudeCodeMode);
-    tabBarRef.setActiveTab(activeTab);
+    // Store の activeTab を更新 → TabBar は props 経由で自動反映
+    windowStore.setActiveTab(activeTabDesc);
 
     if (panelManager) {
       panelManager.getFocusedPanel().pruneTerminalTabs(windows);
@@ -263,8 +212,8 @@ async function _refreshTabBar(sessionName, activeTab) {
 
     if (panelManager) {
       const isClaudeTab = isClaudeCodeMode &&
-        activeTab.type === 'terminal' &&
-        windows.some(w => w.index === activeTab.windowIndex && w.name === 'claude');
+        activeTabDesc.type === 'terminal' &&
+        windows.some(w => w.index === activeTabDesc.windowIndex && w.name === 'claude');
       panelManager.getFocusedPanel().setClaudeWindow(isClaudeTab);
     }
   } catch (err) {
@@ -275,69 +224,12 @@ async function _refreshTabBar(sessionName, activeTab) {
   _headerPollTick();
 }
 
-// ─────────── ヘッダー状態の定期ポーリング（2秒間隔） ───────────
-let _headerPollTimer = null;
-let _headerPollRunning = false;
-let _headerPollCache = { gitFileCount: -1, portmanKeys: '', githubURL: null };
+// ─────────── ヘッダー状態の定期ポーリング ───────────
+// headerPoll.svelte.js に移動済み
 
-function _startHeaderPoll() {
-  _stopHeaderPoll();
-  _headerPollCache = { gitFileCount: -1, portmanKeys: '', githubURL: null };
-  _headerPollTick();
-  _headerPollTimer = setInterval(_headerPollTick, 2000);
-}
-
-function _stopHeaderPoll() {
-  if (_headerPollTimer) {
-    clearInterval(_headerPollTimer);
-    _headerPollTimer = null;
-  }
-}
-
-async function _headerPollTick() {
-  if (_headerPollRunning) return;
-  _headerPollRunning = true;
-  try {
-    const session = currentSessionName;
-    if (!session || currentView !== 'terminal') return;
-
-    const [gitStatus, leases, ghResult] = await Promise.all([
-      getGitStatus(session).catch(() => null),
-      getPortmanLeases(session).catch(() => null),
-      getGitHubURL(session).catch(() => null),
-    ]);
-
-    // セッションが変わっていたら破棄
-    if (session !== currentSessionName) return;
-
-    // Git badge: ファイル数が変わった場合のみ更新
-    const newGitCount = gitStatus?.files ? gitStatus.files.length : 0;
-    if (newGitCount !== _headerPollCache.gitFileCount) {
-      _headerPollCache.gitFileCount = newGitCount;
-      if (tabBarRef) tabBarRef.setGitFileCount(newGitCount);
-    }
-
-    // Portman: リース名リストが変わった場合のみ更新
-    const newPortmanKeys = leases && leases.length > 0
-      ? leases.map(l => l.name).join(',')
-      : '';
-    if (newPortmanKeys !== _headerPollCache.portmanKeys) {
-      _headerPollCache.portmanKeys = newPortmanKeys;
-      portmanLeases = leases && leases.length > 0 ? leases : null;
-      portmanVisible = !!portmanLeases;
-    }
-
-    // GitHub: URL が変わった場合のみ更新
-    const newGhURL = ghResult?.url || null;
-    if (newGhURL !== _headerPollCache.githubURL) {
-      _headerPollCache.githubURL = newGhURL;
-      githubURL = newGhURL;
-      githubVisible = !!newGhURL;
-    }
-  } finally {
-    _headerPollRunning = false;
-  }
-}
+function _startHeaderPoll() { headerPoll.startPoll(); }
+function _stopHeaderPoll() { headerPoll.stopPoll(); }
+function _headerPollTick() { headerPoll.tick(); }
 
 function _getLastTab(sessionName) {
   try { return localStorage.getItem(`palmux-last-tab-${sessionName}`); }
@@ -357,8 +249,8 @@ function _restoreLastTab(sessionName) {
 // ─────────── View switching ───────────
 
 function _switchToSessionListView() {
-  currentView = 'sessions';
   _stopHeaderPoll();
+  windowStore.navigateToSessionList();
 
   if (panelManager) {
     if (panelManager.getIsSplit()) panelManager.toggleSplit();
@@ -371,17 +263,13 @@ function _switchToSessionListView() {
   toolbarToggleVisible = false;
   fontControlsVisible = false;
   splitToggleVisible = false;
-  portmanVisible = false;
-  portmanLeases = null;
-  githubVisible = false;
-  githubURL = null;
+  // portman/github は store 経由で自動クリア（navigateToSessionList）
   drawerBtnVisible = false;
   _updateDrawerPanelTarget();
 }
 
 async function showSessionList({ push = true, replace = false } = {}) {
   _switchToSessionListView();
-  currentSessionName = null;
 
   if (router) {
     const state = { view: 'sessions' };
@@ -409,8 +297,7 @@ async function showSessionList({ push = true, replace = false } = {}) {
 }
 
 async function showWindowList(sessionName, { push = true } = {}) {
-  currentView = 'windows';
-  currentSessionName = sessionName;
+  windowStore.navigateToWindowList(sessionName);
   headerTitle = sessionName;
 
   if (push && router) {
@@ -436,13 +323,11 @@ async function showWindowList(sessionName, { push = true } = {}) {
   }
 }
 
-function connectToWindow(sessionName, windowIndex, { push = true, replace = false } = {}) {
-  currentView = 'terminal';
-  currentSessionName = sessionName;
-  currentWindowIndex = windowIndex;
+function connectToWindow(sessionName, windowIndex, { push = true, replace = false, skipModeCheck = false, forceClean = false } = {}) {
+  windowStore.navigateToWindow(sessionName, windowIndex);
 
   tabBarVisible = true;
-  _refreshTabBar(sessionName, { type: 'terminal', windowIndex });
+  _refreshTabBar(sessionName, { type: 'terminal', windowIndex }, { skipModeCheck });
   headerTitleVisible = false;
   headerTitle = `${sessionName}:${windowIndex}`;
   toolbarToggleVisible = true;
@@ -456,7 +341,7 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
   }
 
   if (panelManager) {
-    panelManager.connectToWindow(sessionName, windowIndex);
+    panelManager.connectToWindow(sessionName, windowIndex, forceClean ? { forceClean: true } : undefined);
   }
 
   if (router) {
@@ -469,8 +354,8 @@ function connectToWindow(sessionName, windowIndex, { push = true, replace = fals
     else if (push) router.push(state);
   }
 
+  // currentSession/windowIndex は store → Drawer props で自動同期
   if (drawerRef) {
-    drawerRef.setCurrent(sessionName, windowIndex);
     drawerRef.restorePinState();
   }
 
@@ -483,7 +368,7 @@ function showFileBrowser(sessionName, { push = true, path = null } = {}) {
   const panel = panelManager.getFocusedPanel();
   panel.showFileBrowser(sessionName, { path });
 
-  if (tabBarRef) tabBarRef.setActiveTab({ type: 'files' });
+  windowStore.navigateToFiles();
   toolbarToggleVisible = false;
 
   const currentSession = panelManager.getCurrentSession();
@@ -494,9 +379,6 @@ function showFileBrowser(sessionName, { push = true, path = null } = {}) {
       filePath: path || '.', split: panelManager.getIsSplit(), rightPanel: _buildRightPanelState(),
     });
   }
-  if (drawerRef) {
-    drawerRef.setCurrent(panelManager.getCurrentSession(), panelManager.getCurrentWindowIndex());
-  }
 }
 
 function showTerminalView({ push = true } = {}) {
@@ -504,9 +386,7 @@ function showTerminalView({ push = true } = {}) {
   const panel = panelManager.getFocusedPanel();
   panel.showTerminalView();
 
-  if (tabBarRef) {
-    tabBarRef.setActiveTab({ type: 'terminal', windowIndex: panelManager.getCurrentWindowIndex() });
-  }
+  windowStore.navigateToTerminal(panelManager.getCurrentWindowIndex());
   toolbarToggleVisible = true;
 
   const currentSession = panelManager.getCurrentSession();
@@ -517,9 +397,6 @@ function showTerminalView({ push = true } = {}) {
       split: panelManager.getIsSplit(), rightPanel: _buildRightPanelState(),
     });
   }
-  if (drawerRef) {
-    drawerRef.setCurrent(panelManager.getCurrentSession(), panelManager.getCurrentWindowIndex());
-  }
 }
 
 function showGitBrowser(sessionName, { push = true } = {}) {
@@ -527,7 +404,7 @@ function showGitBrowser(sessionName, { push = true } = {}) {
   const panel = panelManager.getFocusedPanel();
   panel.showGitBrowser(sessionName);
 
-  if (tabBarRef) tabBarRef.setActiveTab({ type: 'git' });
+  windowStore.navigateToGit();
   toolbarToggleVisible = false;
 
   const currentSession = panelManager.getCurrentSession();
@@ -537,9 +414,6 @@ function showGitBrowser(sessionName, { push = true } = {}) {
       view: 'git', session: sessionName, window: currentWindowIdx,
       split: panelManager.getIsSplit(), rightPanel: _buildRightPanelState(),
     });
-  }
-  if (drawerRef) {
-    drawerRef.setCurrent(panelManager.getCurrentSession(), panelManager.getCurrentWindowIndex());
   }
 }
 
@@ -604,134 +478,35 @@ async function autoConnect() {
 // ─────────── Context menus / Dialogs ───────────
 
 function _showPortmanURLMenu(leases) {
-  const existing = document.querySelector('.context-menu-overlay');
-  if (existing) existing.remove();
-
-  const overlay = document.createElement('div');
-  overlay.className = 'context-menu-overlay';
-  const menu = document.createElement('div');
-  menu.className = 'context-menu';
-  const title = document.createElement('div');
-  title.className = 'context-menu__title';
-  title.textContent = 'Open URL';
-  menu.appendChild(title);
-
-  const closeMenu = () => {
-    overlay.classList.remove('context-menu-overlay--visible');
-    setTimeout(() => overlay.remove(), 200);
-  };
-
-  for (const lease of leases) {
-    const btn = document.createElement('button');
-    btn.className = 'context-menu__item';
-    btn.textContent = lease.name;
-    btn.addEventListener('click', () => {
-      closeMenu();
-      window.open(lease.url, '_blank');
-    });
-    menu.appendChild(btn);
-  }
-  overlay.appendChild(menu);
-  document.body.appendChild(overlay);
-  requestAnimationFrame(() => overlay.classList.add('context-menu-overlay--visible'));
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeMenu(); });
+  if (contextMenuRef) contextMenuRef.showPortmanUrls(leases);
 }
 
 function _showTabModelSelectDialog(sessionName, baseCommand) {
-  const existing = document.querySelector('.context-menu-overlay');
-  if (existing) existing.remove();
-
-  const overlay = document.createElement('div');
-  overlay.className = 'context-menu-overlay';
-  const menu = document.createElement('div');
-  menu.className = 'context-menu';
-  const title = document.createElement('div');
-  title.className = 'context-menu__title';
-  title.textContent = 'Select Model';
-  menu.appendChild(title);
-
-  const closeDialog = () => {
-    overlay.classList.remove('context-menu-overlay--visible');
-    setTimeout(() => overlay.remove(), 200);
-  };
-
-  for (const model of [{ label: 'opus', flag: 'opus' }, { label: 'sonnet', flag: 'sonnet' }, { label: 'haiku', flag: 'haiku' }]) {
-    const btn = document.createElement('button');
-    btn.className = 'context-menu__item';
-    btn.textContent = model.label;
-    btn.addEventListener('click', async () => {
-      closeDialog();
-      try {
-        const win = await restartClaudeWindow(sessionName, `${baseCommand} --model ${model.flag}`);
-        connectToWindow(sessionName, win.index);
-        _refreshTabBar(sessionName, { type: 'terminal', windowIndex: win.index });
-      } catch (err) {
-        console.error('Failed to restart claude window:', err);
-      }
-    });
-    menu.appendChild(btn);
-  }
-
-  overlay.appendChild(menu);
-  document.body.appendChild(overlay);
-  requestAnimationFrame(() => overlay.classList.add('context-menu-overlay--visible'));
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeDialog(); });
+  if (contextMenuRef) contextMenuRef.showModelSelect(sessionName, baseCommand);
 }
 
 function _showTabRenameDialog(sessionName, windowIndex, currentName) {
-  const existing = document.querySelector('.context-menu-overlay');
-  if (existing) existing.remove();
+  if (contextMenuRef) contextMenuRef.showRename(sessionName, windowIndex, currentName);
+}
 
-  const overlay = document.createElement('div');
-  overlay.className = 'context-menu-overlay';
-  const menu = document.createElement('div');
-  menu.className = 'context-menu';
-  const titleEl = document.createElement('div');
-  titleEl.className = 'context-menu__title';
-  titleEl.textContent = 'Rename Window';
-  menu.appendChild(titleEl);
+async function _handleRestartClaude(sessionName, command) {
+  try {
+    const win = await restartClaudeWindow(sessionName, command);
+    // forceClean: 古いタブの WebSocket 接続を全てクリアし、新しい接続のみにする
+    // skipModeCheck: EnsureClaudeWindow がプロセス起動前に bash を検出して再作成するのを防ぐ
+    connectToWindow(sessionName, win.index, { skipModeCheck: true, forceClean: true });
+  } catch (err) {
+    console.error('Failed to restart claude window:', err);
+  }
+}
 
-  const inputWrapper = document.createElement('div');
-  inputWrapper.style.padding = '12px 16px';
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.value = currentName;
-  input.className = 'drawer-window-rename-input';
-  input.style.width = '100%';
-  input.style.boxSizing = 'border-box';
-  input.autocomplete = 'off';
-  input.autocapitalize = 'off';
-  input.spellcheck = false;
-  inputWrapper.appendChild(input);
-  menu.appendChild(inputWrapper);
-
-  const closeDialog = () => {
-    overlay.classList.remove('context-menu-overlay--visible');
-    setTimeout(() => overlay.remove(), 200);
-  };
-
-  const doRename = async () => {
-    const newName = input.value.trim();
-    if (!newName || newName === currentName) { closeDialog(); return; }
-    try {
-      await renameWindow(sessionName, windowIndex, newName);
-      closeDialog();
-      _refreshTabBar(sessionName, _getActiveTabDescriptor());
-    } catch (err) {
-      console.error('Failed to rename window:', err);
-      closeDialog();
-    }
-  };
-
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); doRename(); }
-    else if (e.key === 'Escape') { e.preventDefault(); closeDialog(); }
-  });
-
-  overlay.appendChild(menu);
-  document.body.appendChild(overlay);
-  requestAnimationFrame(() => { overlay.classList.add('context-menu-overlay--visible'); input.focus(); input.select(); });
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeDialog(); });
+async function _handleRenameWindow(sessionName, windowIndex, newName) {
+  try {
+    await renameWindow(sessionName, windowIndex, newName);
+    _refreshTabBar(sessionName, _getActiveTabDescriptor());
+  } catch (err) {
+    console.error('Failed to rename window:', err);
+  }
 }
 
 async function _handleTabDeleteWindow(sessionName, windowIndex) {
@@ -776,8 +551,8 @@ function handleTabSelect(type, windowIndex) {
 
   if (type === 'terminal') {
     connectToWindow(currentSession, windowIndex);
-    const isClaudeTab = tabBarIsClaudeCodeMode &&
-      tabBarWindows.some(w => w.index === windowIndex && w.name === 'claude');
+    const isClaudeTab = windowStore.getIsClaudeCodeMode() &&
+      windowStore.getWindows().some(w => w.index === windowIndex && w.name === 'claude');
     panelManager.getFocusedPanel().setClaudeWindow(isClaudeTab);
   } else if (type === 'files') {
     showFileBrowser(currentSession);
@@ -806,42 +581,45 @@ async function handleTabContextMenu(event, type, windowIndex) {
   if (type !== 'terminal') return;
 
   // Find the window name
-  const win = tabBarWindows.find(w => w.index === windowIndex);
+  const storeWins = windowStore.getWindows();
+  const win = storeWins.find(w => w.index === windowIndex);
   const windowName = win ? win.name : '';
+  const isClaudeTab = windowStore.getIsClaudeCodeMode() && win && win.name === 'claude';
 
   // Build context menu items
   const items = [];
 
-  // Add Makefile/project commands
-  const commands = await _fetchCachedCommands(currentSession);
-  if (commands.length > 0) {
-    // "serve" command goes at top level
-    const serveCmd = commands.find(c => c.label === 'serve');
-    if (serveCmd) {
-      items.push({
-        label: serveCmd.label,
-        action: () => _sendCommandToWindow(windowIndex, serveCmd.command),
-      });
-    }
-
-    // Other commands go into a submenu
-    const otherCommands = commands.filter(c => c.label !== 'serve');
-    if (otherCommands.length > 0) {
-      items.push({
-        label: 'Commands',
-        submenu: otherCommands.map(cmd => ({
-          label: cmd.label,
-          action: () => _sendCommandToWindow(windowIndex, cmd.command),
-        })),
-      });
-    }
-
-    items.push({ separator: true });
-  }
-
-  if (tabBarIsClaudeCodeMode) {
+  if (isClaudeTab) {
+    // Claude タブ: Restart / Resume のみ（Makefile コマンドは不要）
     items.push({ label: 'Restart', action: () => _showTabModelSelectDialog(currentSession, claudePath) });
     items.push({ label: 'Resume', action: () => _showTabModelSelectDialog(currentSession, `${claudePath} --continue`) });
+  } else {
+    // 通常タブ: Makefile/project commands（Restart/Resume は不要）
+    const commands = await fetchCachedCommands(currentSession);
+    if (commands.length > 0) {
+      // "serve" command goes at top level
+      const serveCmd = commands.find(c => c.label === 'serve');
+      if (serveCmd) {
+        items.push({
+          label: serveCmd.label,
+          action: () => _sendCommandToWindow(windowIndex, serveCmd.command),
+        });
+      }
+
+      // Other commands go into a submenu
+      const otherCommands = commands.filter(c => c.label !== 'serve');
+      if (otherCommands.length > 0) {
+        items.push({
+          label: 'Commands',
+          submenu: otherCommands.map(cmd => ({
+            label: cmd.label,
+            action: () => _sendCommandToWindow(windowIndex, cmd.command),
+          })),
+        });
+      }
+
+      items.push({ separator: true });
+    }
   }
   items.push({ label: 'Rename', action: () => _showTabRenameDialog(currentSession, windowIndex, windowName) });
   items.push({ label: 'Delete', action: () => _handleTabDeleteWindow(currentSession, windowIndex) });
@@ -850,82 +628,7 @@ async function handleTabContextMenu(event, type, windowIndex) {
 }
 
 function _showContextMenu(x, y, items, isMobile = false) {
-  const existing = document.querySelector('.context-menu-overlay');
-  if (existing) existing.remove();
-
-  const overlay = document.createElement('div');
-  overlay.className = 'context-menu-overlay';
-  if (!isMobile) {
-    // Desktop: don't center, let the menu position itself at cursor
-    overlay.style.alignItems = 'flex-start';
-    overlay.style.justifyContent = 'flex-start';
-  }
-  const menu = document.createElement('div');
-  menu.className = 'context-menu';
-  if (!isMobile) {
-    menu.style.position = 'absolute';
-    menu.style.left = x + 'px';
-    menu.style.top = y + 'px';
-  }
-
-  const closeMenu = () => {
-    overlay.classList.remove('context-menu-overlay--visible');
-    setTimeout(() => overlay.remove(), 200);
-  };
-
-  for (const item of items) {
-    if (item.separator) {
-      const sep = document.createElement('div');
-      sep.className = 'context-menu__separator';
-      menu.appendChild(sep);
-      continue;
-    }
-    if (item.submenu) {
-      const wrapper = document.createElement('div');
-      wrapper.className = 'context-menu__submenu-wrapper';
-      const trigger = document.createElement('button');
-      trigger.className = 'context-menu__submenu-trigger';
-      trigger.textContent = item.label;
-      // Toggle submenu on click (for mobile)
-      trigger.addEventListener('click', (e) => {
-        e.stopPropagation();
-        wrapper.classList.toggle('context-menu__submenu-wrapper--open');
-      });
-      wrapper.appendChild(trigger);
-      const sub = document.createElement('div');
-      sub.className = 'context-menu__submenu';
-      for (const subItem of item.submenu) {
-        const subBtn = document.createElement('button');
-        subBtn.className = 'context-menu__item';
-        subBtn.textContent = subItem.label;
-        subBtn.addEventListener('click', () => { closeMenu(); subItem.action(); });
-        sub.appendChild(subBtn);
-      }
-      wrapper.appendChild(sub);
-      menu.appendChild(wrapper);
-      continue;
-    }
-    const btn = document.createElement('button');
-    btn.className = 'context-menu__item';
-    btn.textContent = item.label;
-    btn.addEventListener('click', () => { closeMenu(); item.action(); });
-    menu.appendChild(btn);
-  }
-
-  overlay.appendChild(menu);
-  document.body.appendChild(overlay);
-  requestAnimationFrame(() => {
-    overlay.classList.add('context-menu-overlay--visible');
-    // Clamp to viewport on desktop
-    if (!isMobile) {
-      const rect = menu.getBoundingClientRect();
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-      if (rect.right > vw) menu.style.left = Math.max(0, vw - rect.width - 8) + 'px';
-      if (rect.bottom > vh) menu.style.top = Math.max(0, vh - rect.height - 8) + 'px';
-    }
-  });
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeMenu(); });
+  if (contextMenuRef) contextMenuRef.showContextMenu(x, y, items, isMobile);
 }
 
 // ─────────── Button handlers ───────────
@@ -1067,21 +770,24 @@ let _notificationRequestHandler = null;
 function _handlePanelClientStatus(session, win) {
   const cs = panelManager?.getCurrentSession();
   const cw = panelManager?.getCurrentWindowIndex();
+  // Store に状態を同期 → Drawer/TabBar は props 経由で自動反映
+  if (cs !== null && cw !== null) {
+    windowStore.setActiveSession(cs);
+    windowStore.setActiveWindowIndex(cw);
+    windowStore.setHeaderTitle(`${cs}:${cw}`);
+  }
   deleteNotification(session, win)
     .then(() => listNotifications())
     .then((notifications) => {
-      if (drawerRef && notifications) drawerRef.setNotifications(notifications);
-      if (tabBarRef && notifications) tabBarRef.setNotifications(notifications);
+      if (notifications) windowStore.setNotifications(notifications);
     })
     .catch(() => {});
   headerTitle = `${cs}:${cw}`;
-  if (tabBarRef && cs) _refreshTabBar(cs, { type: 'terminal', windowIndex: cw });
-  if (drawerRef) drawerRef.setCurrent(cs, cw, { sessionChanged: true });
+  if (cs) _refreshTabBar(cs, { type: 'terminal', windowIndex: cw });
 }
 
 function _handlePanelNotificationUpdate(notifications) {
-  if (drawerRef) drawerRef.setNotifications(notifications);
-  if (tabBarRef) tabBarRef.setNotifications(notifications);
+  windowStore.setNotifications(notifications);
   _checkClaudeNotificationHaptic(notifications);
 }
 
@@ -1089,9 +795,11 @@ function _handlePanelFocusChange(panel) {
   const sess = panel.getSession();
   const winIdx = panel.getWindowIndex();
   if (sess !== null && winIdx !== null) {
+    // Store に状態を同期 → Drawer/TabBar は props 経由で自動反映
+    windowStore.setActiveSession(sess);
+    windowStore.setActiveWindowIndex(winIdx);
     headerTitle = `${sess}:${winIdx}`;
-    if (drawerRef) drawerRef.setCurrent(sess, winIdx);
-    if (tabBarRef) _refreshTabBar(sess, _getActiveTabDescriptor());
+    _refreshTabBar(sess, _getActiveTabDescriptor());
   }
   _updateDrawerPanelTarget();
 }
@@ -1190,8 +898,8 @@ onMount(() => {
   // Initial notifications
   listNotifications()
     .then((notifications) => {
-      if (drawerRef && notifications) drawerRef.setNotifications(notifications);
-      if (tabBarRef && notifications) tabBarRef.setNotifications(notifications);
+      // notifications は store → Drawer props で自動同期
+      if (notifications) windowStore.setNotifications(notifications);
     })
     .catch((err) => console.error('Failed to load initial notifications:', err));
 
@@ -1253,10 +961,14 @@ $effect(() => {
 <!-- Drawer (renders its own overlay and panel) -->
 <Drawer
   bind:this={drawerRef}
+  activeSession={windowStore.getActiveSession()}
+  activeWindowIndex={windowStore.getActiveWindowIndex()}
+  notifications={windowStore.getNotifications()}
   onSelectSession={handleDrawerSelectSession}
   onCreateSession={handleDrawerCreateSession}
   onDeleteSession={handleDrawerDeleteSession}
   onClose={handleDrawerClose}
+  onPinChange={handleDrawerPinChange}
   {claudePath}
   listSessions={listSessions}
   createSession={createSession}
@@ -1280,7 +992,13 @@ $effect(() => {
   <div id="header-title" class:hidden={!headerTitleVisible}>{headerTitle}</div>
   <div id="tab-bar-container" class="tab-bar" class:hidden={!tabBarVisible}>
     <TabBar
-      bind:this={tabBarRef}
+      sessionName={windowStore.getActiveSession()}
+      windows={windowStore.getWindows()}
+      isClaudeCodeMode={windowStore.getIsClaudeCodeMode()}
+      activeTab={windowStore.getActiveTab()}
+      notifications={windowStore.getNotifications()}
+      gitFileCount={windowStore.getGitFileCount()}
+      runningWindows={windowStore.getRunningWindows()}
       onSelect={handleTabSelect}
       onContextMenu={handleTabContextMenu}
     />
@@ -1394,3 +1112,11 @@ $effect(() => {
     />
   </div>
 </div>
+
+<!-- Context Menu Manager -->
+<ContextMenuManager
+  bind:this={contextMenuRef}
+  models={CLAUDE_MODELS}
+  onRestartClaude={_handleRestartClaude}
+  onRenameWindow={_handleRenameWindow}
+/>

@@ -30,7 +30,12 @@ let {
   onCreateSession = null,
   onDeleteSession = null,
   onClose = null,
+  onPinChange = null,
   claudePath = 'claude',
+  // Store-synced props (replaces setCurrent)
+  activeSession = null,
+  activeWindowIndex = null,
+  notifications: notificationsProp = [],
   // API functions injected by adapter
   listSessions: listSessionsFn = null,
   createSession: createSessionFn = null,
@@ -76,6 +81,38 @@ let sortOrder = $state(localStorage.getItem('palmux-sort-order') === 'activity' 
 
 /** @type {Array<{session: string, window_index: number, type: string}>} */
 let notifications = $state([]);
+
+// Props → internal state sync
+$effect(() => {
+  if (activeSession !== null) {
+    const sessionChanged = currentSession !== activeSession;
+    currentSession = activeSession;
+    currentWindowIndex = activeWindowIndex;
+    if (sessionChanged && visible) {
+      // セッション切替時にプロジェクト情報をリロード
+      const { repo } = parseSessionName(activeSession);
+      const fetches = [listSessionsFn(), listGhqReposFn()];
+      if (listProjectWorktreesFn && !projectWorktrees.has(repo)) {
+        fetches.push(listProjectWorktreesFn(repo).catch(() => null));
+      }
+      Promise.all(fetches).then(([newSessions, repos, worktrees]) => {
+        sessions = newSessions || [];
+        if (worktrees && worktrees.length > 0) {
+          projectWorktrees = new Map([...projectWorktrees, [repo, worktrees]]);
+        }
+        groupSessionsByProject(sessions, repos || []);
+        expandedProjects = new Set([repo]);
+      }).catch(() => {});
+    }
+  }
+});
+
+$effect(() => {
+  if (notificationsProp) {
+    notifications = notificationsProp;
+    updateDrawerBtnBadge();
+  }
+});
 
 /** @type {boolean} */
 let pinned = $state(false);

@@ -28,36 +28,18 @@ const GIT_ICON = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" xm
 // Props
 // ---------------------------------------------------------------------------
 
-/** @type {{ onSelect: (type: string, windowIndex?: number) => void, onContextMenu: (event: {x: number, y: number, isMobile: boolean}, type: string, windowIndex?: number) => void }} */
+/** @type {{ }} */
 let {
+  sessionName = null,
+  windows = [],
+  isClaudeCodeMode = false,
+  activeTab = null,
+  notifications = [],
+  gitFileCount = 0,
+  runningWindows = new Set(),
   onSelect,
   onContextMenu = null,
 } = $props();
-
-// ---------------------------------------------------------------------------
-// Reactive state
-// ---------------------------------------------------------------------------
-
-/** @type {string|null} */
-let sessionName = $state(null);
-
-/** @type {boolean} */
-let isClaudeCodeMode = $state(false);
-
-/** @type {Array<{index: number, name: string, active: boolean}>} */
-let windows = $state([]);
-
-/** @type {{type: string, windowIndex?: number}|null} */
-let activeTab = $state(null);
-
-/** @type {Array<{session: string, window_index: number, type: string}>} */
-let notifications = $state([]);
-
-/** @type {number} */
-let gitFileCount = $state(0);
-
-/** @type {Set<number>} Window indexes with running commands */
-let runningWindows = $state(new Set());
 
 // ---------------------------------------------------------------------------
 // Derived: ordered tabs
@@ -292,70 +274,10 @@ function handleRightClick(e, tab) {
 // ---------------------------------------------------------------------------
 
 /**
- * Set the windows to render as tabs.
- * @param {string} session - Current session name
- * @param {Array<{index: number, name: string, active: boolean}>} wins
- * @param {boolean} claudeMode - Whether the session is in Claude Code mode
- */
-export function setWindows(session, wins, claudeMode) {
-  sessionName = session;
-  windows = wins;
-  isClaudeCodeMode = claudeMode;
-}
-
-/**
- * Mark a tab as active.
- * @param {{type: string, windowIndex?: number}} tab
- */
-export function setActiveTab(tab) {
-  activeTab = tab;
-}
-
-/**
- * Show notification badges on tabs.
- * @param {Array<{session: string, window_index: number, type: string}>} notifs
- */
-export function setNotifications(notifs) {
-  notifications = notifs;
-}
-
-/**
- * Set the uncommitted file count for the Git tab badge.
- * @param {number} count
- */
-export function setGitFileCount(count) {
-  gitFileCount = count;
-}
-
-/**
- * Mark a window as having a running command (shows spinning badge).
- * @param {number} windowIndex
- */
-export function setWindowRunning(windowIndex) {
-  runningWindows = new Set([...runningWindows, windowIndex]);
-}
-
-/**
- * Clear the running state for a window (removes spinning badge).
- * @param {number} windowIndex
- */
-export function clearWindowRunning(windowIndex) {
-  const next = new Set(runningWindows);
-  next.delete(windowIndex);
-  runningWindows = next;
-}
-
-/**
  * Release resources.
  */
 export function dispose() {
   cancelLongPress();
-  sessionName = null;
-  windows = [];
-  activeTab = null;
-  notifications = [];
-  gitFileCount = 0;
-  runningWindows = new Set();
 }
 </script>
 

@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/creack/pty"
 	"github.com/tjst-t/palmux/internal/git"
@@ -24,6 +26,34 @@ const GroupedSessionPrefix = "_palmux_"
 type Manager struct {
 	Exec Executor
 	Ghq  *GhqResolver
+
+	// claudeOps はセッションごとの claude ウィンドウ操作を排他制御する。
+	// ReplaceClaudeWindow と EnsureClaudeWindow の同時実行を防ぐ。
+	claudeOps   map[string]*sync.Mutex
+	claudeOpsMu sync.Mutex
+
+	// claudeGrace はセッションごとの claude ウィンドウ作成タイムスタンプを保持する。
+	// EnsureClaudeWindow がプロセス起動前に bash を検出して窓を再作成するレースを防ぐ。
+	claudeGrace   map[string]time.Time
+	claudeGraceMu sync.Mutex
+}
+
+// claudeGracePeriod は claude ウィンドウ作成後にシェル検出を無視する期間。
+const claudeGracePeriod = 15 * time.Second
+
+// getClaudeOpsMu は指定セッションの claude ウィンドウ操作用 mutex を返す（なければ作成）。
+func (m *Manager) getClaudeOpsMu(session string) *sync.Mutex {
+	m.claudeOpsMu.Lock()
+	defer m.claudeOpsMu.Unlock()
+	if m.claudeOps == nil {
+		m.claudeOps = make(map[string]*sync.Mutex)
+	}
+	mu, ok := m.claudeOps[session]
+	if !ok {
+		mu = &sync.Mutex{}
+		m.claudeOps[session] = mu
+	}
+	return mu
 }
 
 // sessionFormat は list-sessions / new-session の出力フォーマット。
@@ -369,6 +399,15 @@ func (m *Manager) IsGhqSession(session string) bool {
 // SendKeys が失敗しても KillWindow にフォールスルーする。
 // 存在しなければ NewWindow のみ実行する。
 func (m *Manager) ReplaceClaudeWindow(session, name, command string) (*Window, error) {
+	// 同一セッションの EnsureClaudeWindow と排他制御
+	mu := m.getClaudeOpsMu(session)
+	mu.Lock()
+	defer mu.Unlock()
+	return m.replaceClaudeWindowLocked(session, name, command)
+}
+
+// replaceClaudeWindowLocked は mutex を既に取得した状態で呼ばれる内部版。
+func (m *Manager) replaceClaudeWindowLocked(session, name, command string) (*Window, error) {
 	windows, err := m.ListWindows(session)
 	if err != nil {
 		return nil, fmt.Errorf("replace claude window: %w", err)
@@ -391,6 +430,15 @@ func (m *Manager) ReplaceClaudeWindow(session, name, command string) (*Window, e
 	if err != nil {
 		return nil, fmt.Errorf("replace claude window: %w", err)
 	}
+
+	// Grace period を記録: EnsureClaudeWindow がプロセス起動前に
+	// bash を検出して窓を再作成するのを防ぐ
+	m.claudeGraceMu.Lock()
+	if m.claudeGrace == nil {
+		m.claudeGrace = make(map[string]time.Time)
+	}
+	m.claudeGrace[session] = time.Now()
+	m.claudeGraceMu.Unlock()
 
 	return win, nil
 }
@@ -421,22 +469,44 @@ func isShellCommand(cmd string) bool {
 // ウィンドウを再作成して claude を起動する。
 // （サーバー再起動・tmux-resurrect 等でプロセスが失われるケースに対応）
 func (m *Manager) EnsureClaudeWindow(session, claudePath string) (*Window, error) {
+	// 同一セッションの ReplaceClaudeWindow と排他制御
+	mu := m.getClaudeOpsMu(session)
+	mu.Lock()
+	defer mu.Unlock()
+
 	windows, err := m.ListWindows(session)
 	if err != nil {
 		return nil, fmt.Errorf("ensure claude window: %w", err)
 	}
 
+	// Grace period 確認: ReplaceClaudeWindow 直後はシェル検出をスキップする。
+	// claude コマンドは exec "$SHELL" -lc 'exec claude ...' で起動されるため、
+	// bash → claude の exec 遷移中に pane_current_command が "bash" を返す期間がある。
+	var inGrace bool
+	m.claudeGraceMu.Lock()
+	if t, ok := m.claudeGrace[session]; ok {
+		if time.Since(t) < claudeGracePeriod {
+			inGrace = true
+		} else {
+			delete(m.claudeGrace, session)
+		}
+	}
+	m.claudeGraceMu.Unlock()
+
 	for i := range windows {
 		if windows[i].Name == "claude" {
 			// claude プロセスが動いているか確認する。
 			// シェルのみの場合はウィンドウを再作成して claude を起動する。
-			cmd, err := m.GetPaneCommand(session, windows[i].Index)
-			if err == nil && isShellCommand(cmd) {
-				win, err := m.ReplaceClaudeWindow(session, "claude", claudePath)
-				if err != nil {
-					return nil, fmt.Errorf("ensure claude window: %w", err)
+			// ただし grace period 中はスキップ（restart 直後のレース防止）。
+			if !inGrace {
+				cmd, err := m.GetPaneCommand(session, windows[i].Index)
+				if err == nil && isShellCommand(cmd) {
+					win, err := m.replaceClaudeWindowLocked(session, "claude", claudePath)
+					if err != nil {
+						return nil, fmt.Errorf("ensure claude window: %w", err)
+					}
+					return win, nil
 				}
-				return win, nil
 			}
 			return &windows[i], nil
 		}
@@ -446,6 +516,14 @@ func (m *Manager) EnsureClaudeWindow(session, claudePath string) (*Window, error
 	if err != nil {
 		return nil, fmt.Errorf("ensure claude window: %w", err)
 	}
+
+	// 新規作成時も grace period を記録
+	m.claudeGraceMu.Lock()
+	if m.claudeGrace == nil {
+		m.claudeGrace = make(map[string]time.Time)
+	}
+	m.claudeGrace[session] = time.Now()
+	m.claudeGraceMu.Unlock()
 
 	return win, nil
 }

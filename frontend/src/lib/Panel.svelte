@@ -553,8 +553,8 @@
     _connectionManager = null;
   }
 
-  export function connectToWindow(sessionName, windowIdx) {
-    if (sessionName !== session) {
+  export function connectToWindow(sessionName, windowIdx, { forceClean = false } = {}) {
+    if (sessionName !== session || forceClean) {
       _saveToolbarState();
       clearTabCache();
       // flushSync is required: clearTabCache sets tabs=[] and the subsequent

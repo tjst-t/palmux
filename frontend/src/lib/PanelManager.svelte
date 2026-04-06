@@ -211,9 +211,9 @@
     if (focused) focused.switchToTab(tabKey);
   }
 
-  export function connectToWindow(session, windowIndex) {
+  export function connectToWindow(session, windowIndex, opts) {
     const focused = _getFocusedRef();
-    if (focused) focused.connectToWindow(session, windowIndex);
+    if (focused) focused.connectToWindow(session, windowIndex, opts);
   }
 
   export function getCurrentSession() {
